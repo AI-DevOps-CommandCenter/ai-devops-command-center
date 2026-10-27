@@ -27,7 +27,12 @@ app.get("/health", (_req, res) => {
 // Services API routes
 app.use("/api/services", servicesRouter);
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`API server running at http://localhost:${PORT}`);
-});
+// Export app for automated testing
+export default app;
+
+// Start server only when this file is executed directly
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`API server running at http://localhost:${PORT}`);
+  });
+}
