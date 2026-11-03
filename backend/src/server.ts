@@ -6,6 +6,7 @@ import { authenticateToken } from "./middleware/auth.js";
 import incidentRoutes from "./routes/incident.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import investigationRoutes from "./routes/investigation.routes.js";
+import approvalRoutes from "./routes/approval.routes.js";
 
 const app = express();
 
@@ -16,6 +17,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api/incidents", incidentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/investigations", investigationRoutes);
+app.use("/api/approvals", approvalRoutes);
 
 const PORT = process.env.PORT || 3000;
 
