@@ -8,6 +8,7 @@ import dashboardRoutes from "./routes/dashboard.routes.js";
 import investigationRoutes from "./routes/investigation.routes.js";
 import approvalRoutes from "./routes/approval.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
+import playbookRunRoutes from "./routes/playbook-run.routes.js";
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/investigations", investigationRoutes);
 app.use("/api/approvals", approvalRoutes);
 app.use("/api/audit-logs", auditRoutes);
+app.use("/api/playbook-runs", playbookRunRoutes);
 
 const PORT = process.env.PORT || 3000;
 
