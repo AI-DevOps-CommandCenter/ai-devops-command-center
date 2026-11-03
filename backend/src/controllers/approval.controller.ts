@@ -7,6 +7,7 @@ import {
   getUserRole,
   decideApproval
 } from "../services/approval.service.js";
+import { createAuditLog } from "../services/audit.service.js";
 
 export async function createApprovalController(
   req: Request,
@@ -41,6 +42,23 @@ export async function createApprovalController(
       { incident_id },
       userId
     );
+    // Record approval request in audit log
+    try {
+    await createAuditLog(
+        client,
+        {
+        action: "APPROVAL_REQUESTED",
+        entity_type: "approval",
+        entity_id: approval.id,
+        details: {
+            incident_id: approval.incident_id
+        }
+        },
+        userId
+    );
+    } catch (auditError) {
+    console.error("Approval request audit log error:", auditError);
+    }
 
     return res.status(201).json({
       success: true,
@@ -221,6 +239,28 @@ export async function decideApprovalController(
         success: false,
         message: "Approval request not found, already decided, or you are not permitted to decide it."
       });
+    }
+    // Record admin decision in audit log
+    try {
+    await createAuditLog(
+        client,
+        {
+        action:
+            status === "approved"
+            ? "APPROVAL_APPROVED"
+            : "APPROVAL_REJECTED",
+        entity_type: "approval",
+        entity_id: approval.id,
+        details: {
+            incident_id: approval.incident_id,
+            requested_by: approval.requested_by,
+            comments: comments ?? null
+        }
+        },
+        userId
+    );
+    } catch (auditError) {
+    console.error("Approval decision audit log error:", auditError);
     }
 
     return res.status(200).json({
