@@ -1,12 +1,11 @@
 
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 
 import { authenticateToken } from "./middleware/auth.js";
 import incidentRoutes from "./routes/incident.routes.js";
-
-dotenv.config();
+import dashboardRoutes from "./routes/dashboard.routes.js";
+import investigationRoutes from "./routes/investigation.routes.js";
 
 const app = express();
 
@@ -15,6 +14,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // Incident management routes
 app.use("/api/incidents", incidentRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/investigations", investigationRoutes);
 
 const PORT = process.env.PORT || 3000;
 
