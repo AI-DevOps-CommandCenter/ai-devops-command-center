@@ -13,6 +13,7 @@ import postmortemRoutes from "./routes/postmortem.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import adminPlaybookRoutes from "./routes/admin-playbook.routes.js";
 import adminIntegrationRoutes from "./routes/admin-integration.routes.js";
+import remediationExecutionRoutes from "./routes/remediation-execution.routes.js";
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use("/api/postmortems", postmortemRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/admin/playbooks", adminPlaybookRoutes);
 app.use("/api/admin/integrations", adminIntegrationRoutes);
+app.use("/api/remediation-executions", remediationExecutionRoutes);
 
 const PORT = process.env.PORT || 3000;
 
