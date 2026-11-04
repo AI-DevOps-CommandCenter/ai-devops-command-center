@@ -10,6 +10,8 @@ import approvalRoutes from "./routes/approval.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
 import playbookRunRoutes from "./routes/playbook-run.routes.js";
 import postmortemRoutes from "./routes/postmortem.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
+import adminPlaybookRoutes from "./routes/admin-playbook.routes.js";
 
 const app = express();
 
@@ -24,6 +26,8 @@ app.use("/api/approvals", approvalRoutes);
 app.use("/api/audit-logs", auditRoutes);
 app.use("/api/playbook-runs", playbookRunRoutes);
 app.use("/api/postmortems", postmortemRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/admin/playbooks", adminPlaybookRoutes);
 
 const PORT = process.env.PORT || 3000;
 
