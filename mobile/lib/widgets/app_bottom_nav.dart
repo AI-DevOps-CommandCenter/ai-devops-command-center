@@ -3,16 +3,44 @@ import '../theme/app_colors.dart';
 
 class AppBottomNav extends StatelessWidget {
   final String currentRoute;
-  final Function(String) onTabSelected;
+  final Function(String)? onTabSelected;
 
   const AppBottomNav({
     super.key,
     required this.currentRoute,
-    required this.onTabSelected,
+    this.onTabSelected,
   });
+
+  void _handleNavigation(BuildContext context, String targetRoute) {
+    if (onTabSelected != null) {
+      onTabSelected!(targetRoute);
+      return;
+    }
+
+    if (currentRoute == targetRoute) return;
+
+    switch (targetRoute) {
+      case 's03':
+        Navigator.pushNamed(context, '/dashboard');
+        break;
+      case 's04':
+        Navigator.pushNamed(context, '/incidents');
+        break;
+      case 's11':
+        Navigator.pushNamed(context, '/services');
+        break;
+      case 's23':
+        Navigator.pushNamed(context, '/assistant');
+        break;
+      case 's28':
+        Navigator.pushNamed(context, '/profile');
+        break;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final tabs = [
       {'label': 'Overview', 'icon': '◉', 'route': 's03'},
       {'label': 'Incidents', 'icon': '⚠', 'route': 's04'},
@@ -22,10 +50,10 @@ class AppBottomNav extends StatelessWidget {
     ];
 
     return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.card,
+      decoration: BoxDecoration(
+        color: colors.navBg,
         border: Border(
-          top: BorderSide(color: AppColors.navBorder, width: 1),
+          top: BorderSide(color: colors.navBorder, width: 1),
         ),
       ),
       child: SafeArea(
@@ -37,7 +65,7 @@ class AppBottomNav extends StatelessWidget {
               final isSelected = currentRoute == t['route'] || currentRoute == t['label'];
               return Expanded(
                 child: InkWell(
-                  onTap: () => onTabSelected(t['route']!),
+                  onTap: () => _handleNavigation(context, t['route']!),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -45,7 +73,7 @@ class AppBottomNav extends StatelessWidget {
                         t['icon']!,
                         style: TextStyle(
                           fontSize: 18,
-                          color: isSelected ? AppColors.teal : AppColors.muted,
+                          color: isSelected ? colors.teal : colors.muted,
                           fontWeight: FontWeight.normal,
                         ),
                       ),
@@ -55,7 +83,7 @@ class AppBottomNav extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                          color: isSelected ? AppColors.teal : AppColors.muted,
+                          color: isSelected ? colors.teal : colors.muted,
                         ),
                       ),
                     ],
