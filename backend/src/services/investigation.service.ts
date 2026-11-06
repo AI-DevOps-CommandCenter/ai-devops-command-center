@@ -1,20 +1,26 @@
 import type { UserSupabaseClient } from "../config/supabase.js";
 
+export type InvestigationStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed";
+
 export interface CreateInvestigationInput {
   incident_id: string;
-  status?: string;
-  summary?: string;
-  root_cause?: string;
+  status?: InvestigationStatus;
+  summary?: string | null;
+  root_cause?: string | null;
   evidence?: unknown[];
-  ai_model?: string;
+  ai_model?: string | null;
 }
 
 export interface UpdateInvestigationInput {
-  status?: string;
-  summary?: string;
-  root_cause?: string;
+  status?: InvestigationStatus;
+  summary?: string | null;
+  root_cause?: string | null;
   evidence?: unknown[];
-  ai_model?: string;
+  ai_model?: string | null;
 }
 
 // Create an investigation
@@ -35,7 +41,9 @@ export async function createInvestigation(
     .select("*")
     .single();
 
-  return { data, error };
+  if (error) throw error;
+
+  return data;
 }
 
 // Get investigations belonging to an incident
@@ -49,7 +57,9 @@ export async function getInvestigationsByIncident(
     .eq("incident_id", incidentId)
     .order("created_at", { ascending: false });
 
-  return { data, error };
+  if (error) throw error;
+
+  return data;
 }
 
 // Get one investigation
@@ -63,7 +73,9 @@ export async function getInvestigationById(
     .eq("id", id)
     .maybeSingle();
 
-  return { data, error };
+  if (error) throw error;
+
+  return data;
 }
 
 // Update an investigation
@@ -79,5 +91,7 @@ export async function updateInvestigation(
     .select("*")
     .maybeSingle();
 
-  return { data, error };
+  if (error) throw error;
+
+  return data;
 }

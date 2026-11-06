@@ -1,4 +1,3 @@
-
 import type { UserSupabaseClient } from "../config/supabase.js";
 
 export interface CreateApprovalInput {

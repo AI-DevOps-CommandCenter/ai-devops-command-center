@@ -1,9 +1,15 @@
 import type { UserSupabaseClient } from "../config/supabase.js";
 
+export type PlaybookActionType =
+  | "restart"
+  | "circuit_breaker"
+  | "rollback"
+  | "scale";
+
 export interface CreatePlaybookInput {
   name: string;
   description?: string;
-  action_type: string;
+  action_type: PlaybookActionType;
   configuration?: Record<string, unknown>;
   enabled?: boolean;
   requires_approval?: boolean;
@@ -11,14 +17,17 @@ export interface CreatePlaybookInput {
 
 export interface UpdatePlaybookInput {
   name?: string;
-  description?: string;
-  action_type?: string;
+  description?: string | null;
+  action_type?: PlaybookActionType;
   configuration?: Record<string, unknown>;
   enabled?: boolean;
   requires_approval?: boolean;
 }
 
-export async function getAllPlaybooks(client: UserSupabaseClient) {
+// GET all playbooks
+export async function getAllPlaybooks(
+  client: UserSupabaseClient
+) {
   const { data, error } = await client
     .from("playbooks")
     .select("*")
@@ -29,6 +38,7 @@ export async function getAllPlaybooks(client: UserSupabaseClient) {
   return data;
 }
 
+// CREATE a playbook
 export async function createPlaybook(
   client: UserSupabaseClient,
   input: CreatePlaybookInput
@@ -51,6 +61,7 @@ export async function createPlaybook(
   return data;
 }
 
+// UPDATE a playbook
 export async function updatePlaybook(
   client: UserSupabaseClient,
   id: string,
@@ -71,16 +82,23 @@ export async function updatePlaybook(
   return data;
 }
 
+// DELETE a playbook
 export async function deletePlaybook(
   client: UserSupabaseClient,
   id: string
 ) {
-  const { error } = await client
+  const { data, error } = await client
     .from("playbooks")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
 
   if (error) throw error;
+
+  if (!data) {
+    return null;
+  }
 
   return { success: true };
 }

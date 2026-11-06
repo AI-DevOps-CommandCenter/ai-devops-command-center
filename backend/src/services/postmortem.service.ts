@@ -1,14 +1,13 @@
-
 import type { UserSupabaseClient } from "../config/supabase.js";
 
 // Input required to create a postmortem
 export interface CreatePostmortemInput {
   incident_id: string;
   summary: string;
-  root_cause?: string;
-  impact?: string;
+  root_cause?: string | null;
+  impact?: string | null;
   timeline?: Record<string, unknown>[];
-  lessons_learned?: string;
+  lessons_learned?: string | null;
   action_items?: Record<string, unknown>[];
 }
 
@@ -22,10 +21,10 @@ export interface PostmortemFilters {
 // Fields that can be updated
 export interface UpdatePostmortemInput {
   summary?: string;
-  root_cause?: string;
-  impact?: string;
+  root_cause?: string | null;
+  impact?: string | null;
   timeline?: Record<string, unknown>[];
-  lessons_learned?: string;
+  lessons_learned?: string | null;
   action_items?: Record<string, unknown>[];
 }
 

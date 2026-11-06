@@ -1,4 +1,3 @@
-
 import type { Request, Response } from "express";
 import { createAuditLog } from "../services/audit.service.js";
 
@@ -31,17 +30,18 @@ function isValidUUID(id: string): boolean {
 const allowedStatuses: IncidentStatus[] = [
   "open",
   "investigating",
-  "awaiting_approval",
-  "remediating",
+  "identified",
+  "mitigating",
   "resolved",
   "closed"
 ];
 
 const allowedSeverities: IncidentSeverity[] = [
-  "low",
-  "medium",
+  "critical",
   "high",
-  "critical"
+  "medium",
+  "low",
+  "info"
 ];
 
 // Create a new incident

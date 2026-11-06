@@ -1,12 +1,12 @@
-
 import type { UserSupabaseClient } from "../config/supabase.js";
 
 // Allowed incident severity levels
 export type IncidentSeverity =
-  | "low"
-  | "medium"
+  | "critical"
   | "high"
-  | "critical";
+  | "medium"
+  | "low"
+  | "info";
 
 // Data required to create an incident
 export interface CreateIncidentInput {
@@ -97,8 +97,8 @@ export async function getIncidentById(
 export type IncidentStatus =
   | "open"
   | "investigating"
-  | "awaiting_approval"
-  | "remediating"
+  | "identified"
+  | "mitigating"
   | "resolved"
   | "closed";
 

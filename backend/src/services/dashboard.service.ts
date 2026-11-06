@@ -5,9 +5,10 @@ export interface DashboardSummary {
   total: number;
   open: number;
   investigating: number;
-  awaiting_approval: number;
-  remediating: number;
+  identified: number;
+  mitigating: number;
   resolved: number;
+  closed: number;
   critical: number;
 }
 
@@ -20,9 +21,10 @@ export async function getDashboardSummary(
     totalResult,
     openResult,
     investigatingResult,
-    awaitingApprovalResult,
-    remediatingResult,
+    identifiedResult,
+    mitigatingResult,
     resolvedResult,
+    closedResult,
     criticalResult
   ] = await Promise.all([
     client.from("incidents")
@@ -38,15 +40,19 @@ export async function getDashboardSummary(
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
-      .eq("status", "awaiting_approval"),
+      .eq("status", "identified"),
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
-      .eq("status", "remediating"),
+      .eq("status", "mitigating"),
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
       .eq("status", "resolved"),
+
+    client.from("incidents")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "closed"),
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
@@ -58,9 +64,10 @@ export async function getDashboardSummary(
     totalResult,
     openResult,
     investigatingResult,
-    awaitingApprovalResult,
-    remediatingResult,
+    identifiedResult,
+    mitigatingResult,
     resolvedResult,
+    closedResult,
     criticalResult
   ];
 
@@ -80,9 +87,10 @@ export async function getDashboardSummary(
     total: totalResult.count ?? 0,
     open: openResult.count ?? 0,
     investigating: investigatingResult.count ?? 0,
-    awaiting_approval: awaitingApprovalResult.count ?? 0,
-    remediating: remediatingResult.count ?? 0,
+    identified: identifiedResult.count ?? 0,
+    mitigating: mitigatingResult.count ?? 0,
     resolved: resolvedResult.count ?? 0,
+    closed: closedResult.count ?? 0,
     critical: criticalResult.count ?? 0
   };
 

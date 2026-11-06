@@ -1,10 +1,17 @@
 import type { Request, Response } from "express";
+
 import {
   getAllPlaybooks,
   createPlaybook,
   updatePlaybook,
   deletePlaybook
 } from "../services/admin-playbook.service.js";
+
+import type {
+  PlaybookActionType,
+  UpdatePlaybookInput
+} from "../services/admin-playbook.service.js";
+
 import { getUserRole } from "../services/approval.service.js";
 import { createAuditLog } from "../services/audit.service.js";
 
@@ -16,9 +23,20 @@ const VALID_ACTION_TYPES = [
   "circuit_breaker",
   "rollback",
   "scale"
-];
+] as const satisfies readonly PlaybookActionType[];
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+function isValidActionType(
+  value: unknown
+): value is PlaybookActionType {
+  return (
+    typeof value === "string" &&
+    (VALID_ACTION_TYPES as readonly string[]).includes(value)
+  );
+}
+
+function isPlainObject(
+  value: unknown
+): value is Record<string, unknown> {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -29,7 +47,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 async function isAdmin(req: Request): Promise<boolean> {
   if (!req.userSupabase || !req.user) return false;
 
-  const role = await getUserRole(req.userSupabase, req.user.id);
+  const role = await getUserRole(
+    req.userSupabase,
+    req.user.id
+  );
+
   return role === "admin";
 }
 
@@ -77,7 +99,9 @@ export async function getAllPlaybooksController(
       });
     }
 
-    const playbooks = await getAllPlaybooks(req.userSupabase);
+    const playbooks = await getAllPlaybooks(
+      req.userSupabase
+    );
 
     return res.status(200).json({
       success: true,
@@ -130,10 +154,7 @@ export async function createPlaybookController(
       });
     }
 
-    if (
-      typeof action_type !== "string" ||
-      !VALID_ACTION_TYPES.includes(action_type)
-    ) {
+    if (!isValidActionType(action_type)) {
       return res.status(400).json({
         success: false,
         message: "Invalid action type."
@@ -161,7 +182,10 @@ export async function createPlaybookController(
       });
     }
 
-    if (enabled !== undefined && typeof enabled !== "boolean") {
+    if (
+      enabled !== undefined &&
+      typeof enabled !== "boolean"
+    ) {
       return res.status(400).json({
         success: false,
         message: "Enabled must be true or false."
@@ -178,20 +202,26 @@ export async function createPlaybookController(
       });
     }
 
-    const playbook = await createPlaybook(req.userSupabase, {
-      name: name.trim(),
-      description,
-      action_type,
-      configuration,
-      enabled,
-      requires_approval
-    });
+    const playbook = await createPlaybook(
+      req.userSupabase,
+      {
+        name: name.trim(),
+        description,
+        action_type,
+        configuration,
+        enabled,
+        requires_approval
+      }
+    );
 
     await logPlaybookAction(
       req,
       "PLAYBOOK_CREATED",
       playbook.id,
-      { name: playbook.name, action_type: playbook.action_type }
+      {
+        name: playbook.name,
+        action_type: playbook.action_type
+      }
     );
 
     return res.status(201).json({
@@ -230,7 +260,9 @@ export async function updatePlaybookController(
     }
 
     const idParam = req.params.id;
-    const id = Array.isArray(idParam) ? idParam[0] : idParam;
+    const id = Array.isArray(idParam)
+      ? idParam[0]
+      : idParam;
 
     if (!id || !UUID_REGEX.test(id)) {
       return res.status(400).json({
@@ -248,7 +280,7 @@ export async function updatePlaybookController(
       requires_approval
     } = req.body;
 
-    const input: Record<string, unknown> = {};
+    const input: UpdatePlaybookInput = {};
 
     if (name !== undefined) {
       if (typeof name !== "string" || !name.trim()) {
@@ -257,29 +289,32 @@ export async function updatePlaybookController(
           message: "Name must be a non-empty string."
         });
       }
+
       input.name = name.trim();
     }
 
     if (description !== undefined) {
-      if (description !== null && typeof description !== "string") {
+      if (
+        description !== null &&
+        typeof description !== "string"
+      ) {
         return res.status(400).json({
           success: false,
           message: "Description must be a string or null."
         });
       }
+
       input.description = description;
     }
 
     if (action_type !== undefined) {
-      if (
-        typeof action_type !== "string" ||
-        !VALID_ACTION_TYPES.includes(action_type)
-      ) {
+      if (!isValidActionType(action_type)) {
         return res.status(400).json({
           success: false,
           message: "Invalid action type."
         });
       }
+
       input.action_type = action_type;
     }
 
@@ -290,6 +325,7 @@ export async function updatePlaybookController(
           message: "Configuration must be a JSON object."
         });
       }
+
       input.configuration = configuration;
     }
 
@@ -300,6 +336,7 @@ export async function updatePlaybookController(
           message: "Enabled must be true or false."
         });
       }
+
       input.enabled = enabled;
     }
 
@@ -310,6 +347,7 @@ export async function updatePlaybookController(
           message: "Requires_approval must be true or false."
         });
       }
+
       input.requires_approval = requires_approval;
     }
 
@@ -323,14 +361,7 @@ export async function updatePlaybookController(
     const playbook = await updatePlaybook(
       req.userSupabase,
       id,
-      input as {
-        name?: string;
-        description?: string;
-        action_type?: string;
-        configuration?: Record<string, unknown>;
-        enabled?: boolean;
-        requires_approval?: boolean;
-      }
+      input
     );
 
     if (!playbook) {
@@ -344,7 +375,9 @@ export async function updatePlaybookController(
       req,
       "PLAYBOOK_UPDATED",
       id,
-      { updated_fields: Object.keys(input) }
+      {
+        updated_fields: Object.keys(input)
+      }
     );
 
     return res.status(200).json({
@@ -383,7 +416,9 @@ export async function deletePlaybookController(
     }
 
     const idParam = req.params.id;
-    const id = Array.isArray(idParam) ? idParam[0] : idParam;
+    const id = Array.isArray(idParam)
+      ? idParam[0]
+      : idParam;
 
     if (!id || !UUID_REGEX.test(id)) {
       return res.status(400).json({
@@ -391,10 +426,23 @@ export async function deletePlaybookController(
         message: "Invalid playbook ID."
       });
     }
+    const result = await deletePlaybook(
+      req.userSupabase,
+      id
+    );
 
-    await deletePlaybook(req.userSupabase, id);
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: "Playbook not found."
+      });
+    }
 
-    await logPlaybookAction(req, "PLAYBOOK_DELETED", id);
+    await logPlaybookAction(
+      req,
+      "PLAYBOOK_DELETED",
+      id
+    );
 
     return res.status(200).json({
       success: true,

@@ -1,4 +1,3 @@
-
 import type { Request, Response } from "express";
 
 import {
@@ -33,7 +32,11 @@ function isStringArray(value: unknown): boolean {
 }
 
 function isValidOptionalText(value: unknown): boolean {
-  return value === undefined || typeof value === "string";
+  return (
+    value === undefined ||
+    value === null ||
+    typeof value === "string"
+  );
 }
 
 async function isIncidentManager(
@@ -75,7 +78,7 @@ export async function createPostmortemController(
       timeline,
       lessons_learned,
       action_items
-    } = req.body;
+    } = req.body ?? {};
 
     if (
       typeof incident_id !== "string" ||
@@ -164,6 +167,20 @@ export async function createPostmortemController(
   } catch (error) {
     console.error("Create postmortem error:", error);
 
+    // Handle duplicate postmortem for the same incident
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "23505"
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "A postmortem already exists for this incident."
+      });
+    }
+
+    // Handle other errors
     return res.status(500).json({
       success: false,
       message: "Failed to create postmortem."
@@ -329,7 +346,7 @@ export async function updatePostmortemController(
       timeline,
       lessons_learned,
       action_items
-    } = req.body;
+    } = req.body ?? {};
 
     const input: UpdatePostmortemInput = {};
 
@@ -344,7 +361,7 @@ export async function updatePostmortemController(
     }
 
     if (root_cause !== undefined) {
-      if (typeof root_cause !== "string") {
+      if (root_cause !== null && typeof root_cause !== "string") {
         return res.status(400).json({
           success: false,
           message: "Root cause must be text."
@@ -353,23 +370,29 @@ export async function updatePostmortemController(
       input.root_cause = root_cause;
     }
 
+    if (
+      impact !== undefined &&
+      impact !== null &&
+      typeof impact !== "string"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Impact must be text."
+      });
+    }
+
     if (impact !== undefined) {
-      if (typeof impact !== "string") {
-        return res.status(400).json({
-          success: false,
-          message: "Impact must be text."
-        });
-      }
       input.impact = impact;
     }
 
     if (lessons_learned !== undefined) {
-      if (typeof lessons_learned !== "string") {
+      if (!isValidOptionalText(lessons_learned)) {
         return res.status(400).json({
           success: false,
-          message: "Lessons learned must be text."
+          message: "Lessons learned must be text or null."
         });
       }
+
       input.lessons_learned = lessons_learned;
     }
 
