@@ -185,6 +185,30 @@ if [[ "$MODE" == "throwaway-cluster" ]]; then
     fi
     psql_run -c "DELETE FROM public.automation_runs WHERE workflow_name = 'rollback-guard-probe'" >/dev/null 2>&1
   fi
+
+  # Rollback safety for the A2-A7 migrations (probe data, then clean up).
+  guard_700="$ROLLBACK_DIR/20261107000700_approval_workflow.down.sql"
+  if [[ -f "$guard_700" ]]; then
+    psql_run -c "UPDATE public.approvals SET decision_reason = 'rollback-guard-probe' WHERE id = 'f1000000-0000-4000-8000-000000000001'" >/dev/null 2>&1
+    if psql_run -f "$guard_700" >/dev/null 2>&1; then
+      fail "rollback guard: approval workflow columns were dropped although they contained data"
+    else
+      log "  [ok]   rollback refuses to drop approval workflow columns that contain data"
+    fi
+    psql_run -c "UPDATE public.approvals SET decision_reason = NULL WHERE id = 'f1000000-0000-4000-8000-000000000001'" >/dev/null 2>&1
+  fi
+
+  guard_400="$ROLLBACK_DIR/20261107000400_automation_identity.down.sql"
+  if [[ -f "$guard_400" ]]; then
+    psql_run -c "INSERT INTO auth.users (id, email) VALUES ('a9999999-0000-4000-8000-000000000001', 'rollback.probe@example.test'); UPDATE public.profiles SET role = 'automation' WHERE id = 'a9999999-0000-4000-8000-000000000001'" >/dev/null 2>&1
+    if psql_run -f "$guard_400" >/dev/null 2>&1; then
+      fail "rollback guard: automation role removed while an automation identity exists"
+    else
+      log "  [ok]   rollback refuses to remove the automation role while it is in use"
+    fi
+    psql_run -c "DELETE FROM auth.users WHERE id = 'a9999999-0000-4000-8000-000000000001'" >/dev/null 2>&1
+  fi
+  step "data preserved after rollback guard probes" psql_run -v mode=verify -f "$HARNESS_DIR/data_snapshot.sql"
 fi
 
 log ""

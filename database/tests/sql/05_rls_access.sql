@@ -67,8 +67,10 @@ RESET ROLE;
 
 SELECT tests.login('adm');
 SET LOCAL ROLE authenticated;
-SELECT tests.is(tests.scalar('SELECT count(*) FROM public.audit_logs'), 24::bigint,
-    'admins can read audit logs');
+-- 24 seeded + INCIDENT_CREATED (u1) + INCIDENT_UPDATED (op) written by the
+-- audit triggers of migration 000800.
+SELECT tests.is(tests.scalar('SELECT count(*) FROM public.audit_logs'), 26::bigint,
+    'admins can read audit logs (incl. the 2 entries audited by this test)');
 SELECT tests.is(tests.scalar('SELECT count(*) FROM public.profiles'), 5::bigint,
     'admins can read all profiles');
 RESET ROLE;
@@ -106,10 +108,11 @@ RESET ROLE;
 SELECT tests.login('u1');
 SET LOCAL ROLE authenticated;
 SELECT tests.throws($$SELECT 1 FROM public.services$$, '42501', 'services: no client access today (R5 pending)');
-SELECT tests.throws($$SELECT 1 FROM public.notifications$$, '42501', 'notifications: no client access today (A6 pending)');
+SELECT tests.is(tests.scalar('SELECT count(*) FROM public.notifications'), 0::bigint,
+    'notifications: users read their own inbox only (A6; empty here)');
 SELECT tests.throws(format($$INSERT INTO public.device_tokens (user_id, device_token, platform)
                              VALUES (%L, 'tok-u1', 'android')$$, tests.fx('u1')),
-    '42501', 'device_tokens: policies exist but no grant, so clients cannot register (A6 pending)');
+    '42501', 'device_tokens: no direct INSERT; register through register_device_token() (A6)');
 RESET ROLE;
 
 -- anon

@@ -13,8 +13,9 @@ SELECT tests.throws($$INSERT INTO public.incidents (title, severity) VALUES ('x'
     '23514', 'incidents.severity rejects unknown values');
 SELECT tests.throws($$UPDATE public.profiles SET role = 'superuser' WHERE id = tests.fx('admin')$$,
     '23514', 'profiles.role allows only user/admin/operator');
-SELECT tests.throws($$UPDATE public.profiles SET role = 'automation' WHERE id = tests.fx('admin')$$,
-    '23514', 'profiles.role has no automation value yet (pending A5)');
+SELECT tests.lives($$UPDATE public.profiles SET role = 'automation' WHERE id = 'a0000000-0000-4000-8000-000000000002'$$,
+    'profiles.role accepts automation (A5; the owner may set it, see suite 09)');
+UPDATE public.profiles SET role = 'operator' WHERE id = 'a0000000-0000-4000-8000-000000000002';
 SELECT tests.throws($$INSERT INTO public.playbooks (name, action_type) VALUES ('t1', 'restart_service')$$,
     '23514', 'playbooks.action_type stores restart/rollback/scale/circuit_breaker (not restart_service etc.)');
 SELECT tests.lives($$INSERT INTO public.playbooks (name, action_type) VALUES ('t2', 'circuit_breaker')$$,
@@ -24,10 +25,10 @@ SELECT tests.throws(format($$INSERT INTO public.playbook_runs (playbook_id, inci
     '23514', 'playbook_runs.status rejects unknown values');
 SELECT tests.throws(format($$INSERT INTO public.approvals (incident_id, status) VALUES (%L, 'expired')$$,
                            tests.fx('incident')),
-    '23514', 'approvals.status has no expired value yet (pending A3)');
-SELECT tests.throws(format($$INSERT INTO public.approvals (incident_id, status) VALUES (%L, 'cancelled')$$,
-                           tests.fx('incident')),
-    '23514', 'approvals.status has no cancelled value yet (pending A3)');
+    '23514', 'approvals.status has no expired value (A3-Q4: no expiry for now)');
+SELECT tests.lives($$INSERT INTO public.approvals (incident_id, status)
+                     VALUES ('c0000000-0000-4000-8000-000000000002', 'cancelled')$$,
+    'approvals.status accepts cancelled (A3)');
 SELECT tests.throws(format($$INSERT INTO public.ai_analyses (incident_id, confidence) VALUES (%L, 1.5)$$,
                            tests.fx('incident')),
     '23514', 'ai_analyses.confidence must be between 0 and 1');
@@ -37,9 +38,12 @@ SELECT tests.throws(format($$INSERT INTO public.ai_analyses (incident_id, recomm
 SELECT tests.throws(format($$INSERT INTO public.device_tokens (user_id, device_token, platform)
                              VALUES (%L, 'tok-x', 'windows')$$, tests.fx('admin')),
     '23514', 'device_tokens.platform allows android/ios/web');
+SELECT tests.lives(format($$INSERT INTO public.notifications (user_id, title, message, channel)
+                            VALUES (%L, 't', 'm', 'slack')$$, tests.fx('admin')),
+    'notifications.channel accepts slack (A6 / R4)');
 SELECT tests.throws(format($$INSERT INTO public.notifications (user_id, title, message, channel)
-                             VALUES (%L, 't', 'm', 'slack')$$, tests.fx('admin')),
-    '23514', 'notifications.channel has no slack value (R4 pending)');
+                             VALUES (%L, 't', 'm', 'telegram')$$, tests.fx('admin')),
+    '23514', 'notifications.channel no longer accepts telegram (A6)');
 SELECT tests.lives(format($$INSERT INTO public.recovery_checks (incident_id, status) VALUES (%L, 'unhealthy')$$,
                           tests.fx('incident')),
     'recovery_checks accepts an unhealthy (failed) result');
@@ -84,7 +88,7 @@ SELECT tests.is(
 ROLLBACK;
 
 BEGIN;
--- SET NULL behaviour: deleting a user keeps audit rows but loses the actor.
+-- A7-Q3: deleting a user keeps audit rows AND their actor id (no FK).
 SELECT tests.remember('operator', 'a0000000-0000-4000-8000-000000000002');
 SELECT tests.ok(
     (SELECT count(*) FROM public.audit_logs WHERE actor_id = tests.fx('operator')) > 0,
@@ -94,6 +98,6 @@ SELECT tests.is(
     (SELECT count(*) FROM public.profiles WHERE id = tests.fx('operator')),
     0::bigint, 'deleting the auth user cascades to the profile');
 SELECT tests.is(
-    (SELECT count(*) FROM public.audit_logs WHERE actor_id IS NULL),
-    12::bigint, 'SET NULL: audit rows survive but lose their actor (A7-Q3 pending)');
+    (SELECT count(*) FROM public.audit_logs WHERE actor_id = tests.fx('operator')),
+    12::bigint, 'audit rows survive unchanged, actor id kept (A7-Q3)');
 ROLLBACK;

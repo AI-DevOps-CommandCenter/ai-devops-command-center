@@ -13,10 +13,14 @@ SELECT tests.ok(
     NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND NOT rowsecurity),
     'RLS is enabled on every public table');
 
+-- 31 verified baseline policies, plus 3 read policies added by 000600/000700
+-- (ai_analyses, recovery_checks, notifications). 000700 replaces the approvals
+-- SELECT policy one-for-one (operators are approvers, A3-Q1).
 SELECT tests.is(
     (SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'
-       AND tablename NOT IN ('incident_events','notification_deliveries','automation_runs')),
-    31, '31 verified policies on the baseline tables');
+       AND tablename NOT IN ('incident_events','notification_deliveries','automation_runs',
+                             'automation_request_nonces')),
+    34, '31 verified baseline policies + 3 read policies (A2/A6)');
 
 SELECT tests.is(
     (SELECT count(*)::int FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
@@ -35,7 +39,7 @@ SELECT tests.is(
          'recovery_checks_incident_id_fkey','recovery_checks_service_id_fkey',
          'remediation_executions_incident_id_fkey','remediation_executions_playbook_id_fkey',
          'remediation_executions_triggered_by_fkey')),
-    29, 'all 29 verified foreign keys exist');
+    28, '28 of the 29 verified foreign keys exist (audit_logs_actor_id_fkey removed by A7-Q3)');
 
 SELECT tests.is(
     (SELECT confdeltype::text FROM pg_constraint WHERE conname = 'playbook_runs_playbook_id_fkey'),
@@ -43,9 +47,9 @@ SELECT tests.is(
 SELECT tests.is(
     (SELECT confdeltype::text FROM pg_constraint WHERE conname = 'investigations_incident_id_fkey'),
     'c', 'incident children are ON DELETE CASCADE (current live behaviour)');
-SELECT tests.is(
-    (SELECT confdeltype::text FROM pg_constraint WHERE conname = 'audit_logs_actor_id_fkey'),
-    'n', 'audit_logs.actor_id is ON DELETE SET NULL (current live behaviour)');
+SELECT tests.ok(
+    NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'audit_logs_actor_id_fkey'),
+    'audit_logs.actor_id has no FK, so deleting a profile cannot rewrite history (A7-Q3)');
 
 SELECT tests.ok(
     (SELECT count(*) = 4 FROM pg_constraint WHERE contype = 'u' AND conname IN (

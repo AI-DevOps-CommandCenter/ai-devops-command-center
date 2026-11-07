@@ -12,11 +12,11 @@ SELECT tests.ok(
        AND tablename IN ('automation_runs', 'incident_events', 'notification_deliveries') AND rowsecurity),
     'the 3 target tables exist with RLS enabled');
 SELECT tests.is(
-    (SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'
+    (SELECT string_agg(tablename || ':' || cmd, ',') FROM pg_policies WHERE schemaname = 'public'
        AND tablename IN ('automation_runs', 'incident_events', 'notification_deliveries')),
-    0, 'no policies on the new tables yet (access pending A2/A5/A6/A7)');
-SELECT tests.is((SELECT count(*)::int FROM pg_tables WHERE schemaname = 'public'), 21,
-    '21 public tables: 18 baseline + 3 target');
+    'incident_events:SELECT', 'only policy on the new tables: timeline read (A7); the others are function-only');
+SELECT tests.is((SELECT count(*)::int FROM pg_tables WHERE schemaname = 'public'), 22,
+    '22 public tables: 18 baseline + 3 target + automation_request_nonces (A5)');
 
 -- No client privileges at all (including TRUNCATE/REFERENCES/TRIGGER/MAINTAIN)
 SELECT tests.ok(
@@ -25,8 +25,9 @@ SELECT tests.ok(
         FROM unnest(ARRAY['automation_runs', 'incident_events', 'notification_deliveries']) AS t(tbl)
         CROSS JOIN unnest(ARRAY['anon', 'authenticated']) AS r(role)
         CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) AS p(priv)
-        WHERE has_table_privilege(r.role, 'public.' || t.tbl, p.priv)),
-    'anon and authenticated have no privileges on the new tables');
+        WHERE has_table_privilege(r.role, 'public.' || t.tbl, p.priv)
+          AND NOT (r.role = 'authenticated' AND t.tbl = 'incident_events' AND p.priv = 'SELECT')),
+    'no client privileges on the new tables, except SELECT on incident_events for authenticated (A7)');
 
 SELECT tests.login('u1');
 SET LOCAL ROLE authenticated;
@@ -79,8 +80,8 @@ SELECT tests.lives($$INSERT INTO public.notification_deliveries (notification_id
                      VALUES ('f0800000-0000-4000-8000-000000000001', 'f0800000-0000-4000-8000-000000000002', 'push', 'failed', 1)$$,
     'failed push delivery recorded');
 SELECT tests.throws($$INSERT INTO public.notification_deliveries (notification_id, channel)
-                      VALUES ('f0800000-0000-4000-8000-000000000001', 'discord')$$,
-    '23514', 'notification_deliveries.channel uses the notification channel set');
+                      VALUES ('f0800000-0000-4000-8000-000000000001', 'telegram')$$,
+    '23514', 'notification_deliveries.channel uses the A6 channel set (no telegram)');
 SELECT tests.throws($$INSERT INTO public.notification_deliveries (notification_id, channel, attempt_count)
                       VALUES ('f0800000-0000-4000-8000-000000000001', 'push', -1)$$,
     '23514', 'attempt_count cannot be negative');

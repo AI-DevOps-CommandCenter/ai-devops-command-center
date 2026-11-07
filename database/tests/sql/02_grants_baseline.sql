@@ -1,25 +1,26 @@
--- 02: Client privileges on the baseline tables and functions match the
---     verified live baseline (checklist P3 / P3c).
+-- 02: Client privileges on the baseline tables and functions, after all
+--     migrations. Baseline values come from the verified live baseline
+--     (checklist P3 / P3c); changes made by the A2-A7 migrations are marked.
 BEGIN;
 
 WITH expected(tbl, privs) AS (VALUES
-    ('ai_analyses',            ''),
-    ('approvals',              'INSERT,SELECT,UPDATE'),
+    ('ai_analyses',            'SELECT'),                 -- A2 read (000700), was none
+    ('approvals',              'SELECT'),                 -- A2-Q3: writes via functions (000700)
     ('audit_log',              ''),
-    ('audit_logs',             'INSERT,SELECT'),
+    ('audit_logs',             'SELECT'),                 -- A2-Q3/A7: no client INSERT (000500)
     ('deployments',            ''),
-    ('device_tokens',          ''),
+    ('device_tokens',          'SELECT'),                 -- A6 read own (000600), was none
     ('incident_logs',          'INSERT,SELECT'),
     ('incidents',              'INSERT,SELECT,UPDATE'),
     ('integrations',           'DELETE,INSERT,SELECT,UPDATE'),
     ('investigations',         'INSERT,SELECT,UPDATE'),
-    ('notifications',          ''),
-    ('playbook_runs',          'INSERT,SELECT,UPDATE'),
+    ('notifications',          'SELECT'),                 -- A6 read own (000600), was none
+    ('playbook_runs',          'SELECT'),                 -- A2-Q3: writes via functions (000700)
     ('playbooks',              'DELETE,INSERT,SELECT,UPDATE'),
     ('postmortems',            'INSERT,SELECT,UPDATE'),
     ('profiles',               'SELECT'),
-    ('recovery_checks',        ''),
-    ('remediation_executions', 'INSERT,SELECT,UPDATE'),
+    ('recovery_checks',        'SELECT'),                 -- A2 read (000700), was none
+    ('remediation_executions', 'SELECT'),                 -- A2-Q3: legacy, read only (000700)
     ('services',               '')
 ),
 actual AS (
