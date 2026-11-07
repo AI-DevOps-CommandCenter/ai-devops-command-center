@@ -6,8 +6,10 @@ class S21PostmortemReportScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
@@ -20,31 +22,31 @@ class S21PostmortemReportScreen extends StatelessWidget {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.card,
+                      color: colors.card,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: AppColors.text, size: 20),
+                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
+                    children: [
                       Text(
                         'Postmortem',
                         style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
-                          color: AppColors.text,
+                          color: colors.text,
                         ),
                       ),
                       Text(
                         'INC-1042',
                         style: TextStyle(
                           fontSize: 12,
-                          color: AppColors.muted,
+                          color: colors.muted,
                         ),
                       ),
                     ],
@@ -62,21 +64,22 @@ class S21PostmortemReportScreen extends StatelessWidget {
                   children: [
                     // Summary Card
                     _buildCard(
+                      colors: colors,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
+                        children: [
                           Text(
                             'Summary',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: AppColors.text,
+                              color: colors.text,
                             ),
                           ),
-                          SizedBox(height: 6),
+                          const SizedBox(height: 6),
                           Text(
                             'Elevated errors on payments-api after v2.8.1; resolved by rollback.',
-                            style: TextStyle(fontSize: 13, color: AppColors.text, height: 1.4),
+                            style: TextStyle(fontSize: 13, color: colors.text, height: 1.4),
                           ),
                         ],
                       ),
@@ -85,21 +88,22 @@ class S21PostmortemReportScreen extends StatelessWidget {
 
                     // Impact Card
                     _buildCard(
+                      colors: colors,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
+                        children: [
                           Text(
                             'Impact',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: AppColors.text,
+                              color: colors.text,
                             ),
                           ),
-                          SizedBox(height: 6),
+                          const SizedBox(height: 6),
                           Text(
                             'Error rate peaked 12.4%, P95 2.4 s, about 25 minutes.',
-                            style: TextStyle(fontSize: 13, color: AppColors.text, height: 1.4),
+                            style: TextStyle(fontSize: 13, color: colors.text, height: 1.4),
                           ),
                         ],
                       ),
@@ -110,28 +114,35 @@ class S21PostmortemReportScreen extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: AppColors.card,
+                        color: colors.card,
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.cardBorder, width: 0.8),
+                        border: Border.all(color: colors.cardBorder, width: 0.8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Timeline',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: AppColors.text,
+                              color: colors.text,
                             ),
                           ),
                           const SizedBox(height: 12),
-                          _buildTimelineItem('14:05', 'Deploy v2.8.1'),
-                          _buildTimelineItem('14:12', 'Alert'),
-                          _buildTimelineItem('14:20', 'AI analysis'),
-                          _buildTimelineItem('14:24', 'Rollback approved by Alex Morgan'),
-                          _buildTimelineItem('14:27', 'Execution done'),
-                          _buildTimelineItem('14:33', 'Recovery verified', isLast: true),
+                          _buildTimelineItem(colors, '14:05', 'Deploy v2.8.1'),
+                          _buildTimelineItem(colors, '14:12', 'Alert'),
+                          _buildTimelineItem(colors, '14:20', 'AI analysis'),
+                          _buildTimelineItem(colors, '14:24', 'Rollback approved by Alex Morgan'),
+                          _buildTimelineItem(colors, '14:27', 'Execution done'),
+                          _buildTimelineItem(colors, '14:33', 'Recovery verified', isLast: true),
                         ],
                       ),
                     ),
@@ -139,21 +150,22 @@ class S21PostmortemReportScreen extends StatelessWidget {
 
                     // Probable cause Card
                     _buildCard(
+                      colors: colors,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
+                        children: [
                           Text(
                             'Probable cause',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: AppColors.text,
+                              color: colors.text,
                             ),
                           ),
-                          SizedBox(height: 6),
+                          const SizedBox(height: 6),
                           Text(
                             'DB pool timeout lowered to 500 ms (hypothesis supported by logs and timing).',
-                            style: TextStyle(fontSize: 13, color: AppColors.text, height: 1.4),
+                            style: TextStyle(fontSize: 13, color: colors.text, height: 1.4),
                           ),
                         ],
                       ),
@@ -162,21 +174,22 @@ class S21PostmortemReportScreen extends StatelessWidget {
 
                     // Result Card
                     _buildCard(
+                      colors: colors,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
+                        children: [
                           Text(
                             'Result',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: AppColors.text,
+                              color: colors.text,
                             ),
                           ),
-                          SizedBox(height: 6),
+                          const SizedBox(height: 6),
                           Text(
                             'Error rate 0.4%, P95 190 ms. Verified recovered.',
-                            style: TextStyle(fontSize: 13, color: AppColors.text, height: 1.4),
+                            style: TextStyle(fontSize: 13, color: colors.text, height: 1.4),
                           ),
                         ],
                       ),
@@ -189,11 +202,11 @@ class S21PostmortemReportScreen extends StatelessWidget {
                       height: 48,
                       child: ElevatedButton(
                         onPressed: () {
-                          Navigator.pushNamedAndRemoveUntil(context, '/dashboard', (route) => false);
+                          Navigator.pushNamedAndRemoveUntil(context, '/overview', (route) => false);
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.teal,
-                          foregroundColor: Colors.white,
+                          backgroundColor: colors.teal,
+                          foregroundColor: colors.isDark ? const Color(0xFF0B1226) : Colors.white,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -216,7 +229,7 @@ class S21PostmortemReportScreen extends StatelessWidget {
     );
   }
 
-  static Widget _buildTimelineItem(String time, String desc, {bool isLast = false}) {
+  static Widget _buildTimelineItem(AppColorScheme colors, String time, String desc, {bool isLast = false}) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -225,16 +238,16 @@ class S21PostmortemReportScreen extends StatelessWidget {
             Container(
               width: 10,
               height: 10,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AppColors.teal,
+                color: colors.teal,
               ),
             ),
             if (!isLast)
               Container(
                 width: 2,
                 height: 26,
-                color: AppColors.border,
+                color: colors.border,
               ),
           ],
         ),
@@ -243,7 +256,7 @@ class S21PostmortemReportScreen extends StatelessWidget {
           padding: const EdgeInsets.only(top: 0),
           child: RichText(
             text: TextSpan(
-              style: const TextStyle(fontSize: 13, color: AppColors.text),
+              style: TextStyle(fontSize: 13, color: colors.text),
               children: [
                 TextSpan(text: '$time  ', style: const TextStyle(fontWeight: FontWeight.bold)),
                 TextSpan(text: desc),
@@ -255,19 +268,19 @@ class S21PostmortemReportScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildCard({required Widget child}) {
+  Widget _buildCard({required AppColorScheme colors, required Widget child}) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: colors.card,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.cardBorder, width: 0.8),
-        boxShadow: const [
+        border: Border.all(color: colors.cardBorder, width: 0.8),
+        boxShadow: [
           BoxShadow(
-            color: Color.fromRGBO(15, 27, 51, 0.06),
+            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
             blurRadius: 4,
-            offset: Offset(0, 1),
+            offset: const Offset(0, 1),
           ),
         ],
       ),
