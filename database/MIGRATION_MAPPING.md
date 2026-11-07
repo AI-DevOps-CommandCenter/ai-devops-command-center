@@ -6,6 +6,22 @@
 > The approved target design gives the **table list and capabilities**, not the column definitions.
 > Columns listed as **"proposed"** are recommendations for review, not part of the approved design.
 
+## Architecture decision status
+
+> **⛔ NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL A2–A7 ARE ALSO APPROVED.**
+
+| Decision | Status | Effect on this mapping |
+|---|---|---|
+| **A1** Canonical backend | **APPROVED 2026-11-07** – hybrid architecture, base `origin/feature/backend-api-database`, user-token + Supabase RLS as the primary security model (report §11) | The mapping must stay compatible with that branch's table usage. It writes incidents with free-text `service_name` (relevant to U6) and writes `remediation_executions` directly (relevant to U1). Critical rules on `approvals`, `playbook_runs`, remediation and `audit_logs` are to be enforced in the database, not only in the backend. **Not implemented.** |
+| A2 Privileged mechanism / final grant–RLS boundary | **PENDING** | Determines the explicit grants for each target table (stage 7). |
+| A3 Approval authority | **PENDING** | Determines the `approvals` ↔ `playbook_runs` link (§2.9, §2.10). |
+| A4 No-approval execution rules | **PENDING** | Determines the `requires_approval` / protected-playbook handling (§2.8). |
+| A5 n8n identity | **PENDING** | Determines who writes `automation_runs` (§2.18). |
+| A6 Notifications | **PENDING** | Determines the `notifications` / `notification_deliveries` / `device_tokens` access (§2.12–§2.14). |
+| A7 Trusted audit logging | **PENDING** | Determines the write path for `audit_logs` (§2.16). |
+
+The table-by-table mapping below is unchanged by A1. A1 decides **where** the rules are enforced, not **how** existing data is mapped.
+
 ## Guiding rules
 
 1. **Additive first.** Add tables and nullable columns before anything else. Nothing is renamed or dropped in the same step that copies data.

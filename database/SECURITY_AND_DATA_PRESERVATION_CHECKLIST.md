@@ -6,7 +6,8 @@
 Sections: **§S** safety rules · **§P** pre-migration read-only checks · **§D** record-by-record preservation · **§W** workflow and security design · **§R** roles and RLS · **§B** backend code findings and architecture decisions · **§V** final sign-off.
 
 > ## ⛔ IMPLEMENTATION BLOCKER
-> **NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL THESE ARCHITECTURE DECISIONS ARE APPROVED** (§B4, decisions A1–A7).
+> **NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL THESE ARCHITECTURE DECISIONS ARE APPROVED** (§B5, decisions A1–A7).
+> Status: **A1 APPROVED (2026-11-07)** · **A2–A7 PENDING**. The blocker remains until A2–A7 are approved.
 
 ---
 
@@ -501,7 +502,7 @@ Each record: **keep the ID**, **no destructive change**, and verify after migrat
 - [ ] `integrations`: admin-only; secrets kept outside plain JSON (Vault).
 - [ ] New tables (`incident_events`, `notification_deliveries`, `automation_runs`) have policies before any client uses them.
 - [ ] Legacy tables: no client access; writes revoked.
-- [ ] Backend service-role usage reviewed: every backend route enforces the same role checks (report S8).
+- [ ] Backend service-role usage reviewed: every backend route enforces the same role checks (report S8). *Under approved A1, user-facing routes use the publishable key + user JWT. Any remaining privileged server-side operation must use the controlled mechanism defined under A2 (pending).*
 - [ ] `anon` has no access to any `public` table except what is explicitly required.
 
 ### R3. Authentication checklist
@@ -546,21 +547,30 @@ Full evidence, with file paths and line numbers, is in `PHASE19_FINAL_VERIFICATI
 - [ ] Other direct Supabase clients (N5).
 
 ### B5. Architecture decisions – must be approved before any SQL
-- [ ] **A1** Canonical backend branch.
-- [ ] **A2** User-token/RLS architecture vs service-role/backend-only architecture.
-- [ ] **A3** Canonical approval authority and authorized approver roles.
-- [ ] **A4** No-approval playbook execution rules.
-- [ ] **A5** Secure n8n integration identity.
-- [ ] **A6** Notifications authentication and database compatibility.
-- [ ] **A7** Trusted audit logging.
+- [x] **A1** Canonical backend branch – **APPROVED 2026-11-07.** Hybrid architecture: base `origin/feature/backend-api-database`; user-token + RLS as the primary database security model; port the auth/profile middleware, role middleware, zod, helmet, Vitest/Supertest and password reset (after redirect review) from `feature/backend-api`. Rejected alternative: service_role/backend-only. Full record: report §11. **Not implemented yet.**
+- [ ] **A2** User-token/RLS architecture vs service-role/backend-only architecture – **PENDING.** A1 sets user-token + RLS as primary. Still open: the controlled mechanism for privileged server-side operations, and the final grant/RLS boundary.
+- [ ] **A3** Canonical approval authority and authorized approver roles – **PENDING.**
+- [ ] **A4** No-approval playbook execution rules – **PENDING.**
+- [ ] **A5** Secure n8n integration identity – **PENDING** (A1 principle: dedicated limited identity, authenticated machine-to-machine requests, no service_role).
+- [ ] **A6** Notifications authentication and database compatibility – **PENDING** (A1 principle: dedicated limited identity, no service_role).
+- [ ] **A7** Trusted audit logging – **PENDING.**
 
-**⛔ NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL A1–A7 ARE APPROVED.**
+**A1 security requirements (approved principles, to verify during implementation):**
+- [ ] The service_role key is never present in the Flutter app, n8n or the notifications service.
+- [ ] Every user-facing database call uses the publishable key with the caller's JWT.
+- [ ] Every privileged server-side operation goes through an explicitly authorized, controlled mechanism (defined under A2).
+- [ ] Approval, remediation and audit rules are enforced by database constraints, RLS or trusted functions, not only by backend or frontend code.
+- [ ] Backend role checks remain as an additional layer.
+- [ ] Machine-to-machine requests (n8n, notifications) are authenticated.
+
+**⛔ NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL A2–A7 ARE ALSO APPROVED.**
 
 ---
 
 ## §V – Final sign-off
 
-- [ ] Architecture decisions A1–A7 approved (§B5) and recorded.
+- [x] Architecture decision A1 approved and recorded (2026-11-07; report §11).
+- [ ] Architecture decisions A2–A7 approved (§B5) and recorded.
 
 - [ ] All §P checks recorded.
 - [ ] All §D records ticked on the rehearsal copy.
