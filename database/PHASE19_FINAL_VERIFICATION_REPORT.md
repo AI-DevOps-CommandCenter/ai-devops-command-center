@@ -7,7 +7,7 @@
 
 > ## ⛔ IMPLEMENTATION BLOCKER
 > **NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL THESE ARCHITECTURE DECISIONS ARE APPROVED.**
-> See §10 (architecture decisions A1–A7).
+> Decision status: **A1 APPROVED (2026-11-07)** · **A2–A7 PENDING**. The blocker stays in force until A2–A7 are also approved. See §10 and §11.
 
 ## How to read this report
 
@@ -356,12 +356,77 @@ These are **database-level gaps**, not confirmed exploits.
 
 > **⛔ NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL THESE ARCHITECTURE DECISIONS ARE APPROVED.**
 
-| # | Decision | Why it blocks | Related |
-|---|---|---|---|
-| A1 | **Canonical backend branch:** `feature/backend-api` or `origin/feature/backend-api-database`, or a merge of the two. | Determines which code the database must protect and which routes exist. | C10, N2 |
-| A2 | **User-token/RLS architecture vs service-role/backend-only architecture.** | With user tokens, RLS and database functions are the security boundary and must enforce the workflow (I4). With service_role, the backend is the only control, and clients must be blocked from direct table writes. | C10, I1–I4 |
-| A3 | **Canonical approval authority and authorized approver roles:** one approval system (`approvals` linked to `playbook_runs`) and who may decide (admin only, or admin + operator). | Two inconsistent systems exist today. | C2, C3, U2, U3 |
-| A4 | **No-approval playbook execution rules:** whether `requires_approval = false` may auto-approve, and for which action types. | Auto-approval exists in code. | C4, U4, U5 |
-| A5 | **Secure n8n integration identity:** a dedicated role, a backend endpoint, or a service account; plus the webhook authentication method. | Unknown today; n8n must never be able to decide approvals. | C14, N1, U9 |
-| A6 | **Notifications authentication and database compatibility:** route authentication, user identity taken from the login token, whether service_role is justified, and table/column names aligned with the schema. | Open endpoints with service_role; writes would fail against the live schema. | C12, C13, N3 |
-| A7 | **Trusted audit logging:** audit writes through a trusted database function, no direct client INSERT, and whether audit failure must fail the action. | Entries can be user-created and logging can silently fail. | L5, C8, §W8 |
+| # | Decision | Status | Why it blocks | Related |
+|---|---|---|---|---|
+| A1 | **Canonical backend branch:** `feature/backend-api` or `origin/feature/backend-api-database`, or a merge of the two. | **APPROVED 2026-11-07** – hybrid architecture on base `origin/feature/backend-api-database`; see §11 | Determines which code the database must protect and which routes exist. | C10, N2 |
+| A2 | **User-token/RLS architecture vs service-role/backend-only architecture.** | **PENDING** – A1 sets user-token + RLS as the primary model. A2 still has to define the "controlled privileged mechanism" for server-side operations (which operations, which identity, how it is authorized) and confirm the final grant/RLS boundary. | With user tokens, RLS and database functions are the security boundary and must enforce the workflow (I4). With service_role, the backend is the only control, and clients must be blocked from direct table writes. | C10, I1–I4 |
+| A3 | **Canonical approval authority and authorized approver roles:** one approval system (`approvals` linked to `playbook_runs`) and who may decide (admin only, or admin + operator). | **PENDING** | Two inconsistent systems exist today. | C2, C3, U2, U3 |
+| A4 | **No-approval playbook execution rules:** whether `requires_approval = false` may auto-approve, and for which action types. | **PENDING** | Auto-approval exists in code. | C4, U4, U5 |
+| A5 | **Secure n8n integration identity:** a dedicated role, a backend endpoint, or a service account; plus the webhook authentication method. | **PENDING** (A1 principle: dedicated limited identity, authenticated machine-to-machine requests, no service_role) | Unknown today; n8n must never be able to decide approvals. | C14, N1, U9 |
+| A6 | **Notifications authentication and database compatibility:** route authentication, user identity taken from the login token, whether service_role is justified, and table/column names aligned with the schema. | **PENDING** (A1 principle: dedicated limited identity, no service_role) | Open endpoints with service_role; writes would fail against the live schema. | C12, C13, N3 |
+| A7 | **Trusted audit logging:** audit writes through a trusted database function, no direct client INSERT, and whether audit failure must fail the action. | **PENDING** | Entries can be user-created and logging can silently fail. | L5, C8, §W8 |
+
+---
+
+## 11. Architecture decision record – A1 (APPROVED)
+
+**Status:** **APPROVED** by the project owner on 2026-11-07.
+**Implementation status:** **NOT IMPLEMENTED.** This records a decision only. No code has been merged, ported or changed, and no database change has been made.
+
+### 11.1 Approved decision
+
+**Adopt a hybrid backend architecture, using user-token + Supabase RLS as the primary database security model.**
+
+1. **Canonical backend base:** `origin/feature/backend-api-database`.
+2. **Features to port from `feature/backend-api`:**
+   - Authentication and profile validation middleware.
+   - Reusable role-based authorization middleware.
+   - Zod input validation.
+   - Helmet security headers.
+   - Vitest and Supertest testing setup.
+   - Password reset functionality, after reviewing its redirect configuration (currently hard-coded to `http://localhost:3000/reset-password`, `backend/src/routes/auth.routes.ts:47`).
+3. **Database access:**
+   - Use the Supabase publishable key with the authenticated user's JWT.
+   - Enforce database access through Supabase RLS and explicit grants.
+   - Never expose the service_role key to Flutter or n8n.
+   - Any privileged server-side operation must use a carefully controlled and explicitly authorized mechanism.
+4. **Security enforcement:**
+   - Backend authorization checks are an additional layer.
+   - Database constraints, RLS policies and trusted database functions enforce critical workflow rules.
+   - Approval, remediation and audit operations must not rely solely on frontend or backend checks.
+5. **n8n and notifications:**
+   - Use dedicated, limited identities.
+   - Authenticate machine-to-machine requests.
+   - Do not share service_role credentials with n8n or notification services.
+
+### 11.2 Rationale
+
+- `origin/feature/backend-api-database` already implements most of the domain: incidents, investigations, approvals, playbook runs, remediation, postmortems, admin, audit and dashboard [V-CODE]. It is consistent with the live data and RLS design (inference I5).
+- **Least privilege:** each request acts with the calling user's rights, so a backend defect cannot exceed them. With service_role, any missing check exposes the whole database.
+- Clients can reach the database directly with their own token (C10, C15, I4), so database-level enforcement is needed whichever architecture is used. Making RLS, constraints and trusted functions authoritative matches the Phase 19 design (checklist §W).
+- The quality components of `feature/backend-api` (middleware, zod, helmet, tests, password reset) are small and portable [V-CODE].
+
+### 11.3 Rejected alternative
+
+**service_role / backend-only architecture** (`feature/backend-api` as base, all direct client table grants removed). Rejected because:
+- the backend would become the single security control;
+- the service_role key would grant full access if compromised;
+- the 31 existing RLS policies would be bypassed;
+- most of the domain features would have to be re-implemented on that base.
+
+### 11.4 Approved decision vs proposed implementation details
+
+| Approved (A1) | Proposed implementation details – **not yet approved, not implemented** |
+|---|---|
+| Base branch `origin/feature/backend-api-database` | How the branches are reconciled (both create `backend/package.json`, `server.ts`, `middleware/auth.ts`); merge base `9aa3a0d`. |
+| Port the listed features from `feature/backend-api` | Order of porting; fixing the duplicate `"type"` key in that branch's `package.json`; adding `test`/`typecheck` scripts. |
+| Publishable key + user JWT; RLS + explicit grants | Exact grants and policies per table (stage 7, §R1), including tables that currently have no client access (`services`, `device_tokens`, `notifications`, `recovery_checks`, `ai_analyses`). |
+| Critical workflow rules enforced in the database | Specific functions, triggers and constraints (checklist §W). These depend on A3, A4 and A7. |
+| A controlled mechanism for privileged server-side operations | Its form and identity – **open under A2**. |
+| Dedicated limited identities for n8n and notifications | Concrete identity and authentication method – **open under A5 and A6**. |
+
+### 11.5 Effect on the audit findings
+
+All findings in §5–§9 remain valid and unchanged. A1 does not fix any of them. It determines **where** the fixes must live: in the database (RLS, grants, constraints, trusted functions), with backend checks as an additional layer.
+
+> **⛔ NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL A2–A7 ARE ALSO APPROVED.**

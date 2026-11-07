@@ -8,6 +8,7 @@ Related documents: `PHASE19_FINAL_VERIFICATION_REPORT.md`, `MIGRATION_MAPPING.md
 > ## ⛔ IMPLEMENTATION BLOCKER
 > **NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL THESE ARCHITECTURE DECISIONS ARE APPROVED.**
 > Decisions A1–A7 (see "Architecture decisions" at the end, and report §10) must be approved before stage 1 can be completed. Stage 3 onwards cannot start until they are.
+> Status: **A1 APPROVED (2026-11-07)** · **A2–A7 PENDING**. The blocker remains until A2–A7 are approved.
 
 ---
 
@@ -55,6 +56,14 @@ Related documents: `PHASE19_FINAL_VERIFICATION_REPORT.md`, `MIGRATION_MAPPING.md
 The backend code audit (report §9) found two backend branches with different Supabase access architectures (C10). It also found inconsistent approval authority (C3), remediation without an approval check (C6), best-effort audit logging (C8), an unauthenticated notifications service using service_role (C12, C13), and no verified n8n integration identity (C14, N1). The design of stages 1, 6 and 7 depends on these answers:
 - If clients use user tokens directly (RLS architecture), the database functions, triggers and policies must enforce the whole approval workflow.
 - If only the backend uses service_role, client table grants must be removed and the backend becomes the security boundary.
+
+**Progress:** A1 approved on 2026-11-07. The hybrid architecture uses user-token + RLS as the primary model on base `origin/feature/backend-api-database` (report §11). A2–A7 are pending. A1 is a decision, not an implementation: no code has been ported and nothing has changed in the database.
+
+**Consequences of A1 for later stages (proposed, not yet approved in detail):**
+- **Stage 6:** approval, remediation and audit rules must be enforced by database constraints, RLS and trusted functions, not only by backend checks.
+- **Stage 7:** explicit grants and policies for every table the canonical backend uses, including tables with no client access today.
+- **Stage 8:** tests run against the ported Vitest/Supertest setup.
+- **Stage 10:** n8n uses a dedicated, limited, authenticated identity – never service_role.
 
 **Gate:** decisions A1–A7 approved and recorded by the owner. **No migration SQL or live database change before this gate.**
 **Why first:** stage 1 (schema), stage 6 (functions/triggers) and stage 7 (RLS/grants) are designed differently under each architecture.
@@ -238,14 +247,14 @@ Designed alongside stage 2 and rehearsed before stage 13:
 
 From the backend code security audit (report §9–§10, checklist §B). **Live database facts** (L-items), **backend code findings** (C-items), **inferences** (I-items) and **open verifications** (N-items) are kept separate in the report.
 
-| # | Decision | Key evidence | Related |
-|---|---|---|---|
-| A1 | Canonical backend branch (`feature/backend-api` vs `origin/feature/backend-api-database`, or a merge). | C10, N2 | – |
-| A2 | User-token/RLS architecture vs service-role/backend-only architecture. | C10, C11, I1–I4 | U13 |
-| A3 | Canonical approval authority and authorized approver roles. | C2, C3 | U2, U3 |
-| A4 | No-approval playbook execution rules. | C4 | U4, U5 |
-| A5 | Secure n8n integration identity and webhook authentication. | C14, N1 | U9 |
-| A6 | Notifications authentication and database compatibility. | C12, C13, N3 | – |
-| A7 | Trusted audit logging (function-only writes; behaviour when an audit write fails). | L5, C8 | U8 |
+| # | Decision | Status | Key evidence | Related |
+|---|---|---|---|---|
+| A1 | Canonical backend branch (`feature/backend-api` vs `origin/feature/backend-api-database`, or a merge). | **APPROVED 2026-11-07** – hybrid, base `origin/feature/backend-api-database`, user-token + RLS primary; rejected: service_role/backend-only (report §11). Not implemented. | C10, N2 | – |
+| A2 | User-token/RLS architecture vs service-role/backend-only architecture. | **PENDING** – direction set by A1; the controlled privileged mechanism and final grant/RLS boundary are still open. | C10, C11, I1–I4 | U13 |
+| A3 | Canonical approval authority and authorized approver roles. | **PENDING** | C2, C3 | U2, U3 |
+| A4 | No-approval playbook execution rules. | **PENDING** | C4 | U4, U5 |
+| A5 | Secure n8n integration identity and webhook authentication. | **PENDING** | C14, N1 | U9 |
+| A6 | Notifications authentication and database compatibility. | **PENDING** | C12, C13, N3 | – |
+| A7 | Trusted audit logging (function-only writes; behaviour when an audit write fails). | **PENDING** | L5, C8 | U8 |
 
-> **⛔ NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL THESE ARCHITECTURE DECISIONS ARE APPROVED.**
+> **⛔ NO MIGRATION SQL OR LIVE DATABASE CHANGES UNTIL A2–A7 ARE ALSO APPROVED.**
