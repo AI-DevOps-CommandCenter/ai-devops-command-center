@@ -7,8 +7,9 @@
 
 This register records architecture and implementation decisions for the database work. It **does not replace** the committed Phase 19 register (`MIGRATION_EXECUTION_PLAN.md` "Architecture decisions", on `feature/backend-api`). It references that register and adds decisions taken since.
 
-> ## ⛔ IMPLEMENTATION BLOCKER (unchanged)
-> **No migration SQL or live database changes until all required decisions in the committed A2–A7 register have been approved.** Decision Batch 1 does **not** lift this blocker.
+> ## Implementation blocker: LIFTED for local work (Batch 2, 2026-11-07)
+> A2–A7 were approved in Decision Batch 2 (§2c) and implemented and tested **locally** (§2d).
+> **Still blocked:** any remote database change. Remote apply needs D-009 (staging credentials and access), the backend switch (handover §1a) and, for production, the explicit written approval in handover §6.
 
 ### Status values
 
@@ -29,12 +30,12 @@ This register records architecture and implementation decisions for the database
 | # | Decision | Status | Where recorded |
 |---|---|---|---|
 | A1 | Canonical backend branch (hybrid; user JWT + RLS primary) | **APPROVED** 2026-11-07 | Committed Phase 19 docs (`56c6b82`) |
-| A2 | User-token/RLS vs service-role; privileged mechanism; final grant/RLS boundary | **PENDING – PARTIALLY ANSWERED** (A2-Q1 → D-001; A2-Q6/R7 → D-002) | Committed register + this file |
-| A3 | Approval authority and approver roles | **PENDING** | Committed register |
-| A4 | No-approval playbook rules | **PENDING** | Committed register |
-| A5 | n8n identity and webhook authentication | **PENDING** | Committed register |
-| A6 | Notifications authentication and database compatibility | **PENDING** | Committed register |
-| A7 | Trusted audit logging | **PENDING** | Committed register |
+| A2 | User-token/RLS vs service-role; privileged mechanism; final grant/RLS boundary | **APPROVED** Batch 2 (2026-11-07). Implemented locally (000400–000700). | §2c |
+| A3 | Approval authority and approver roles | **APPROVED** Batch 2, with A3-Q1, A3-Q3 and A3-Q4 answered. Implemented locally (000700). | §2c |
+| A4 | No-approval playbook rules | **APPROVED** Batch 2. Implemented locally (000700). | §2c |
+| A5 | n8n identity and webhook authentication | **APPROVED** Batch 2. Implemented locally (000400 + backend `machine-auth.ts`). A5-Q2 open. | §2c |
+| A6 | Notifications authentication and database compatibility | **APPROVED** Batch 2. Implemented locally (000600). | §2c |
+| A7 | Trusted audit logging | **APPROVED** Batch 2, with A7-Q3 answered. Implemented locally (000500). | §2c |
 | A8 | Existing database reconciliation | **PROPOSED** (Q-X1 open) | A2–A7 report §6 |
 | A9 | Actor model | **PROPOSED** (Q-X1 open) | A2–A7 report §4 |
 | A10 | Migration and deployment strategy | **PROPOSED** (Q-X1 open). Two of its questions are answered by D-004/D-005 as standalone decisions. | A2–A7 report §7 |
@@ -208,6 +209,61 @@ Notes:
 
 ---
 
+## 2c. Decision Batch 2: A2–A7 (2026-11-07)
+
+Recorded on the project team's instruction in the working session on 2026-11-07. As with Batch 1, no approver name was given, so the named sign-off is left for the approver to complete.
+
+| # | Decision (as instructed) | Report recommendation | Questions answered |
+|---|---|---|---|
+| **A2** | "Use Supabase JWT + RLS for normal user-specific reads. Critical workflow operations must go through authenticated backend APIs and narrowly scoped, secure database functions. Never expose service_role keys to Flutter or n8n." | Same (A + B + C; D none) | A2-Q2 (Flutter may read its own data directly), A2-Q3 (revoke direct client writes on approvals, playbook_runs, remediation_executions, audit_logs), A2-Q5 (functions plus constraints/triggers) |
+| **A3** | "Use one authoritative approval system. Each approval must be linked 1:1 to a playbook_run. Enforce immutable approval decisions, requester/approver separation, idempotency and duplicate execution prevention." | Same | U2 (link direction `approvals.playbook_run_id`) |
+| **A4** | "Require human approval for every remediation action initially. No automatic remediation execution without approval. All four action types must follow this rule." | Stricter than the report (no unprotected types) | A4-Q1 (all four protected), A4-Q2 (the no-approval restart playbook still needs approval; its row is unchanged), R8 (moot) |
+| **A5** | "Use a dedicated automation identity and authenticated backend APIs. Secure both n8n-to-backend and backend-to-n8n communication with signed authentication and replay protection. No direct database access or service_role key for n8n." | Same | A5-Q1 (`automation` role value), A5-Q3 (HMAC with replay protection) |
+| **A6** | "Implement notification management in the backend notification module. Support in_app, push, email, slack and discord. Keep provider credentials on the backend." | Same; channel set extended | A6-Q1 (fold into the backend), R4 (channels), R6 (code location: backend) |
+| **A7** | "Implement append-only audit logging with database-enforced protections. Derive actor identity from authenticated context, prevent client updates/deletes, and ensure critical operations and audit records are committed atomically. Keep incident_events separate for incident timelines." | Same | A7-Q1 (fail closed), A7-Q4 (no back-fill: nothing invented), A7-Q6 (timeline in scope) |
+
+### Sub-answers given during implementation (2026-11-07)
+These were asked because each one changes the code and none was answered by the decisions above.
+
+| Question | Answer |
+|---|---|
+| **A3-Q1** Who may approve | **Admin and operator**, never for their own request |
+| **A3-Q3** Who completes running runs | **n8n, plus a manual override** by admin/operator with a required reason (audited) |
+| **A3-Q4** Expiry and timeouts | **Not now.** Recorded as open. |
+| **A7-Q3** Audit actor FK | **Remove the FK, keep the ID** (applied to `audit_logs` and `incident_events`) |
+
+### Consistency check (Batch 2)
+| Checked against | Result |
+|---|---|
+| A1 | **No conflict.** JWT + RLS primary; backend checks as a second layer; no service_role in Flutter or n8n. |
+| D-001 / D-002 | **Consistent.** No privileged key anywhere; the n8n path uses a JWT identity. The backend guard test `no-privileged-key.test.ts` still passes. |
+| D-004 / D-007 / D-008 | **Consistent.** CLI migration layout, synthetic data only, historical SQL untouched. |
+| D-009 | **Consistent.** Nothing remote was touched. |
+| Report §9.2 conflicts | A3 vs A8 legacy copy: no copy was made (legacy rows stay). A7 vs FK SET NULL: resolved by A7-Q3. A5 vs `admin_update_user_role`: the function is unchanged, and a trigger makes `automation` owner-only. A2 vs current backend: **release gate** (handover §1a). A3 vs admin-only approvals RLS: the policy now includes operators. |
+| Teammate work | Existing migrations, the baseline and backend controllers are **unchanged**. Test suites 01–08 were updated only where an approved decision changes the asserted behaviour. Suite 07 was designed to be flipped. |
+
+## 2d. Implementation record, Batch 2 (2026-11-07)
+
+Local only: a throwaway PostgreSQL 18.6 cluster on 127.0.0.1 with synthetic data. **Nothing was applied to staging or production. Nothing was pushed.**
+
+| File | Content |
+|---|---|
+| `supabase/migrations/20261107000400_automation_identity.sql` | A5: role value, owner-only role guard, `current_app_role`, `require_app_role`, nonce store + `consume_automation_nonce` |
+| `…000500_trusted_audit_and_timeline.sql` | A7: actor FKs dropped, append-only/no-truncate triggers (all roles), `log_audit_event`, `write_incident_event`, `add_incident_event`, redaction, no client audit INSERT, timeline read policy |
+| `…000600_notifications.sql` | A6: channel CHECKs, own-inbox/device reads, `register_device_token`, `unregister_device_token`, `mark_notification_read`, `create_notification`, `claim_notification_deliveries`, `record_notification_delivery` |
+| `…000700_approval_workflow.sql` | A2/A3/A4: `approvals.playbook_run_id` (1:1), `cancelled`, separation CHECKs, idempotency key, one-active-run index, immutable decisions, `request_playbook_run`, `decide_approval`, `cancel_approval`, `cancel_playbook_run`, `start_playbook_run`, `complete_playbook_run`, `record_ai_analysis`, `record_recovery_check`, revoked direct writes, read policies |
+| `database/rollback/…000400–000700.down.sql` | Guarded rollbacks: each refuses to run if it would lose data |
+| `database/tests/sql/09–12` | New suites (A5, A3/A4, A7, A6); 01–08 updated per decision |
+| `backend/src/middleware/machine-auth.ts`, `backend/tests/machine-auth.test.ts` | A5: HMAC signing/verification, 5-minute window, nonce replay protection (memory and database stores), fail closed |
+
+| `…000800_audit_coverage_and_redaction.sql` (+ rollback, suite 13) | Final-review fixes. **#1:** after client audit INSERT was revoked, direct-write actions (incidents, postmortems, playbooks, integrations, role changes) were no longer audited; triggers now audit them atomically, with the actor from the JWT; status changes go to the timeline. **#2:** run/automation payloads are redacted recursively for every writer. |
+
+**Results:** database 13 files, 325 assertions, 0 failures. Data preserved across rollback, re-apply and guard probes. Backend 69 tests, 0 failures; `tsc` clean.
+
+**Data:** no existing row is modified by any migration (verified by checksums). Legacy rows are kept as they are (A3-Q5/U1 open).
+
+---
+
 ## 3. Consistency check summary
 
 | Checked against | Result |
@@ -370,10 +426,23 @@ Each P5 item stays unimplemented until its question is answered. Recommendations
 
 ---
 
+### 7.2 Open after Batch 2 (2026-11-07)
+- **B3-1 (release gate):** the backend team switches approvals, playbook runs, remediation and audit writes to the new functions in the same release as 000500/000700 (handover §1a).
+- **A5-Q2 / A2-Q4:** provisioning, rotation and revocation of the automation identity, and where the backend stores its credentials and the signing secret.
+- **A3-Q2:** the live deadlocked approval (an operator can now decide it, or the admin can cancel it).
+- **A3-Q4:** expiry and timeouts (deferred).
+- **A3-Q5 / U1:** legacy rows.
+- **U11:** incident transitions and the recovery rule (GAP-07/08).
+- **A6-Q3:** humans notifying others (currently not allowed; functions and automation only).
+- **A9-Q2:** human-entered AI analysis (currently automation only).
+- **Q-X1, A8-Q5, A9 actor types, R13, D-009 credentials.**
+
 ## 8. Change log
 
 | Date | Change |
 |---|---|
+| 2026-11-07 | Final review fixes: migration 000800 (audit coverage of direct writes; recursive payload redaction), rollback, suite 13; suite 05 count updated. 325 DB assertions, 0 failures. Not pushed. |
+| 2026-11-07 | **Decision Batch 2:** A2–A7 approved (§2c), with sub-answers A3-Q1, A3-Q3, A3-Q4 and A7-Q3. Blocker lifted for local work only. Implemented as migrations 000400–000700 with guarded rollbacks, suites 09–12 and backend `machine-auth.ts` (§2d). Local tests: 304 DB assertions and 69 backend tests, 0 failures. No remote database accessed; not pushed. |
 | 2026-11-07 | Implementation record §2b (P1 backend, baseline, additive migrations, local tests: 179 assertions passing). New open items B2-1, R13, R14 and the P5 question table §7.1. No remote database accessed. |
 | 2026-11-07 | D-009 ownership decision recorded: team leader as owner; organization `AI-DevOps-CommandCenter`; proposed name `devops-command-center-staging` and region `ap-southeast-1`; minimum access; synthetic data only. Credential storage and access assignments pending. No project created; no CLI link; no database accessed. |
 | 2026-11-07 | Batch 1b recorded (D-006 to D-009). Phase 3 step 1 performed: cherry-picked `41b6772`, `bb11fdb`, `55c9a1b` (from `fff81bf`, `56c6b82`, `030df62`). `HISTORICAL_CONTEXT_NOTE.md` added. Not pushed. No SQL executed, no Supabase access, no CLI installed. |

@@ -134,15 +134,15 @@ Treat every timestamp as ISO-8601 UTC and every `id` as a UUID string. Fields ma
 
 ---
 
-## Part B – Proposed contracts (NOT APPROVED)
+## Part B – Workflow contracts (APPROVED A2–A7, implemented locally 2026-11-07)
 
-These replace the direct table writes in Part A once the decisions are approved. All of them:
+These replace the direct table writes in Part A (migrations 000400–000700). Part A's approval, playbook-run, remediation and audit **writes** stop working when those migrations are applied, so the backend must switch in the same release (handover §1a). All of them:
 - run inside PostgreSQL as narrow `SECURITY DEFINER` functions with `search_path = ''`;
 - check `auth.uid()` and the caller's role themselves;
 - write the audit entry in the same transaction;
 - are called by the backend with the **user's JWT** through `supabase.rpc(...)` (D-002).
 
-### B.1 Error codes (proposed, pending A2)
+### B.1 Error codes (implemented)
 
 Functions raise these custom SQLSTATEs; the backend maps them, and PostgreSQL's own errors, to HTTP.
 
@@ -160,56 +160,74 @@ Functions raise these custom SQLSTATEs; the backend maps them, and PostgreSQL's 
 
 ### B.2 Workflow functions
 
-| Function (proposed) | Caller | Effect | Depends on |
-|---|---|---|---|
-| `request_playbook_run(p_incident_id, p_playbook_id, p_idempotency_key, p_request_payload)` | user, operator, admin | Checks the playbook is enabled and the caller may see the incident. Copies `approval_required`. Creates a `pending` approval when protected. The same idempotency key returns the same run. | A3, A4, U2 |
-| `decide_approval(p_approval_id, p_decision, p_reason)` | approver roles (A3-Q1) | Compare-and-set on `pending`. Approver is `auth.uid()` and ≠ requester. Moves the linked run to `approved` or `rejected`. | A3 |
-| `cancel_approval(p_approval_id, p_reason)` | requester | `pending → cancelled` | A3 |
-| `cancel_playbook_run(p_run_id, p_reason)` | requester (pending), managers (approved/running) | | A3 |
-| `start_playbook_run(p_run_id, p_n8n_execution_id)` | automation identity | Requires `approved`; protected ⇒ approval `approved`. Creates `automation_runs`. Duplicate execution ID ⇒ `23505`. | A3, A5 |
-| `complete_playbook_run(p_run_id, p_status, p_result, p_n8n_execution_id)` | automation (manual override per A3-Q3) | `running → success/failed`; records the error payload | A3, A5 |
-| `record_ai_analysis(p_incident_id, p_investigation_id, p_model_name, p_summary, p_root_cause, p_severity, p_confidence, p_evidence, p_recommended_action)` | automation | Writes `ai_analyses` and a timeline event | A5, A9-Q2 |
-| `record_recovery_check(p_incident_id, p_playbook_run_id, p_status, p_check_type, p_details)` | automation, managers | Writes `recovery_checks` and a timeline event | A3, U11 |
-| `update_incident_status(p_incident_id, p_status, p_reason)` | managers | Enforces allowed transitions. `resolved` needs a healthy recovery check after the last successful run, or an override with a reason. | A3, U11 |
-| `add_incident_event(p_incident_id, p_event_type, p_message, p_metadata)` | functions, automation, managers (comments) | Append-only timeline | A7 |
-| `register_device_token(p_device_token, p_platform)` | user (self) | Upsert on the caller's own token | A6 |
-| `create_notification(p_user_id, p_incident_id, p_title, p_message, p_channels)` | functions, automation | Inbox row plus one delivery row per channel | A6 |
-| `log_audit_event(...)` | **internal only**, no client EXECUTE | Called inside the functions above; failure aborts the action (A7-Q1) | A7 |
+Every function below writes its audit entry (and, where relevant, a timeline event and notifications) in the same transaction. If any of these writes fails, the whole action fails.
 
-**Example: request a run (proposed)**
+| Function (implemented) | Caller | Effect |
+|---|---|---|
+| `request_playbook_run(p_incident_id, p_playbook_id, p_idempotency_key = NULL, p_request_payload = '{}')` → `{run_id, status, approval_id, created}` | user (own incidents), operator, admin | Playbook must be enabled; incident not resolved/closed. **Always** creates a `pending` approval linked 1:1 (A4). Same requester + key returns the same run (`created: false`); the same key for another request ⇒ DC409. A second active run for the same incident+playbook ⇒ DC409. Notifies every admin/operator except the requester. |
+| `decide_approval(p_approval_id, p_decision 'approved'\|'rejected', p_reason = NULL)` | operator, admin (A3-Q1) | Never on one's own request (DC403); only `pending` (DC409). The approver comes from the JWT. Moves the linked run to `approved`/`rejected` and notifies the requester. |
+| `cancel_approval(p_approval_id, p_reason = NULL)` | the requester only | `pending → cancelled`, and the linked run too |
+| `cancel_playbook_run(p_run_id, p_reason)` | requester or manager (pending); manager with a reason of 5+ chars (approved/running) | `→ cancelled`; a pending approval is cancelled too |
+| `start_playbook_run(p_run_id, p_n8n_execution_id, p_workflow_name = 'remediation')` → `{run_id, status, automation_run_id, incident_id, action_type, request_payload}` | **automation** only | Requires run `approved`, playbook enabled and approval `approved`. A second start ⇒ DC409; a reused execution id ⇒ `23505`. |
+| `complete_playbook_run(p_run_id, p_status 'success'\|'failed', p_result = '{}', p_n8n_execution_id = NULL, p_reason = NULL)` | automation (execution id must match, else DC403); operator/admin **manual override** with a reason of 5+ chars (A3-Q3) | `running →` final. Credential-like keys are removed from `p_result`. A manual override is audited as `PLAYBOOK_RUN_COMPLETED_MANUALLY`. |
+| `record_ai_analysis(p_incident_id, p_investigation_id, p_model_name, p_summary, p_root_cause, p_severity, p_confidence, p_evidence, p_recommended_action)` → id | **automation** only | The investigation must belong to the incident; the table CHECKs validate values |
+| `record_recovery_check(p_incident_id, p_playbook_run_id, p_status, p_check_type = NULL, p_details = '{}')` → id | automation, operator, admin | The run must belong to the incident; `checked_by` comes from the JWT |
+| `add_incident_event(p_incident_id, p_event_type, p_message, p_metadata = '{}', p_level = 'info')` → id | operator/admin: `comment` only. automation: `log, comment, investigation, remediation, recovery, notification` | Append-only timeline. `approval`/`status_change` events come only from the workflow functions. |
+| `register_device_token(p_device_token, p_platform)` / `unregister_device_token(p_device_token)` | the signed-in human (self) | The user comes from the JWT. A token moves to the account currently signed in on that device. |
+| `mark_notification_read(p_notification_id)` | the recipient | |
+| `create_notification(p_user_id \| NULL, p_incident_id, p_title, p_message, p_channels = {in_app,push})` → id | **automation** only (humans cannot notify others) | `p_user_id` NULL = team broadcast (`slack`/`discord` only) |
+| `claim_notification_deliveries(p_limit = 50)` → rows `{delivery_id, channel, attempt_count, notification_id, user_id, incident_id, title, message, recipient_email (email only), device_tokens (push only)}` | **automation** only | Claims pending deliveries not attempted in the last 2 minutes (at least once) |
+| `record_notification_delivery(p_delivery_id, p_status 'sent'\|'delivered'\|'failed', p_provider_message_id, p_error_message)` | **automation** only | `failed`/`delivered` are final |
+| `consume_automation_nonce(p_nonce, p_signed_at)` | **automation** only | Replay protection: ±5 minutes; each nonce once (DC409) |
+| `current_app_role()` | any signed-in user | Returns the caller's role |
+| Internal, **no client EXECUTE**: `require_app_role`, `log_audit_event`, `write_incident_event`, `write_notification`, `notify_approvers`, `redact_sensitive` | the functions above | |
+| **Not implemented:** `update_incident_status` | | Waiting for U11 (recovery rule) |
+
+**Example: request a run**
 ```ts
 const { data, error } = await req.userSupabase.rpc("request_playbook_run", {
   p_incident_id: "…", p_playbook_id: "…",
   p_idempotency_key: "mobile-7f3c…", p_request_payload: { target: "checkout-api" }
 });
-// data  -> { run_id: "…", status: "pending_approval", approval_id: "…" }
+// data  -> { run_id: "…", status: "pending_approval", approval_id: "…", created: true }
 // error -> { code: "DC409", message: "An active run already exists for this incident and playbook." }
 ```
 
-**Example: decide (proposed)**
+**Example: decide**
 ```ts
 await req.userSupabase.rpc("decide_approval", { p_approval_id: "…", p_decision: "approved", p_reason: "Safe" });
 // error.code "DC403" when the caller requested it; "DC409" when it is no longer pending
 ```
 
-### B.3 n8n integration (proposed, pending A5)
+### B.3 n8n integration (A5, implemented on the database and backend side)
 
-**Rules that hold under every option (D-001):**
-- n8n never holds service_role or the database URL.
+**Rules (A5, D-001):**
+- n8n never holds service_role, the database URL or any Supabase key.
 - `N8N_BLOCK_ENV_ACCESS_IN_NODE=true`.
 - HTTPS.
 - A pinned n8n image.
 
+**Signing (both directions, the same scheme):** `backend/src/middleware/machine-auth.ts`
+```http
+X-DC-Timestamp: 1762510000                      (unix seconds)
+X-DC-Nonce:     <16-200 chars, A-Z a-z 0-9 _ ->   (unique per request)
+X-DC-Signature: sha256=<hex HMAC-SHA256(secret, canonical)>
+
+canonical = timestamp + "." + nonce + "." + METHOD + "." + path + "." + rawBody
+```
+- **Why method and path are signed:** a signature for one endpoint can't be replayed on another. (The earlier proposal signed only `timestamp + "." + body`; n8n must use the canonical form above.)
+- **Rejected:** a timestamp more than 5 minutes off; a nonce already used (backend: DB function `consume_automation_nonce`); a wrong signature; any request when replay protection is unavailable (503, fail closed).
+- **Secret:** at least 32 characters, held only in the backend's and n8n's secret stores (A2-Q4/A5-Q2 open).
+
 **Backend → n8n (start a remediation workflow):**
 ```http
 POST https://<n8n host>/webhook/remediation
-X-DC-Timestamp: 1762510000
-X-DC-Signature: sha256=<HMAC-SHA256(secret, timestamp + "." + body)>
+X-DC-Timestamp / X-DC-Nonce / X-DC-Signature   (built with buildSignedHeaders())
 { "playbook_run_id": "…", "incident_id": "…", "action_type": "restart", "request_payload": { … } }
 ```
-n8n rejects requests older than 5 minutes and any whose signature doesn't match.
+n8n verifies the same canonical string and rejects stale or replayed requests.
 
-**n8n → backend (machine endpoints, proposed paths):**
+**n8n → backend (machine endpoints; to be mounted with `machineAuth()` + `express.json({ verify: captureRawBody })`):**
 
 | Endpoint | Body | Calls |
 |---|---|---|
@@ -219,9 +237,9 @@ n8n rejects requests older than 5 minutes and any whose signature doesn't match.
 | `POST /api/machine/recovery-checks` | `{ incident_id, playbook_run_id, status, check_type, details }` | `record_recovery_check` |
 | `POST /api/machine/incident-events` | `{ incident_id, event_type, message, metadata }` | `add_incident_event` |
 
-- **Signing:** each request carries the same HMAC headers plus `X-DC-Nonce`, and the backend rejects any nonce it has already seen.
-- **Database identity:** the backend uses the automation identity (A5) for the database call.
-- **Duplicate deliveries:** the same `n8n_execution_id` returns 409 (`automation_runs_n8n_execution_id_key`). Tested locally in suite 08.
+- **Database identity:** after verifying the signature, the backend calls the function with the **automation identity's JWT** (role `automation`, assignable only by the database owner).
+- **Duplicate deliveries:** the same `n8n_execution_id` returns 409 (`automation_runs_n8n_execution_id_key`). Tested in suites 08 and 10.
+- **Completion** must use the execution id that started the run (else DC403).
 
 **AI output → database mapping:**
 
@@ -235,9 +253,11 @@ n8n rejects requests older than 5 minutes and any whose signature doesn't match.
 | `title` | no column (unmapped) |
 | — | `root_cause`: the AI schema has no field for it (R11) |
 
-### B.4 Notifications (proposed, pending A6/R6)
-- **Inbox:** one `notifications` row per user and item.
-- **Delivery:** one `notification_deliveries` row per channel or device attempt. The table exists now (migration 000200) with no client access.
-- **Device tokens:** registered with the user's JWT. The user ID comes from the token, never from the request body.
-- **Allowed channels:** `in_app, push, email, telegram`. Slack and Discord from the mobile settings screen aren't supported (R4).
-- **FCM server credentials:** kept in the backend's secret store, never in mobile or n8n.
+### B.4 Notifications (A6, implemented)
+- **Module:** the backend notification module (A6-Q1, R6).
+- **Inbox:** one `notifications` row per user and item. Users read their own rows directly (RLS) and mark them read with `mark_notification_read`.
+- **Delivery:** one `notification_deliveries` row per external channel. The module calls `claim_notification_deliveries`, sends each delivery, then calls `record_notification_delivery`. No client can read the table.
+- **Device tokens:** `register_device_token` uses the user ID from the JWT, never from the request body.
+- **Allowed channels:** `in_app, push, email, slack, discord` (A6 / R4). `telegram` was removed.
+- **Team broadcasts:** `user_id` NULL, `slack`/`discord` only.
+- **Provider credentials** (FCM, SMTP, Slack/Discord webhooks): kept in the backend's secret store, never in mobile, n8n or the database.

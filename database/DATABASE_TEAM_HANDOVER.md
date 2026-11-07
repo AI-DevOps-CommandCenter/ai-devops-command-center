@@ -4,12 +4,12 @@
 **Date:** 2026-11-07
 **Branch:** `feature/database-implementation` (local commits, not pushed)
 
-> **Status in one line:**
-> - **Done, tested locally:** the verified baseline and the additive structure.
-> - **Blocked on decisions A2–A7:** the database workflow and security logic.
-> - **Not yet done:** staging rehearsal and the production migration.
+> **Status in one line (updated 2026-11-07, Batch 2):**
+> - **Done, tested locally:** the verified baseline, the additive structure, and the **A2–A7 security and workflow logic** (migrations 000400–000700; 12 suites, 304 assertions, 0 failures).
+> - **Gate before any remote apply:** the backend must switch from direct table writes to the new functions **in the same release** (§1a). The current backend code breaks against 000500/000700.
+> - **Not yet done:** staging rehearsal (D-009 credentials still open) and the production migration.
 >
-> **The database is NOT complete.**
+> **The database is complete locally for A2–A7. It is not applied anywhere remote.**
 
 ---
 
@@ -17,18 +17,30 @@
 
 | Team | Start now | Contract |
 |---|---|---|
-| **Mobile (Flutter)** | <ul><li>Sign in with Supabase Auth (email/password) to get the access token.</li><li>Call the backend with `Authorization: Bearer <token>`.</li><li>Build screens on the current endpoints: dashboard, incidents, investigations, approvals, playbook runs, postmortems, admin.</li><li>Poll for status changes.</li></ul> | `API_AND_INTEGRATION_CONTRACTS.md` Part A (verified) and the §A.4 models |
-| **Backend** | <ul><li>New endpoints use `validate()` (Zod), `requireRole()` and the per-request user client.</li><li>Add contract tests (see `backend/tests`).</li><li>Keep using the user's JWT; no service_role (D-001).</li></ul> | `backend/README.md`, Part A |
-| **n8n** | <ul><li>Draft workflows against **mock** machine endpoints.</li><li>The AI output schema already matches `ai_analyses`.</li><li>Don't put service_role or a database URL in n8n.</li></ul> | Part B.3 (proposed; final after A5) |
-| **Notifications** | Wait. The code location is unknown (R6) and the design is pending A6. | Part B.4 (proposed) |
+| **Mobile (Flutter)** | <ul><li>Sign in with Supabase Auth (email/password) to get the access token.</li><li>Call the backend with `Authorization: Bearer <token>`.</li><li>Direct Supabase **reads** of the user's own data are allowed under RLS (A2): incidents, approvals, playbook runs, timeline (`incident_events`), AI analyses, recovery checks, own notifications, own devices.</li><li>Every **write** goes through the backend. Use an idempotency key (8–200 chars) when requesting a run.</li><li>Show approve/reject only to admins and operators, never on their own requests.</li></ul> | Part A, and Part B.2 (implemented) |
+| **Backend** | **Required before any remote apply (§1a):** switch to `rpc(...)` for every workflow write. Map the `DC4xx` error codes to HTTP (Part B.1). Mount the machine endpoints with `machineAuth()` (`backend/src/middleware/machine-auth.ts`, tested). | Part B (implemented) |
+| **n8n** | <ul><li>Build workflows against the machine endpoints (Part B.3).</li><li>Sign every request (HMAC, nonce, timestamp). The signing helpers are in `machine-auth.ts`.</li><li>Report results with the **same** `n8n_execution_id` that started the run.</li><li>No service_role, no database URL, no Supabase key in n8n.</li></ul> | Part B.3 (implemented on the database/backend side) |
+| **Notifications** | Backend notification module (A6): claim pending deliveries with `claim_notification_deliveries()`, send them with provider credentials kept on the backend, then record each result with `record_notification_delivery()`. | Part B.4 (implemented) |
 
-**Don't build against yet:** the proposed database functions (Part B.2). Their names and shapes may change when A2–A7 are approved.
+### 1a. Release gate: backend switch (owner: backend team)
+Migrations 000500 and 000700 revoke the direct client writes the current controllers use. These calls must change in the **same release** as the migrations:
+
+| Current code (`backend/src/services/…`) | Replace with |
+|---|---|
+| `approval.service.ts` insert/update `approvals` | `request_playbook_run` (creates the approval), `decide_approval`, `cancel_approval` |
+| `playbook-run.service.ts` insert/update `playbook_runs` | `request_playbook_run`, `decide_approval`, `cancel_playbook_run`; n8n: `start_playbook_run` / `complete_playbook_run` |
+| `remediation-execution.service.ts` insert/update | Retired (read-only legacy). Use playbook runs. |
+| `audit.service.ts` insert into `audit_logs` | Remove all 16 calls. The functions (workflow) and the triggers of 000800 (incidents, postmortems, playbooks, integrations, role changes) write the audit entry themselves, atomically. |
+
+Reads keep working unchanged. The current code catches audit failures, so those calls fail silently; the approval, run and remediation writes return 500 until they are switched.
 
 ---
 
 ## 2. Schema overview
 
-21 `public` tables: 18 live, verified, plus 3 new target tables.
+22 `public` tables: 18 live, verified, plus 3 new target tables, plus `automation_request_nonces` (A5, function-only).
+
+> The diagram and the "Client access today" column below describe the **baseline** (before A2–A7). For access after migrations 000400–000700, use the role matrix further down. After A7-Q3, `audit_logs.actor_id` and `incident_events.actor_id` are plain IDs with **no FK** to profiles.
 
 ```mermaid
 erDiagram
@@ -93,23 +105,34 @@ erDiagram
 - `on_auth_user_created` on `auth.users`;
 - event trigger `ensure_rls`, which enables RLS on every new public table.
 
-### Role and permission matrix (current; verified by tests 02, 05, 06)
+**Functions added by A2–A7 (migrations 000400–000700):** see `API_AND_INTEGRATION_CONTRACTS.md` Part B.2. All of them are `SECURITY DEFINER`, use `search_path = ''`, check the caller's role themselves, and take the actor from the JWT. Internal helpers (`require_app_role`, `log_audit_event`, `write_incident_event`, `write_notification`, `notify_approvers`, `redact_sensitive`) cannot be called by clients.
 
-| Action | anon | user | operator | admin |
-|---|---|---|---|---|
-| Read own profile / all profiles | – | own | own | all |
-| Change roles | – | – | – | others only (function) |
-| Create incident | – | own | own | own |
-| Read incidents | – | own | all | all |
-| Update incidents | – | – | ✓ | ✓ |
-| Request approval | – | own | own | own |
-| Decide approval | – | – | – | ✓ (not own) |
-| Request playbook run | – | own incident | ✓ | ✓ |
-| Decide playbook run | – | – | ✓ (not own) | ✓ (not own) |
-| Record remediation execution | – | – | ✓ | ✓ |
-| Read audit logs | – | – | – | ✓ |
-| Manage playbooks / integrations | – | – | – | ✓ |
-| Delete incidents | – | – | – | – (no grant) |
+**Triggers added:** `guard_automation_role` (profiles), append-only and no-truncate guards on `audit_logs` and `incident_events`, and `approvals_immutable_decision` / `approvals_no_truncate`.
+
+### Role and permission matrix (after A2–A7; verified by tests 02, 05, 06, 09–12)
+
+| Action | anon | user | operator | admin | automation (backend for n8n) |
+|---|---|---|---|---|---|
+| Read own profile / all profiles | – | own | own | all | own |
+| Change roles | – | – | – | others only; never to or from `automation` | – |
+| Create incident | – | own | own | own | own |
+| Read incidents, timeline, AI analyses, recovery checks | – | own incidents | all | all | – |
+| Update incidents | – | – | ✓ | ✓ | – |
+| Request a playbook run (creates its approval) | – | own incident | ✓ | ✓ | – |
+| Decide an approval | – | – | ✓ (never own) | ✓ (never own) | – |
+| Cancel a pending request | – | own | own / any | own / any | – |
+| Cancel an approved or running run | – | – | ✓ (reason) | ✓ (reason) | – |
+| Start a run | – | – | – | – | ✓ (approved runs only) |
+| Complete a run | – | – | ✓ manual, reason | ✓ manual, reason | ✓ (matching execution id) |
+| Record AI analysis | – | – | – | – | ✓ |
+| Record recovery check | – | – | ✓ | ✓ | ✓ |
+| Timeline: add comment / operational event | – | – | comment | comment | log, investigation, remediation, recovery, notification |
+| Read audit logs | – | – | – | ✓ | – |
+| Write audit logs | nobody directly: only inside the functions, atomically | | | | |
+| Change or delete audit/timeline/decided approvals | nobody (owner included) | | | | |
+| Notifications | – | read own, mark read, register own device | same | same | create, claim and record deliveries |
+| Manage playbooks / integrations | – | – | – | ✓ | – |
+| Delete incidents | – | – | – | – (no grant) | – |
 
 ---
 
@@ -121,11 +144,17 @@ erDiagram
 | 2 | `20261107000100_add_missing_fk_indexes.sql` | 10 indexes | Tested locally |
 | 3 | `20261107000200_create_target_tables.sql` | 3 new tables, no client access | Tested locally |
 | 4 | `20261107000300_add_target_link_columns.sql` | 5 nullable link columns | Tested locally |
+| 5 | `20261107000400_automation_identity.sql` | **A5:** `automation` role (owner-only), role helpers, replay-protection nonce store | Tested locally |
+| 6 | `20261107000500_trusted_audit_and_timeline.sql` | **A7:** append-only audit and timeline (all roles), actor FK removed (A7-Q3), internal audit writer, no client audit INSERT, timeline read policy | Tested locally |
+| 7 | `20261107000600_notifications.sql` | **A6:** channels in_app/push/email/slack/discord, own-inbox reads, device-token and delivery functions | Tested locally |
+| 8 | `20261107000700_approval_workflow.sql` | **A2/A3/A4:** approvals linked 1:1 to runs, `cancelled` status, separation CHECKs, idempotency, one active run per incident+playbook, immutable decisions, workflow functions, direct client writes revoked | Tested locally. **Release gate §1a.** |
+| 9 | `20261107000800_audit_coverage_and_redaction.sql` | **A7 review fixes:** audit triggers on incidents, postmortems, playbooks, integrations and role changes (API actions, fail closed); incident status changes on the timeline; recursive redaction of run and automation payloads | Tested locally |
 
-- **Rollback:** `database/rollback/<migration>.down.sql`. Apply in reverse order. Each script refuses to run if it would destroy data.
+- **Rollback:** `database/rollback/<migration>.down.sql`. Apply in reverse order. Each script refuses to run if it would destroy data. Guards for 000200, 000400 and 000700 are exercised by the test runner.
 - **Historical SQL** (`origin/feature/database:database/schema.sql`, `001_align_with_proposal.sql`) is unchanged and is **not** a baseline (D-008).
+- **Existing rows are never modified** by 000400–000700 (verified by the data-preservation checksums).
 
-**Not implemented (waiting for decisions):** all workflow functions and triggers, RLS and grant changes, audit hardening, approval link and statuses, the `automation` role, actor types, soft delete. See §7.
+**Not implemented (still open):** incident status transitions and the recovery rule (U11; GAP-07/08 remain open), approval expiry and run timeouts (A3-Q4: not now), actor-type columns (A9), soft delete (A8-Q5), legacy row copy (U1). See §7.
 
 ---
 
@@ -168,21 +197,29 @@ npx supabase stop
 `supabase/seed.sql` contains only invented values, in the same per-table shape as production (46 rows). D-007 applies: never copy production data.
 
 ### Current results (executed 2026-11-07, PostgreSQL 18.6 throwaway cluster)
-- **8 test files, 179 assertions, 0 failures.**
-- **Data preserved** across migrations, rollback and re-apply (46 synthetic rows, byte-identical checksums).
-- **Rollback guard works.**
+- **Database: 13 test files, 325 assertions, 0 failures** (was 8 files / 179 before A2–A7).
+- **Data preserved** across migrations, rollback, re-apply and the rollback-guard probes (46 synthetic rows, byte-identical checksums).
+- **Rollback guards work** for 000200, 000400 and 000700.
+- **Backend: 9 test files, 69 tests, 0 failures** (`npx vitest run`), including 15 for n8n request signing and replay protection (`tests/machine-auth.test.ts`). `tsc --noEmit` is clean.
 - **Production is PostgreSQL 17.** Staging rehearsal (P7) must repeat the run on 17.
+
+Suites 01–08 were updated in place where A2–A7 deliberately change behaviour. Each changed assertion names its decision.
 
 | Suite | Covers |
 |---|---|
-| 01 | Baseline structure, ensure_rls behaviour, triggers |
-| 02 | Grants equal the live baseline (P3/P3c) |
-| 03 | CHECK/UNIQUE/FK behaviour (incl. current CASCADE, SET NULL) |
+| 01 | Baseline structure (+3 read policies, actor FK removed), ensure_rls, triggers |
+| 02 | Client grants after all migrations (baseline values; changes marked per decision) |
+| 03 | CHECK/UNIQUE/FK behaviour (automation role, cancelled status, A6 channels, actor id kept on user deletion) |
 | 04 | Sign-up trigger, `updated_at`, role function |
-| 05 | RLS per role, anon, tables without access |
-| 06 | Approval rules: self-approval blocked, admin-only, decided is final, deadlock |
-| 07 | **Known gaps** GAP-01…10 (pass today; flip when A2/A3/A4/A7 are implemented) |
-| 08 | New tables: no client access, duplicate n8n execution blocked, statuses, links, indexes |
+| 05 | RLS per role, anon, own-inbox reads |
+| 06 | Approval rules: 1:1 link, admin + operator decide, never own, immutable for every role, legacy deadlock |
+| 07 | Known gaps: GAP-01…06, 09, 10 **closed**; GAP-07/08 **open** (U11) |
+| 08 | New tables: function-only access, timeline read, duplicate n8n execution blocked, links, indexes |
+| 09 | **A5:** automation role guard, replay protection, machine-only functions, automation never requests or decides |
+| 10 | **A3/A4:** idempotency, duplicate execution, approval bypass attempts, manual override, cancellation, AI and recovery records |
+| 11 | **A7:** actor from JWT, fail-closed atomic audit, redaction, append-only for the owner, timeline access |
+| 12 | **A6:** device tokens, inbox RLS, approver notifications, Slack/Discord broadcast, delivery claim/record |
+| 13 | **A7 review fixes:** audit of incident/postmortem/playbook/integration/role changes, fail closed, settings never audited, status timeline, recursive redaction for every writer |
 
 ---
 
@@ -206,32 +243,40 @@ npx supabase stop
 
 **Steps:**
 1. Mark the baseline as applied. It is **not executed**; the objects already exist.
-2. Apply migrations 2–4.
-3. Verify the 46 production records.
+2. Apply migrations 2–8 **together with the switched backend** (§1a).
+3. Provision the automation identity (owner, SQL Editor; procedure A5-Q2).
+4. Verify the 46 production records.
 
 ---
 
-## 7. Remaining decisions (blocking the database logic)
+## 7. Decisions
 
-Full list in `DATABASE_DECISION_REGISTER.md` §7. **Team-leader approval needed** for the items below.
+**A2–A7 were approved on 2026-11-07 (Decision Batch 2) and are implemented locally** in migrations 000400–000700. See `DATABASE_DECISION_REGISTER.md` §2c for the exact wording and the sub-answers (A3-Q1, A3-Q3, A3-Q4, A7-Q3).
 
-| Decision | Why it matters | Recommendation (not approved) | Blocks |
-|---|---|---|---|
-| **A2** boundary (Q2–Q5) | Rules enforced only in the backend can be bypassed (GAP-01/02) | Revoke direct client writes on workflow and audit tables; definer functions for transitions; constraints/triggers for simple invariants | All workflow functions, the RLS/grant migration |
-| **A3** approval model | Two approval paths; remediation without approval (GAP-06) | One model: `approvals.playbook_run_id`; admin + operator approve, never own; operators may complete runs manually with a reason; 24 h expiry, 30 min timeout | Workflow functions, approval statuses |
-| **A4** no-approval rules | An enabled restart needs no approval | Allow-list, everything protected by default; all four current action types protected | `request_playbook_run` |
-| **A5** n8n identity | Machine access without service_role | `automation` role; the backend holds that identity; HMAC both ways | Machine endpoints, `start/complete` functions, automation_runs access |
-| **A6** notifications | Code missing (R6); no client grants | Fold into the backend; push + in_app first | Notification functions, device-token access |
-| **A7** audit / timeline | Audit is forgeable and best-effort (GAP-05/09) | Fail closed; no FK, stored actor reference; append-only + TRUNCATE guard; triggers for direct writes; mark the 24 old rows legacy | Audit hardening, incident_events access |
-| **Q-X1** (A8–A10) | Reconciliation, actor model, deployment process | Accept | Soft delete, actor types, legacy copy (U1) |
-| **R13** action naming | Brief uses `restart_service`…, database uses `restart`… | Keep the database values; map labels in the app (no data change) | Nothing (UI only) |
+### Still open (none blocks the work done; each blocks only what is listed)
 
-**Independent work already done without these decisions:** baseline, indexes, target tables, link columns, tests, contracts.
+| Item | Why it matters | Blocks |
+|---|---|---|
+| **Backend switch (§1a)** | Backend team, owner of the controllers | Any remote apply of 000500/000700 |
+| **A5-Q2** automation identity: who provisions, rotates and revokes it; where the backend keeps its credentials (A2-Q4) | Only the database owner can assign the role | Staging and production use of the machine endpoints |
+| **A3-Q2** the seeded/live deadlocked approval `fdea11c4…` (no run linked) | An operator can now decide it, or the admin can cancel it. Which one is a human decision. | Nothing technical |
+| **A3-Q5 / U1** legacy rows: approval with no run, run with no approval, remediation execution `108d5a0d…` | They stay as they are. The run without an approval can never be started (A4). | Legacy copy |
+| **A3-Q4** approval expiry and run timeouts | "Not now". Stale items are cancelled by people. | Expiry function |
+| **U11** incident status rules and the recovery rule | GAP-07/08 remain open | `update_incident_status` |
+| **A9** actor types, **A8-Q5** soft delete, **Q-X1** | Not part of Batch 2 | Actor columns, archiving |
+| **A9-Q2** human-entered AI analysis | AI results are automation-only for now | – |
+| **R13** action naming | Keep the database values; map labels in the app | UI only |
+| **D-009** staging credentials and access | | Staging rehearsal |
 
 ## 8. Known limitations
 - **The baseline matches the structure export and the recorded grants, not a fresh live dump.** It must be compared with a read-only schema dump of staging or production before the production step.
 - **service_role grants and the live default privileges (P3b) aren't reproduced.** The baseline doesn't touch them, and the migrations grant explicitly.
 - **Local tests ran on PostgreSQL 18 with a shim, not on Supabase's PostgreSQL 17 stack.**
-- **The backend doesn't yet use the new tables or link columns.**
-- **Clients with table-level UPDATE on `playbook_runs` (managers) can write `automation_run_id`** until A2-Q3 revokes direct writes.
-- **The known gaps GAP-01…10 remain open until A2/A3/A4/A7 are implemented.**
+- **The backend doesn't yet call the new functions** (release gate §1a). The machine endpoints aren't mounted yet. Their authentication middleware is ready and tested.
+- **Hard-deleting an incident that has a decided approval or any timeline/automation history is refused**, for the owner too. This is intended (immutable decisions, A3/A7). Archiving needs A8-Q5.
+- **Deleting a user who decided an approval** clears the approver link on the approval (FK `SET NULL`), but the decision itself and the audit entry naming them both stay.
+- **Notification delivery claims** are "at least once": a delivery not recorded within 2 minutes is handed out again.
+- **GAP-07/08 (incident transitions, recovery rule) remain open** until U11 is decided.
+- **Owner changes without a JWT** (SQL Editor, migrations) are not written to the application audit log. They belong in the migration log.
+- **Not yet verified on Supabase:** the definer functions rely on their owner owning the tables, so RLS doesn't block them. Local tests run as a superuser. Verify on staging (U13).
+- **Review notes (low):** two simultaneous requests with the same idempotency key give the second caller DC409 rather than the existing run. `register_device_token` moves a known token to the caller. Cancelling a running run doesn't stop the n8n workflow. `start_playbook_run` doesn't re-check that the incident is still open. `machineAuth` signs `originalUrl`, query string included.
