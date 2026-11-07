@@ -13,29 +13,23 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _selectedChip = '';
 
-  final List<Map<String, dynamic>> _resolvedIncidents = [
+  final List<Map<String, String>> _resolvedIncidents = const [
     {
       'id': 'INC-1042',
       'title': 'Elevated errors after deployment',
       'badge': 'Postmortem',
-      'badgeBg': AppColors.badgeTealBg,
-      'badgeColor': AppColors.teal,
       'service': 'payments-api · Production',
     },
     {
       'id': 'INC-1037',
       'title': 'Cache hit ratio dropped',
       'badge': 'Resolved',
-      'badgeBg': AppColors.badgeGreenBg,
-      'badgeColor': AppColors.green,
       'service': 'catalog-api · Production',
     },
     {
       'id': 'INC-1033',
       'title': 'TLS cert nearing expiry',
       'badge': 'Resolved',
-      'badgeBg': AppColors.badgeGreenBg,
-      'badgeColor': AppColors.green,
       'service': 'edge-gateway · Production',
     },
   ];
@@ -48,6 +42,7 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final query = _searchController.text.toLowerCase();
     final filtered = _resolvedIncidents.where((i) {
       final matchesQuery = query.isEmpty ||
@@ -63,7 +58,7 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
     }).toList();
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
@@ -76,21 +71,21 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.card,
+                      color: colors.card,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: AppColors.text, size: 20),
+                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Text(
+                  Text(
                     'History',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.text,
+                      color: colors.text,
                     ),
                   ),
                 ],
@@ -108,26 +103,26 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                     Container(
                       height: 48,
                       decoration: BoxDecoration(
-                        color: AppColors.card,
+                        color: colors.card,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.border),
+                        border: Border.all(color: colors.border),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Row(
                         children: [
-                          const Icon(Icons.search, color: AppColors.muted, size: 20),
+                          Icon(Icons.search, color: colors.muted, size: 20),
                           const SizedBox(width: 8),
                           Expanded(
                             child: TextField(
                               controller: _searchController,
                               onChanged: (_) => setState(() {}),
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 hintText: 'Search resolved',
-                                hintStyle: TextStyle(color: AppColors.muted, fontSize: 14),
+                                hintStyle: TextStyle(color: colors.muted, fontSize: 14),
                                 border: InputBorder.none,
                                 isDense: true,
                               ),
-                              style: const TextStyle(color: AppColors.text, fontSize: 14),
+                              style: TextStyle(color: colors.text, fontSize: 14),
                             ),
                           ),
                           if (_searchController.text.isNotEmpty)
@@ -136,7 +131,7 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                                 _searchController.clear();
                                 setState(() {});
                               },
-                              child: const Icon(Icons.clear, color: AppColors.muted, size: 18),
+                              child: Icon(Icons.clear, color: colors.muted, size: 18),
                             ),
                         ],
                       ),
@@ -163,16 +158,16 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                                 padding: const EdgeInsets.symmetric(horizontal: 14),
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: isSelected ? AppColors.teal : Colors.transparent,
+                                  color: isSelected ? colors.teal : Colors.transparent,
                                   borderRadius: BorderRadius.circular(99),
-                                  border: isSelected ? null : Border.all(color: AppColors.border),
+                                  border: isSelected ? null : Border.all(color: colors.border),
                                 ),
                                 child: Text(
                                   chip,
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                    color: isSelected ? Colors.white : AppColors.muted,
+                                    color: isSelected ? (colors.isDark ? const Color(0xFF0B1226) : Colors.white) : colors.muted,
                                   ),
                                 ),
                               ),
@@ -189,22 +184,26 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(vertical: 40),
                         decoration: BoxDecoration(
-                          color: AppColors.card,
+                          color: colors.card,
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.cardBorder, width: 0.8),
+                          border: Border.all(color: colors.cardBorder, width: 0.8),
                         ),
                         child: Column(
-                          children: const [
-                            Text('∅', style: TextStyle(fontSize: 32, color: AppColors.muted)),
-                            SizedBox(height: 6),
-                            Text('No resolved incidents.', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.text)),
-                            SizedBox(height: 4),
-                            Text('Try clearing the search or filter.', style: TextStyle(color: AppColors.muted, fontSize: 13)),
+                          children: [
+                            Text('∅', style: TextStyle(fontSize: 32, color: colors.muted)),
+                            const SizedBox(height: 6),
+                            Text('No resolved incidents.', style: TextStyle(fontWeight: FontWeight.bold, color: colors.text)),
+                            const SizedBox(height: 4),
+                            Text('Try clearing the search or filter.', style: TextStyle(color: colors.muted, fontSize: 13)),
                           ],
                         ),
                       )
                     else
                       ...filtered.map((item) {
+                        final isPostmortem = item['badge'] == 'Postmortem';
+                        final badgeBg = isPostmortem ? colors.badgeTealBg : colors.badgeGreenBg;
+                        final badgeColor = isPostmortem ? colors.teal : colors.green;
+
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 10.0),
                           child: InkWell(
@@ -215,14 +214,14 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                             child: Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: AppColors.card,
+                                color: colors.card,
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: AppColors.cardBorder, width: 0.8),
-                                boxShadow: const [
+                                border: Border.all(color: colors.cardBorder, width: 0.8),
+                                boxShadow: [
                                   BoxShadow(
-                                    color: Color.fromRGBO(15, 27, 51, 0.06),
+                                    color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
                                     blurRadius: 4,
-                                    offset: Offset(0, 1),
+                                    offset: const Offset(0, 1),
                                   ),
                                 ],
                               ),
@@ -234,16 +233,16 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                                     children: [
                                       Text(
                                         item['id']!,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.bold,
-                                          color: AppColors.text,
+                                          color: colors.text,
                                         ),
                                       ),
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                         decoration: BoxDecoration(
-                                          color: item['badgeBg'] as Color,
+                                          color: badgeBg,
                                           borderRadius: BorderRadius.circular(99),
                                         ),
                                         child: Text(
@@ -251,7 +250,7 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                                           style: TextStyle(
                                             fontSize: 11,
                                             fontWeight: FontWeight.w700,
-                                            color: item['badgeColor'] as Color,
+                                            color: badgeColor,
                                           ),
                                         ),
                                       ),
@@ -260,12 +259,12 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                                   const SizedBox(height: 6),
                                   Text(
                                     item['title']!,
-                                    style: const TextStyle(fontSize: 13, color: AppColors.text),
+                                    style: TextStyle(fontSize: 13, color: colors.text),
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
                                     item['service']!,
-                                    style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                                    style: TextStyle(fontSize: 11, color: colors.muted),
                                   ),
                                 ],
                               ),
