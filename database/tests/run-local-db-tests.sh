@@ -173,6 +173,18 @@ if [[ "$MODE" == "throwaway-cluster" ]]; then
     step "re-apply $(basename "$migration")" apply_file "$migration"
   done
   step "data preserved after re-apply" psql_run -v mode=verify -f "$HARNESS_DIR/data_snapshot.sql"
+
+  # Rollback safety: a rollback must refuse to drop tables that contain data.
+  guard_down="$ROLLBACK_DIR/20261107000200_create_target_tables.down.sql"
+  if [[ -f "$guard_down" ]]; then
+    psql_run -c "INSERT INTO public.automation_runs (workflow_name) VALUES ('rollback-guard-probe')" >/dev/null 2>&1
+    if psql_run -f "$guard_down" >/dev/null 2>&1; then
+      fail "rollback guard: target tables were dropped although they contained data"
+    else
+      log "  [ok]   rollback refuses to drop target tables that contain data"
+    fi
+    psql_run -c "DELETE FROM public.automation_runs WHERE workflow_name = 'rollback-guard-probe'" >/dev/null 2>&1
+  fi
 fi
 
 log ""
