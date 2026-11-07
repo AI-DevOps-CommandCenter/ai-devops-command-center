@@ -11,6 +11,20 @@
 - **A8–A10 – PROPOSED, not in the committed register, not approved.**
 - **R1–R12 – new questions raised by this audit (§4.4).** Decision Batch 1 (2026-11-07) decided R1, R2, R7, R12 and A2-Q1 (D-001 to D-005 in `database/DATABASE_DECISION_REGISTER.md`). A2 as a whole stays PENDING. The other R-items remain open.
 
+> ## Execution status (2026-11-07)
+> | Work package | Status |
+> |---|---|
+> | P1 backend groundwork | ✅ Done, commit `d798f43` (54 backend tests) |
+> | P2 local environment | ⚠️ Partly done. Throwaway-cluster runner working; Supabase local stack needs Docker Desktop (not running) |
+> | P3 baseline | ✅ `20261107000000_baseline_live_public_schema.sql`, tested locally (`1bca4f2`) |
+> | P4 additive structure | ✅ 000100–000300 plus guarded rollbacks, tested locally (`e2e51da`). Decision-dependent items are deferred. |
+> | P5 functions / triggers / RLS changes | ⛔ Blocked. Exact questions in register §7.1. |
+> | P6 contracts | ✅ `API_AND_INTEGRATION_CONTRACTS.md`: current API verified; RPC/n8n proposed |
+> | P7 tests | ✅ Local: 8 suites, 179 assertions, 0 failures. Staging rehearsal not started. |
+> | Staging / production | ⛔ Not started (D-009 credentials and access pending; production needs explicit approval) |
+>
+> Team handover: `database/DATABASE_TEAM_HANDOVER.md`.
+
 > ## ⛔ IMPLEMENTATION BLOCKER (unchanged)
 > **No migration SQL or live database changes until all required decisions in the committed A2–A7 register have been approved.**
 

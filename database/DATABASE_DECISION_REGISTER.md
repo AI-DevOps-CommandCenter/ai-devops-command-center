@@ -184,6 +184,30 @@ Notes:
 
 ---
 
+## 2b. Implementation record (2026-11-07)
+
+**Instruction recorded:** the project lead's session instruction of 2026-11-07 asked for the baseline and additive migrations to be prepared and tested. They were prepared and tested **locally only**: a throwaway PostgreSQL cluster on 127.0.0.1, with synthetic data. **Nothing was applied to staging or production.**
+
+- **What the blocker still covers:** it continues to apply to every **remote** database. Migrations 000100–000300 contain **no** decision-dependent logic (§7).
+- **Confirmation needed:** the team leader to confirm this reading of the blocker (open item **B2-1**).
+
+| Commit | Content |
+|---|---|
+| `d798f43` | P1 backend groundwork (D-001/D-002) |
+| `1bca4f2` | Baseline migration (verified), synthetic seed (D-007), local test harness and 7 suites |
+| `e2e51da` | Additive: FK indexes, `automation_runs` / `incident_events` / `notification_deliveries` (no client access), nullable link columns, guarded rollbacks, suite 08 |
+
+**Verification sources for the baseline:**
+- **Structure:** the structure export, cross-checked against the backup archive's object list (definitions only, no table data read).
+- **Grants:** checklist P3/P3c.
+- **`ensure_rls` and `on_auth_user_created`:** exact definitions read from the backup archive's object definitions, no table data.
+
+**Test result (executed):** 8 files, 179 assertions, 0 failures. Data preserved across migrations, rollback and re-apply.
+
+**Deliberately not implemented (decision-dependent):** U1/U2 links and legacy copy; new approval statuses; workflow functions and triggers; RLS and grant changes; audit hardening (A2, A3, A4, A5, A6, A7, A8, A9).
+
+---
+
 ## 3. Consistency check summary
 
 | Checked against | Result |
@@ -325,6 +349,24 @@ All three stay unchanged where they are. Bringing `schema.sql` and `001` onto th
 | **D-009 confirmation** | Owner decided (team leader). **Still open:** credential storage method (CLI token, database password, API keys), individual access assignments, final confirmation of the proposed project name and region. Must be recorded before any CLI connection. |
 | **B1b-1** | Is a restore test of the **production** backup still required (stage 2), and if so, where (local, access-controlled)? Staging uses synthetic data only (D-007). |
 | **B1b-2** | Who owns the migration log (A10-Q4)? |
+| **B2-1** | Confirm that the blocker allows preparing and testing migrations **locally** (done, §2b), while any remote application stays blocked. |
+| **R13** | Action type names: the brief says `restart_service` / `rollback_deployment` / `scale_service` / `circuit_breaker`; the database stores `restart` / `rollback` / `scale` / `circuit_breaker`. Recommendation: keep the stored values (no data change) and map labels in the app. |
+| **R14** | Confirm the design choices made inside migration 000200 (from the committed mapping): `RESTRICT` toward incidents, investigations and runs; `SET NULL` for actors and device tokens; `CASCADE` from notifications to deliveries. They are revisable until the migration is applied remotely. |
+
+### 7.1 Exact questions blocking P5 (database functions, triggers, RLS)
+
+Each P5 item stays unimplemented until its question is answered. Recommendations are in `DATABASE_TEAM_HANDOVER.md` §7.
+
+| P5 item | Question for the team leader |
+|---|---|
+| Revoke direct client writes on `approvals`, `playbook_runs`, `remediation_executions`, `audit_logs`; definer functions | A2-Q3 and A2-Q5: approve "functions for transitions + constraints/triggers for invariants"? |
+| `request_playbook_run`, `decide_approval`, cancel functions, approval link and statuses | A3-Q1 (who approves), U2 (link direction), A3-Q4 (expiry/timeout), A3-Q5 (legacy approval with no run) |
+| Protected-playbook rule | A4-Q1 and R8: allow-list or block-list? Is any action type ever approval-free? |
+| `start/complete_playbook_run`, `automation` role, machine endpoints | A5-Q1 to A5-Q5 |
+| `register_device_token`, `create_notification`, delivery writes | A6-Q1 to A6-Q3, R6 |
+| `log_audit_event`, append-only/TRUNCATE guards, `incident_events` access, actor FK | A7-Q1, A7-Q3, A7-Q6 to A7-Q9 |
+| `update_incident_status`, recovery rule | U11 (recovery rule), A3 |
+| Legacy remediation copy, soft delete, actor types | Q-X1, then U1, A8-Q5, A9 |
 
 ---
 
@@ -332,6 +374,7 @@ All three stay unchanged where they are. Bringing `schema.sql` and `001` onto th
 
 | Date | Change |
 |---|---|
+| 2026-11-07 | Implementation record §2b (P1 backend, baseline, additive migrations, local tests: 179 assertions passing). New open items B2-1, R13, R14 and the P5 question table §7.1. No remote database accessed. |
 | 2026-11-07 | D-009 ownership decision recorded: team leader as owner; organization `AI-DevOps-CommandCenter`; proposed name `devops-command-center-staging` and region `ap-southeast-1`; minimum access; synthetic data only. Credential storage and access assignments pending. No project created; no CLI link; no database accessed. |
 | 2026-11-07 | Batch 1b recorded (D-006 to D-009). Phase 3 step 1 performed: cherry-picked `41b6772`, `bb11fdb`, `55c9a1b` (from `fff81bf`, `56c6b82`, `030df62`). `HISTORICAL_CONTEXT_NOTE.md` added. Not pushed. No SQL executed, no Supabase access, no CLI installed. |
 | 2026-11-07 | Register created. Decision Batch 1 recorded (D-001 to D-005). A8–A10 definitions quoted. D-003 pre-copy inspection, staging requirements and historical SQL status recorded. No SQL executed; no live database or Supabase access; no application code or migrations changed. |
