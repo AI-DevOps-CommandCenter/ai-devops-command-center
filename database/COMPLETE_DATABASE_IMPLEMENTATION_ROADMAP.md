@@ -371,7 +371,10 @@ Mapping to the existing plan (`MIGRATION_EXECUTION_PLAN.md` stages 0–13) is sh
   3. Test-restore into rehearsal.
   4. Compare counts and checksums with the P1/P2 baselines.
   5. Verify the Supabase CLI execution identity, read-only, on staging (U13 identity part; the method is decided by D-004).
-- **Dependencies:** Phase 2 (D-005 decided; staging availability and cost, B1-2 staging data, B1-4 ownership open).
+- **Dependencies:** Phase 2:
+  - D-005 decided; D-007 synthetic data decided.
+  - D-009 owner decided: the team leader, organization `AI-DevOps-CommandCenter`, proposed `devops-command-center-staging` in `ap-southeast-1`.
+  - Still pending: D-009 credential storage and access assignments, and staging availability and cost.
 - **Files:** `database/MIGRATION_LOG.md` (new); a restore-verification record.
 - **Risks and precautions:**
   - Backups contain personal data: store them outside git and never print them.
@@ -576,7 +579,7 @@ Mapping to the existing plan (`MIGRATION_EXECUTION_PLAN.md` stages 0–13) is sh
 
 Next:
 1. **Phase 3, step 2:** install and pin the Supabase CLI and run `supabase init`, with no `supabase link` (D-004, D-009). Needs the team's go-ahead.
-2. **Decision Batch 2:** Q-X1; the D-009 ownership and credential confirmation; B1b-1 (production backup restore test); staging availability and cost (A10-Q1); the remaining A2 sub-questions.
+2. **Decision Batch 2:** Q-X1; the rest of D-009 (credential storage and individual access; the owner is already decided); B1b-1 (production backup restore test); staging availability and cost (A10-Q1); the remaining A2 sub-questions.
 
 Phase 6 (backend middleware, D-002) may start after Phase 3. No SQL is written until all of A2–A7 are approved.
 

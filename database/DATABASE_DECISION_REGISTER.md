@@ -46,7 +46,7 @@ This register records architecture and implementation decisions for the database
 | D-006 | Include the A2–A7 report in the D-003 copy (B1-1) | **APPROVED** Batch 1b. Performed (`55c9a1b`). | §2a |
 | D-007 | Synthetic test data only in staging (B1-2) | **APPROVED** Batch 1b | §2a |
 | D-008 | Historical SQL preserved unchanged as reference only (B1-3) | **APPROVED** Batch 1b | §2a |
-| D-009 | Confirm staging ownership and credential management before connecting the CLI (B1-4) | **APPROVED** Batch 1b. Confirmation **pending**. | §2a |
+| D-009 | Confirm staging ownership and credential management before connecting the CLI (B1-4) | **APPROVED** Batch 1b. **Ownership decided** 2026-11-07 (team leader; proposed project details). Credential storage and individual access **pending**. Project **not created**. | §2a |
 
 ### 1.1 Definitions of A8, A9 and A10 (quoted from `A2_A7_ARCHITECTURE_DECISION_REPORT.md`, commit `030df62`)
 
@@ -161,7 +161,26 @@ Approved by the project team in the working session on 2026-11-07. The named sig
   1. the staging project owner;
   2. who holds the CLI access token and the staging database password;
   3. where they are stored (A2-Q4).
-- **Status:** confirmation **pending**.
+- **Status:** item 1 decided (below). Items 2 and 3 are **pending**, so the gate is **still closed**: no CLI connection yet.
+
+#### D-009 ownership decision (2026-11-07)
+This is the team leader's approved ownership decision with **proposed** project details. **The staging project does not exist yet.** Nothing has been created, linked or connected.
+
+| Item | Decision | Status |
+|---|---|---|
+| Staging project owner | The current project team leader | **APPROVED** |
+| Supabase organization | `AI-DevOps-CommandCenter` | **APPROVED** (organization access not verified in this repository) |
+| Project name | `devops-command-center-staging` | **PROPOSED** |
+| Region | `ap-southeast-1` (Singapore) | **PROPOSED** |
+| Access | Only authorized team members, each with the minimum required access | **APPROVED** principle; individual assignments **PENDING** |
+| Data | Synthetic test data only (same as D-007) | **APPROVED** |
+| Production data | Never copy production user data or credentials into staging | **APPROVED** |
+| Credential storage (CLI access token, staging database password, staging API keys) | Not yet decided (A2-Q4) | **PENDING** |
+| Individual access assignments | Not yet decided | **PENDING** |
+
+Notes:
+- The production project's region is not recorded in this repository **[UNKNOWN]**. Whether staging should match it is not part of this decision.
+- The team leader is recorded by role only; no name was given.
 
 ---
 
@@ -186,11 +205,11 @@ Nothing below has been checked against the Supabase account. Items marked **[UNK
 ### 4.1 Access and account
 | Requirement | Status |
 |---|---|
-| A Supabase account with permission to **create projects** in the organization that owns production (or a separate organization) | **[UNKNOWN]**: who holds owner/admin rights |
+| A Supabase account with permission to **create projects** in the organization that owns production (or a separate organization) | Organization decided: `AI-DevOps-CommandCenter` (D-009). The team leader's create-project permission is not verified here **[UNKNOWN]**. |
 | Plan and billing that allow an additional project; cost approval | **[UNKNOWN]** (A10-Q1) |
-| A Supabase **personal access token** for the CLI (`supabase login`), held by the person running migrations and never committed | Not yet created; storage location: A2-Q4 |
-| The staging **database password**, stored in a secret store | Not yet created; A2-Q4 |
-| An owner who approves staging creation and controls access | **[UNKNOWN]** |
+| A Supabase **personal access token** for the CLI (`supabase login`), held by the person running migrations and never committed | Not yet created; storage method **PENDING** (D-009, A2-Q4) |
+| The staging **database password**, stored in a secret store | Not yet created; storage method **PENDING** (D-009, A2-Q4) |
+| An owner who approves staging creation and controls access | **Decided:** the current project team leader (D-009). Individual access assignments **PENDING**. |
 
 ### 4.2 Workstation and tooling
 | Requirement | Status |
@@ -204,7 +223,7 @@ Nothing below has been checked against the Supabase account. Items marked **[UNK
 | Item | Note |
 |---|---|
 | PostgreSQL major version | Must match production (17) [R]. |
-| Region | **[UNKNOWN]**: production region not recorded. |
+| Region | Staging: `ap-southeast-1` (Singapore), **proposed** (D-009). Production region not recorded **[UNKNOWN]**. |
 | Auth settings | Email/password provider, site URL and redirect URLs (password reset), and the GitHub provider if used (U10). Staging redirect URLs must point at staging app builds. |
 | Database-level objects **not in the `public` schema export** | The `ensure_rls` event trigger [R] and the `on_auth_user_created` trigger on `auth.users` [R] aren't in `public-schema.sql` [V]. The baseline and staging setup must include and verify them explicitly. |
 | Extensions | None are created in the `public` export [V]. Any in other schemas (e.g. for scheduling, A9-Q1) is **[UNKNOWN]**. |
@@ -303,7 +322,7 @@ All three stay unchanged where they are. Bringing `schema.sql` and `001` onto th
 | U13 (identity) | Verify the Supabase CLI execution identity, read-only, on staging and later production. |
 | R3, R4, R5, R9, R10, R11 | Mobile-only screens; notification channels; mobile data path; database test tool; `service_name` vs `service_id`; severity and root cause. |
 | ~~B1-1 to B1-4~~ | Decided as D-006 to D-009 (§2a). |
-| **D-009 confirmation** | Staging owner, holder of the CLI token and database password, and storage location. Must be recorded before any CLI connection. |
+| **D-009 confirmation** | Owner decided (team leader). **Still open:** credential storage method (CLI token, database password, API keys), individual access assignments, final confirmation of the proposed project name and region. Must be recorded before any CLI connection. |
 | **B1b-1** | Is a restore test of the **production** backup still required (stage 2), and if so, where (local, access-controlled)? Staging uses synthetic data only (D-007). |
 | **B1b-2** | Who owns the migration log (A10-Q4)? |
 
@@ -313,5 +332,6 @@ All three stay unchanged where they are. Bringing `schema.sql` and `001` onto th
 
 | Date | Change |
 |---|---|
+| 2026-11-07 | D-009 ownership decision recorded: team leader as owner; organization `AI-DevOps-CommandCenter`; proposed name `devops-command-center-staging` and region `ap-southeast-1`; minimum access; synthetic data only. Credential storage and access assignments pending. No project created; no CLI link; no database accessed. |
 | 2026-11-07 | Batch 1b recorded (D-006 to D-009). Phase 3 step 1 performed: cherry-picked `41b6772`, `bb11fdb`, `55c9a1b` (from `fff81bf`, `56c6b82`, `030df62`). `HISTORICAL_CONTEXT_NOTE.md` added. Not pushed. No SQL executed, no Supabase access, no CLI installed. |
 | 2026-11-07 | Register created. Decision Batch 1 recorded (D-001 to D-005). A8–A10 definitions quoted. D-003 pre-copy inspection, staging requirements and historical SQL status recorded. No SQL executed; no live database or Supabase access; no application code or migrations changed. |
