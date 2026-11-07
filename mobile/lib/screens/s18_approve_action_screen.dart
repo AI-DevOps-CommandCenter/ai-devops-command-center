@@ -13,8 +13,10 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
@@ -27,21 +29,21 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.card,
+                      color: colors.card,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: AppColors.text, size: 20),
+                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Text(
+                  Text(
                     'Approve Action',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.text,
+                      color: colors.text,
                     ),
                   ),
                 ],
@@ -52,7 +54,7 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-                child: _isCancelled ? _buildCancelledView() : _buildApprovalView(),
+                child: _isCancelled ? _buildCancelledView(colors) : _buildApprovalView(colors),
               ),
             ),
           ],
@@ -61,29 +63,30 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
     );
   }
 
-  Widget _buildApprovalView() {
+  Widget _buildApprovalView(AppColorScheme colors) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Approval Details Card
         _buildCard(
+          colors: colors,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Roll back payments-api',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
-                  color: AppColors.text,
+                  color: colors.text,
                 ),
               ),
               const SizedBox(height: 10),
-              _buildRow('Environment', 'Production'),
-              const Divider(height: 14, color: AppColors.cardBorder, thickness: 0.5),
-              _buildRow('From → To', 'v2.8.1 → v2.8.0'),
-              const Divider(height: 14, color: AppColors.cardBorder, thickness: 0.5),
-              _buildRow('Approver', 'Alex Morgan'),
+              _buildRow(colors, 'Environment', 'Production'),
+              Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
+              _buildRow(colors, 'From → To', 'v2.8.1 → v2.8.0'),
+              Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
+              _buildRow(colors, 'Approver', 'Alex Morgan'),
             ],
           ),
         ),
@@ -94,14 +97,14 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFFFDEFC8),
+            color: colors.badgeAmberBg,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: const Text(
+          child: Text(
             'Impact: brief request failures during switchover (about 30 s). Nothing runs until you confirm.',
             style: TextStyle(
               fontSize: 12,
-              color: Color(0xFF7A4B00),
+              color: colors.badgeAmberText,
               height: 1.4,
             ),
           ),
@@ -117,8 +120,8 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
               Navigator.pushNamed(context, '/execution-progress');
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.red,
-              foregroundColor: Colors.white,
+              backgroundColor: colors.red,
+              foregroundColor: colors.isDark ? const Color(0xFF0B1226) : Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -143,16 +146,16 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
               });
             },
             style: OutlinedButton.styleFrom(
-              backgroundColor: AppColors.cardAccent,
-              foregroundColor: AppColors.text,
-              side: const BorderSide(color: AppColors.border),
+              backgroundColor: colors.cardAccent,
+              foregroundColor: colors.text,
+              side: BorderSide(color: colors.border),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            child: const Text(
+            child: Text(
               'Cancel',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text),
             ),
           ),
         ),
@@ -161,26 +164,27 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
     );
   }
 
-  Widget _buildCancelledView() {
+  Widget _buildCancelledView(AppColorScheme colors) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildCard(
+          colors: colors,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
+            children: [
               Text(
                 'Approval cancelled',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
-                  color: AppColors.text,
+                  color: colors.text,
                 ),
               ),
-              SizedBox(height: 6),
+              const SizedBox(height: 6),
               Text(
                 'Nothing was executed. Incident remains open.',
-                style: TextStyle(fontSize: 13, color: AppColors.muted),
+                style: TextStyle(fontSize: 13, color: colors.muted),
               ),
             ],
           ),
@@ -195,16 +199,16 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
               Navigator.pop(context);
             },
             style: OutlinedButton.styleFrom(
-              backgroundColor: AppColors.cardAccent,
-              foregroundColor: AppColors.text,
-              side: const BorderSide(color: AppColors.border),
+              backgroundColor: colors.cardAccent,
+              foregroundColor: colors.text,
+              side: BorderSide(color: colors.border),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            child: const Text(
+            child: Text(
               'Back to recommendation',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text),
             ),
           ),
         ),
@@ -212,19 +216,19 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
     );
   }
 
-  Widget _buildCard({required Widget child}) {
+  Widget _buildCard({required AppColorScheme colors, required Widget child}) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: colors.card,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.cardBorder, width: 0.8),
-        boxShadow: const [
+        border: Border.all(color: colors.cardBorder, width: 0.8),
+        boxShadow: [
           BoxShadow(
-            color: Color.fromRGBO(15, 27, 51, 0.06),
+            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
             blurRadius: 4,
-            offset: Offset(0, 1),
+            offset: const Offset(0, 1),
           ),
         ],
       ),
@@ -232,23 +236,23 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
     );
   }
 
-  Widget _buildRow(String label, String value) {
+  Widget _buildRow(AppColorScheme colors, String label, String value) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 13,
-            color: AppColors.muted,
+            color: colors.muted,
           ),
         ),
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.bold,
-            color: AppColors.text,
+            color: colors.text,
           ),
         ),
       ],
