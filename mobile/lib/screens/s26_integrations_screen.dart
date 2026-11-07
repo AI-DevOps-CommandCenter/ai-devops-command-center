@@ -38,8 +38,10 @@ class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
@@ -52,21 +54,21 @@ class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.card,
+                      color: colors.card,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: AppColors.text, size: 20),
+                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Text(
+                  Text(
                     'Integrations',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.text,
+                      color: colors.text,
                     ),
                   ),
                 ],
@@ -87,14 +89,14 @@ class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
                   return Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: AppColors.card,
+                      color: colors.card,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.cardBorder, width: 0.8),
-                      boxShadow: const [
+                      border: Border.all(color: colors.cardBorder, width: 0.8),
+                      boxShadow: [
                         BoxShadow(
-                          color: Color.fromRGBO(15, 27, 51, 0.06),
+                          color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
                           blurRadius: 4,
-                          offset: Offset(0, 1),
+                          offset: const Offset(0, 1),
                         ),
                       ],
                     ),
@@ -106,16 +108,16 @@ class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
                           children: [
                             Text(
                               item['name'],
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
-                                color: AppColors.text,
+                                color: colors.text,
                               ),
                             ),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: isOk ? AppColors.badgeGreenBg : AppColors.badgeRedBg,
+                                color: isOk ? colors.badgeGreenBg : colors.badgeRedBg,
                                 borderRadius: BorderRadius.circular(99),
                               ),
                               child: Text(
@@ -123,7 +125,7 @@ class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
-                                  color: isOk ? AppColors.green : AppColors.red,
+                                  color: isOk ? colors.green : colors.red,
                                 ),
                               ),
                             ),
@@ -132,7 +134,7 @@ class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
                         const SizedBox(height: 4),
                         Text(
                           'Last sync ${item['lastSync']}',
-                          style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                          style: TextStyle(fontSize: 12, color: colors.muted),
                         ),
                         const SizedBox(height: 10),
                         SizedBox(
@@ -141,9 +143,9 @@ class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
                           child: OutlinedButton(
                             onPressed: isSyncing ? null : () => _reconnect(index),
                             style: OutlinedButton.styleFrom(
-                              backgroundColor: AppColors.cardAccent,
-                              foregroundColor: AppColors.text,
-                              side: const BorderSide(color: AppColors.border),
+                              backgroundColor: colors.cardAccent,
+                              foregroundColor: colors.text,
+                              side: BorderSide(color: colors.border),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(10),
                               ),
@@ -152,7 +154,7 @@ class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
                               isSyncing
                                   ? 'Connecting…'
                                   : (isOk ? 'Reconnect' : 'Retry sync'),
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.text),
                             ),
                           ),
                         ),
