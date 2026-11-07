@@ -71,8 +71,10 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
@@ -85,21 +87,21 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.card,
+                      color: colors.card,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: AppColors.text, size: 20),
+                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Text(
+                  Text(
                     'Assistant',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.text,
+                      color: colors.text,
                     ),
                   ),
                 ],
@@ -111,11 +113,11 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: Row(
                 children: [
-                  _buildPromptChip('Logs', 'logs'),
+                  _buildPromptChip(colors, 'Logs', 'logs'),
                   const SizedBox(width: 8),
-                  _buildPromptChip('Build error', 'build'),
+                  _buildPromptChip(colors, 'Build error', 'build'),
                   const SizedBox(width: 8),
-                  _buildPromptChip('Pull request', 'pr'),
+                  _buildPromptChip(colors, 'Pull request', 'pr'),
                 ],
               ),
             ),
@@ -139,17 +141,17 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
-                        color: isUser ? AppColors.badgeTealBg : AppColors.card,
+                        color: isUser ? colors.badgeTealBg : colors.card,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
-                          color: isUser ? AppColors.teal.withOpacity(0.3) : AppColors.cardBorder,
+                          color: isUser ? colors.teal.withOpacity(0.3) : colors.cardBorder,
                           width: 0.8,
                         ),
-                        boxShadow: const [
+                        boxShadow: [
                           BoxShadow(
-                            color: Color.fromRGBO(15, 27, 51, 0.04),
+                            color: colors.isDark ? Colors.black.withOpacity(0.25) : const Color.fromRGBO(15, 27, 51, 0.04),
                             blurRadius: 3,
-                            offset: Offset(0, 1),
+                            offset: const Offset(0, 1),
                           ),
                         ],
                       ),
@@ -160,7 +162,7 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
                             msg['text']!,
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppColors.text,
+                              color: colors.text,
                               height: 1.4,
                               fontWeight: isUser ? FontWeight.w600 : FontWeight.normal,
                             ),
@@ -169,9 +171,9 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
                             const SizedBox(height: 6),
                             Text(
                               msg['ref']!,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
-                                color: AppColors.muted,
+                                color: colors.muted,
                                 fontStyle: FontStyle.italic,
                               ),
                             ),
@@ -190,7 +192,7 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
     );
   }
 
-  Widget _buildPromptChip(String label, String contextKey) {
+  Widget _buildPromptChip(AppColorScheme colors, String label, String contextKey) {
     return InkWell(
       onTap: () => _askContext(contextKey),
       borderRadius: BorderRadius.circular(99),
@@ -199,16 +201,16 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
         padding: const EdgeInsets.symmetric(horizontal: 14),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: AppColors.card,
+          color: colors.card,
           borderRadius: BorderRadius.circular(99),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(color: colors.border),
         ),
         child: Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
-            color: AppColors.muted,
+            color: colors.muted,
           ),
         ),
       ),
