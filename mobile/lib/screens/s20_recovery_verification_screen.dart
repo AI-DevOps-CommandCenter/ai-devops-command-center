@@ -6,8 +6,10 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
@@ -20,31 +22,31 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.card,
+                      color: colors.card,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: AppColors.text, size: 20),
+                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
+                    children: [
                       Text(
                         'Verification',
                         style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
-                          color: AppColors.text,
+                          color: colors.text,
                         ),
                       ),
                       Text(
                         'INC-1042',
                         style: TextStyle(
                           fontSize: 12,
-                          color: AppColors.muted,
+                          color: colors.muted,
                         ),
                       ),
                     ],
@@ -65,19 +67,19 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: AppColors.card,
+                        color: colors.card,
                         borderRadius: BorderRadius.circular(14),
-                        border: const Border(
-                          left: BorderSide(color: AppColors.green, width: 4),
-                          top: BorderSide(color: AppColors.cardBorder, width: 0.8),
-                          right: BorderSide(color: AppColors.cardBorder, width: 0.8),
-                          bottom: BorderSide(color: AppColors.cardBorder, width: 0.8),
+                        border: Border(
+                          left: BorderSide(color: colors.green, width: 4),
+                          top: BorderSide(color: colors.cardBorder, width: 0.8),
+                          right: BorderSide(color: colors.cardBorder, width: 0.8),
+                          bottom: BorderSide(color: colors.cardBorder, width: 0.8),
                         ),
-                        boxShadow: const [
+                        boxShadow: [
                           BoxShadow(
-                            color: Color.fromRGBO(15, 27, 51, 0.06),
+                            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
                             blurRadius: 4,
-                            offset: Offset(0, 1),
+                            offset: const Offset(0, 1),
                           ),
                         ],
                       ),
@@ -87,35 +89,35 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text(
+                              Text(
                                 'Status',
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
-                                  color: AppColors.text,
+                                  color: colors.text,
                                 ),
                               ),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: AppColors.badgeGreenBg,
+                                  color: colors.badgeGreenBg,
                                   borderRadius: BorderRadius.circular(99),
                                 ),
-                                child: const Text(
+                                child: Text(
                                   'Recovered',
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
-                                    color: AppColors.green,
+                                    color: colors.green,
                                   ),
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 6),
-                          const Text(
+                          Text(
                             'Execution completed separately. Health is verified independently.',
-                            style: TextStyle(fontSize: 12, color: AppColors.muted),
+                            style: TextStyle(fontSize: 12, color: colors.muted),
                           ),
                         ],
                       ),
@@ -127,6 +129,7 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
                       children: [
                         Expanded(
                           child: _buildMetricCard(
+                            colors: colors,
                             label: 'Error rate',
                             transition: '12.4% →',
                             currentValue: '0.4%',
@@ -135,6 +138,7 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
                         const SizedBox(width: 10),
                         Expanded(
                           child: _buildMetricCard(
+                            colors: colors,
                             label: 'P95 latency',
                             transition: '2.4 s →',
                             currentValue: '190 ms',
@@ -146,14 +150,15 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
 
                     // Checks Card
                     _buildCard(
+                      colors: colors,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildCheckItem('Error rate below 1%'),
+                          _buildCheckItem(colors, 'Error rate below 1%'),
                           const SizedBox(height: 8),
-                          _buildCheckItem('P95 under 300 ms'),
+                          _buildCheckItem(colors, 'P95 under 300 ms'),
                           const SizedBox(height: 8),
-                          _buildCheckItem('No new timeouts for 5 min'),
+                          _buildCheckItem(colors, 'No new timeouts for 5 min'),
                         ],
                       ),
                     ),
@@ -168,8 +173,8 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
                           Navigator.pushNamed(context, '/postmortem');
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.teal,
-                          foregroundColor: Colors.white,
+                          backgroundColor: colors.teal,
+                          foregroundColor: colors.isDark ? const Color(0xFF0B1226) : Colors.white,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -193,6 +198,7 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
   }
 
   Widget _buildMetricCard({
+    required AppColorScheme colors,
     required String label,
     required String transition,
     required String currentValue,
@@ -200,30 +206,30 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: colors.card,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.cardBorder, width: 0.8),
-        boxShadow: const [
+        border: Border.all(color: colors.cardBorder, width: 0.8),
+        boxShadow: [
           BoxShadow(
-            color: Color.fromRGBO(15, 27, 51, 0.06),
+            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
             blurRadius: 4,
-            offset: Offset(0, 1),
+            offset: const Offset(0, 1),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          Text(label, style: TextStyle(fontSize: 12, color: colors.muted)),
           const SizedBox(height: 4),
-          Text(transition, style: const TextStyle(fontSize: 13, color: AppColors.text)),
+          Text(transition, style: TextStyle(fontSize: 13, color: colors.text)),
           const SizedBox(height: 2),
           Text(
             currentValue,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.w800,
-              color: AppColors.text,
+              color: colors.text,
             ),
           ),
         ],
@@ -231,34 +237,34 @@ class S20RecoveryVerificationScreen extends StatelessWidget {
     );
   }
 
-  static Widget _buildCheckItem(String text) {
+  Widget _buildCheckItem(AppColorScheme colors, String text) {
     return Row(
       children: [
-        const Icon(Icons.check, color: AppColors.green, size: 18),
+        Icon(Icons.check, color: colors.green, size: 18),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(fontSize: 13, color: AppColors.text),
+            style: TextStyle(fontSize: 13, color: colors.text),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildCard({required Widget child}) {
+  Widget _buildCard({required AppColorScheme colors, required Widget child}) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: colors.card,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.cardBorder, width: 0.8),
-        boxShadow: const [
+        border: Border.all(color: colors.cardBorder, width: 0.8),
+        boxShadow: [
           BoxShadow(
-            color: Color.fromRGBO(15, 27, 51, 0.06),
+            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
             blurRadius: 4,
-            offset: Offset(0, 1),
+            offset: const Offset(0, 1),
           ),
         ],
       ),
