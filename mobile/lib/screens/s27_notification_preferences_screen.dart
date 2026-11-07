@@ -39,8 +39,10 @@ class _S27NotificationPreferencesScreenState extends State<S27NotificationPrefer
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
@@ -53,21 +55,21 @@ class _S27NotificationPreferencesScreenState extends State<S27NotificationPrefer
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.card,
+                      color: colors.card,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: AppColors.text, size: 20),
+                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Text(
+                  Text(
                     'Preferences',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.text,
+                      color: colors.text,
                     ),
                   ),
                 ],
@@ -87,14 +89,14 @@ class _S27NotificationPreferencesScreenState extends State<S27NotificationPrefer
                         child: Container(
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: AppColors.card,
+                            color: colors.card,
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppColors.cardBorder, width: 0.8),
-                            boxShadow: const [
+                            border: Border.all(color: colors.cardBorder, width: 0.8),
+                            boxShadow: [
                               BoxShadow(
-                                color: Color.fromRGBO(15, 27, 51, 0.06),
+                                color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
                                 blurRadius: 4,
-                                offset: Offset(0, 1),
+                                offset: const Offset(0, 1),
                               ),
                             ],
                           ),
@@ -103,10 +105,10 @@ class _S27NotificationPreferencesScreenState extends State<S27NotificationPrefer
                             children: [
                               Text(
                                 channel,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
-                                  color: AppColors.text,
+                                  color: colors.text,
                                 ),
                               ),
                               const SizedBox(height: 6),
@@ -121,11 +123,11 @@ class _S27NotificationPreferencesScreenState extends State<S27NotificationPrefer
                                     children: [
                                       Text(
                                         event,
-                                        style: const TextStyle(fontSize: 13, color: AppColors.text),
+                                        style: TextStyle(fontSize: 13, color: colors.text),
                                       ),
                                       Switch.adaptive(
                                         value: isChecked,
-                                        activeColor: AppColors.teal,
+                                        activeColor: colors.teal,
                                         onChanged: (val) {
                                           setState(() {
                                             _preferences[key] = val;
@@ -150,16 +152,16 @@ class _S27NotificationPreferencesScreenState extends State<S27NotificationPrefer
                       child: ElevatedButton(
                         onPressed: () {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Preferences saved successfully!'),
-                              backgroundColor: AppColors.green,
-                              duration: Duration(seconds: 2),
+                            SnackBar(
+                              content: const Text('Preferences saved successfully!'),
+                              backgroundColor: colors.green,
+                              duration: const Duration(seconds: 2),
                             ),
                           );
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.teal,
-                          foregroundColor: Colors.white,
+                          backgroundColor: colors.teal,
+                          foregroundColor: colors.isDark ? const Color(0xFF0B1226) : Colors.white,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
