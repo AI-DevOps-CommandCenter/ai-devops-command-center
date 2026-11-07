@@ -394,6 +394,11 @@ Mapping to the existing plan (`MIGRATION_EXECUTION_PLAN.md` stages 0–13) is sh
 - **Completion criteria:** the baseline is reviewed and becomes the source of truth.
 
 ### Phase 6 – Backend groundwork (no database change; A1, A2)
+
+> **Status 2026-11-07 (P1 done, uncommitted, awaiting review):**
+> - **Done:** user-JWT middleware and the privileged-key startup guard (D-001/D-002); `requireRole()`; Helmet, restricted CORS and rate limiting; Zod environment validation and `validate()`; JSON error handlers; module type fixed and `build` script added; `.env` loading fixed (backend, then repository root); Vitest + Supertest (54 tests passing; `npm audit` 0 vulnerabilities).
+> - **Not yet done:** the password reset port, and machine endpoints (A5).
+> - **Moved to P5:** consolidating the controllers' inline checks onto `requireRole()`/Zod. Details in `backend/README.md`.
 - **Tasks:**
   1. Port the middleware **using the user-JWT client** (R7).
   2. Add zod validation, helmet, CORS restriction and rate limiting.

@@ -1,15 +1,14 @@
-
-import "dotenv/config";
+import "./load-env.js";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+import { loadSupabaseEnv } from "./env.js";
 
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error("Supabase environment variables are missing!");
-}
+// Validates the configuration at startup (Zod). Only a publishable key is
+// accepted; privileged keys are rejected (decision D-001).
+const { SUPABASE_URL: supabaseUrl, SUPABASE_PUBLISHABLE_KEY: supabaseKey } =
+  loadSupabaseEnv();
 
-// General Supabase client
+// General Supabase client (publishable key only). Used to verify user JWTs.
 export const supabase = createClient(
   supabaseUrl,
   supabaseKey
@@ -19,8 +18,8 @@ export const supabase = createClient(
 // Database requests made through this client are subject to that user's RLS policies.
 export function createUserSupabaseClient(accessToken: string) {
   return createClient(
-    supabaseUrl!,
-    supabaseKey!,
+    supabaseUrl,
+    supabaseKey,
     {
       global: {
         headers: {
