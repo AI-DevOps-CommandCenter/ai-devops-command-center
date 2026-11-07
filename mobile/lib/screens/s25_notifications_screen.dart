@@ -7,8 +7,10 @@ class S25NotificationsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
@@ -21,21 +23,21 @@ class S25NotificationsScreen extends StatelessWidget {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.card,
+                      color: colors.card,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: AppColors.text, size: 20),
+                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Text(
+                  Text(
                     'Notifications',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.text,
+                      color: colors.text,
                     ),
                   ),
                 ],
@@ -58,19 +60,19 @@ class S25NotificationsScreen extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: AppColors.card,
+                          color: colors.card,
                           borderRadius: BorderRadius.circular(14),
-                          border: const Border(
-                            left: BorderSide(color: AppColors.red, width: 4),
-                            top: BorderSide(color: AppColors.cardBorder, width: 0.8),
-                            right: BorderSide(color: AppColors.cardBorder, width: 0.8),
-                            bottom: BorderSide(color: AppColors.cardBorder, width: 0.8),
+                          border: Border(
+                            left: BorderSide(color: colors.red, width: 4),
+                            top: BorderSide(color: colors.cardBorder, width: 0.8),
+                            right: BorderSide(color: colors.cardBorder, width: 0.8),
+                            bottom: BorderSide(color: colors.cardBorder, width: 0.8),
                           ),
-                          boxShadow: const [
+                          boxShadow: [
                             BoxShadow(
-                              color: Color.fromRGBO(15, 27, 51, 0.06),
+                              color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
                               blurRadius: 4,
-                              offset: Offset(0, 1),
+                              offset: const Offset(0, 1),
                             ),
                           ],
                         ),
@@ -80,21 +82,21 @@ class S25NotificationsScreen extends StatelessWidget {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text(
+                                Text(
                                   'Incident detected',
                                   style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.bold,
-                                    color: AppColors.text,
+                                    color: colors.text,
                                   ),
                                 ),
-                                _buildBadge('New', AppColors.badgeRedBg, AppColors.red),
+                                _buildBadge('New', colors.badgeRedBg, colors.red),
                               ],
                             ),
                             const SizedBox(height: 6),
-                            const Text(
+                            Text(
                               'INC-1042 on payments-api · 14:12',
-                              style: TextStyle(fontSize: 13, color: AppColors.text),
+                              style: TextStyle(fontSize: 13, color: colors.text),
                             ),
                           ],
                         ),
@@ -111,19 +113,19 @@ class S25NotificationsScreen extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: AppColors.card,
+                          color: colors.card,
                           borderRadius: BorderRadius.circular(14),
-                          border: const Border(
-                            left: BorderSide(color: AppColors.amber, width: 4),
-                            top: BorderSide(color: AppColors.cardBorder, width: 0.8),
-                            right: BorderSide(color: AppColors.cardBorder, width: 0.8),
-                            bottom: BorderSide(color: AppColors.cardBorder, width: 0.8),
+                          border: Border(
+                            left: BorderSide(color: colors.amber, width: 4),
+                            top: BorderSide(color: colors.cardBorder, width: 0.8),
+                            right: BorderSide(color: colors.cardBorder, width: 0.8),
+                            bottom: BorderSide(color: colors.cardBorder, width: 0.8),
                           ),
-                          boxShadow: const [
+                          boxShadow: [
                             BoxShadow(
-                              color: Color.fromRGBO(15, 27, 51, 0.06),
+                              color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
                               blurRadius: 4,
-                              offset: Offset(0, 1),
+                              offset: const Offset(0, 1),
                             ),
                           ],
                         ),
@@ -133,21 +135,21 @@ class S25NotificationsScreen extends StatelessWidget {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text(
+                                Text(
                                   'Approval requested',
                                   style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.bold,
-                                    color: AppColors.text,
+                                    color: colors.text,
                                   ),
                                 ),
-                                _buildBadge('New', AppColors.badgeAmberBg, AppColors.amber),
+                                _buildBadge('New', colors.badgeAmberBg, colors.amber),
                               ],
                             ),
                             const SizedBox(height: 6),
-                            const Text(
+                            Text(
                               'Roll back to v2.8.0',
-                              style: TextStyle(fontSize: 13, color: AppColors.text),
+                              style: TextStyle(fontSize: 13, color: colors.text),
                             ),
                           ],
                         ),
@@ -162,21 +164,22 @@ class S25NotificationsScreen extends StatelessWidget {
                       },
                       borderRadius: BorderRadius.circular(14),
                       child: _buildCard(
+                        colors: colors,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
+                          children: [
                             Text(
                               'Action result',
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
-                                color: AppColors.text,
+                                color: colors.text,
                               ),
                             ),
-                            SizedBox(height: 4),
+                            const SizedBox(height: 4),
                             Text(
                               'Rollback completed · 14:27',
-                              style: TextStyle(fontSize: 12, color: AppColors.muted),
+                              style: TextStyle(fontSize: 12, color: colors.muted),
                             ),
                           ],
                         ),
@@ -191,21 +194,22 @@ class S25NotificationsScreen extends StatelessWidget {
                       },
                       borderRadius: BorderRadius.circular(14),
                       child: _buildCard(
+                        colors: colors,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
+                          children: [
                             Text(
                               'Incident resolved',
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
-                                color: AppColors.text,
+                                color: colors.text,
                               ),
                             ),
-                            SizedBox(height: 4),
+                            const SizedBox(height: 4),
                             Text(
                               'INC-1042 verified recovered',
-                              style: TextStyle(fontSize: 12, color: AppColors.muted),
+                              style: TextStyle(fontSize: 12, color: colors.muted),
                             ),
                           ],
                         ),
@@ -223,19 +227,19 @@ class S25NotificationsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildCard({required Widget child}) {
+  Widget _buildCard({required AppColorScheme colors, required Widget child}) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: colors.card,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.cardBorder, width: 0.8),
-        boxShadow: const [
+        border: Border.all(color: colors.cardBorder, width: 0.8),
+        boxShadow: [
           BoxShadow(
-            color: Color.fromRGBO(15, 27, 51, 0.06),
+            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
             blurRadius: 4,
-            offset: Offset(0, 1),
+            offset: const Offset(0, 1),
           ),
         ],
       ),
