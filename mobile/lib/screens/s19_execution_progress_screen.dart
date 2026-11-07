@@ -46,10 +46,11 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final isFinished = _currentStepIndex >= _steps.length;
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
@@ -62,31 +63,31 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.card,
+                      color: colors.card,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back, color: AppColors.text, size: 20),
+                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
+                    children: [
                       Text(
                         'Execution',
                         style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
-                          color: AppColors.text,
+                          color: colors.text,
                         ),
                       ),
                       Text(
                         'INC-1042',
                         style: TextStyle(
                           fontSize: 12,
-                          color: AppColors.muted,
+                          color: colors.muted,
                         ),
                       ),
                     ],
@@ -106,9 +107,16 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                       decoration: BoxDecoration(
-                        color: AppColors.card,
+                        color: colors.card,
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.cardBorder, width: 0.8),
+                        border: Border.all(color: colors.cardBorder, width: 0.8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -128,14 +136,14 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                                     height: 12,
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
-                                      color: isCompleted ? AppColors.teal : AppColors.border,
+                                      color: isCompleted ? colors.teal : colors.border,
                                     ),
                                   ),
                                   if (!isLast)
                                     Container(
                                       width: 2,
                                       height: 38,
-                                      color: isCompleted ? AppColors.teal : AppColors.border,
+                                      color: isCompleted ? colors.teal : colors.border,
                                     ),
                                 ],
                               ),
@@ -152,7 +160,7 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                                         style: TextStyle(
                                           fontSize: 13,
                                           fontWeight: FontWeight.bold,
-                                          color: isCompleted ? AppColors.text : AppColors.muted,
+                                          color: isCompleted ? colors.text : colors.muted,
                                         ),
                                       ),
                                       const SizedBox(width: 10),
@@ -161,7 +169,7 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                                           step['title']!,
                                           style: TextStyle(
                                             fontSize: 13,
-                                            color: isCompleted ? AppColors.text : AppColors.muted,
+                                            color: isCompleted ? colors.text : colors.muted,
                                             fontWeight: isCompleted ? FontWeight.w500 : FontWeight.normal,
                                           ),
                                         ),
@@ -183,25 +191,32 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                         width: double.infinity,
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: AppColors.card,
+                          color: colors.card,
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.cardBorder, width: 0.8),
+                          border: Border.all(color: colors.cardBorder, width: 0.8),
+                          boxShadow: [
+                            BoxShadow(
+                              color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
+                              blurRadius: 4,
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
+                          children: [
                             Text(
                               'Execution finished',
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
-                                color: AppColors.text,
+                                color: colors.text,
                               ),
                             ),
-                            SizedBox(height: 4),
+                            const SizedBox(height: 4),
                             Text(
                               'Health is not yet verified. Recovery is checked next.',
-                              style: TextStyle(fontSize: 12, color: AppColors.muted),
+                              style: TextStyle(fontSize: 12, color: colors.muted),
                             ),
                           ],
                         ),
@@ -216,8 +231,8 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                             Navigator.pushNamed(context, '/recovery-verification');
                           },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.teal,
-                            foregroundColor: Colors.white,
+                            backgroundColor: colors.teal,
+                            foregroundColor: colors.isDark ? const Color(0xFF0B1226) : Colors.white,
                             elevation: 0,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
