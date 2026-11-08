@@ -1,0 +1,340 @@
+{
+  "id": "dc33wf01alertint",
+  "name": "01 - Alert Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 01 – Alert Intake (owner: Vishwa)\nAlertmanager → validate → de-duplicate → respond 202 → create incident (**BLOCKED: BD-1**) → run 05 Root Cause for every new alert.\nAuth: Header Auth credential \"Alertmanager Webhook Token\" (Alertmanager sends `Authorization: Bearer <token>`).",
+        "width": 700,
+        "height": 220
+      },
+      "id": "c20c85b9-3326-493c-a70b-9fa777237c51",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alertmanager",
+        "responseMode": "responseNode",
+        "options": {},
+        "authentication": "headerAuth"
+      },
+      "id": "b4474794-e41d-469c-ad66-1981ddff9562",
+      "name": "Alertmanager webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b3fd4cdf-a00f-4db5-aaaf-e59cc710350f",
+      "notes": "POST /webhook/alertmanager (Alertmanager webhook_config, version 4 payload).",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dc33credalertmgr",
+          "name": "Alertmanager Webhook Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 01 – Alert Intake (owner: Vishwa)\n// Node: \"Parse and validate alerts\". Reads an Alertmanager webhook payload\n// (version 4 format: { status, alerts: [{ status, labels, annotations,\n// startsAt, fingerprint, ... }], ... }) and normalizes every FIRING alert.\n// Resolved alerts are acknowledged but do not create incidents.\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\nconst env = $env;\nconst body = $input.first().json.body;\nconst errors = [];\n\nif (!body || typeof body !== 'object' || Array.isArray(body)) errors.push('Body must be a JSON object.');\nelse if (!Array.isArray(body.alerts) || body.alerts.length === 0) errors.push('alerts[] is required and must not be empty.');\nelse if (body.alerts.length > 50) errors.push('Too many alerts in one notification (max 50).');\n\nif (errors.length) {\n  return [{ json: { valid: false, http_status: 400, response: { accepted: false, errors } } }];\n}\n\n// Which alert label names the service: configurable, then common fallbacks.\nconst serviceLabels = [env.ALERT_SERVICE_LABEL || 'service', 'service_name', 'job', 'app'];\n// Alertmanager severities -> incidents.severity (critical|high|medium|low|info).\nconst SEVERITY = { critical: 'critical', page: 'critical', high: 'high', error: 'high', warning: 'medium', warn: 'medium', medium: 'medium', low: 'low', info: 'info', none: 'info' };\n\nconst alerts = [];\nconst rejected = [];\nlet resolved = 0;\nbody.alerts.forEach((a, i) => {\n  const labels = (a && a.labels) || {};\n  const ann = (a && a.annotations) || {};\n  const problems = [];\n  if (!labels.alertname) problems.push('labels.alertname missing');\n  const service = serviceLabels.map((l) => labels[l]).find((v) => typeof v === 'string' && v);\n  if (!service) problems.push('no service label (' + serviceLabels.join('/') + ')');\n  else if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(service)) problems.push('service label has invalid characters');\n  const startsAt = a && a.startsAt ? new Date(a.startsAt) : null;\n  if (!startsAt || isNaN(startsAt.getTime())) problems.push('startsAt is not a valid timestamp');\n  if (problems.length) { rejected.push({ index: i, problems }); return; }\n  if (a.status === 'resolved') { resolved++; return; }\n\n  const rawSeverity = String(labels.severity || '').toLowerCase();\n  alerts.push({\n    fingerprint: typeof a.fingerprint === 'string' && /^[A-Za-z0-9]{1,64}$/.test(a.fingerprint) ? a.fingerprint : null,\n    alert_name: truncate(labels.alertname, 100),\n    service_name: service,\n    severity: SEVERITY[rawSeverity] || 'medium',\n    alert_severity: rawSeverity || null,\n    started_at: startsAt.toISOString(),\n    summary: truncate(redact(ann.summary || ann.description || labels.alertname), 300),\n    description: truncate(redact(ann.description || ''), 1000),\n    labels: Object.fromEntries(Object.entries(labels).slice(0, 30).map(([k, v]) => [truncate(k, 60), truncate(redact(v), 200)])),\n    generator_url: typeof a.generatorURL === 'string' ? truncate(a.generatorURL, 500) : null,\n  });\n});\n\nif (!alerts.length && !resolved) {\n  return [{ json: { valid: false, http_status: 400, response: { accepted: false, errors: ['No valid alerts.'], rejected } } }];\n}\nreturn [{ json: { valid: true, alerts, rejected, resolved, receiver: body.receiver || null, group_key: truncate(body.groupKey || '', 300) } }];\n"
+      },
+      "id": "08b7ae25-f3dc-455f-a44b-03bbd1f15e2e",
+      "name": "Parse and validate alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "notes": "Firing alerts only; resolved alerts are acknowledged."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d2206098-5ad0-473c-ad9f-650b51e6b328",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "bccd484b-6def-4e13-a7b3-b5902ba0367d",
+      "name": "Valid payload?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "78c84011-d14f-49f3-a01e-5cb334260b83",
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        180
+      ],
+      "notes": "Invalid payload."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 01 – Node: \"Detect duplicate alerts\".\n// Alertmanager re-sends the same firing alert every repeat_interval. An alert\n// occurrence is identified by fingerprint + startsAt; it is processed once per\n// DEDUP_WINDOW_MINUTES (default 360). The store is the workflow's static data,\n// which n8n saves only for production (active) executions, not manual tests.\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\nconst env = $env;\nconst data = $input.first().json;\nconst store = $getWorkflowStaticData('global');\nstore.seenAlerts = store.seenAlerts || {};\nconst seen = store.seenAlerts;\nconst now = Date.now();\nconst windowMs = envInt(env, 'DEDUP_WINDOW_MINUTES', 360, 1, 10080) * 60000;\n\nfor (const [k, at] of Object.entries(seen)) if (now - at > windowMs) delete seen[k];\n\nconst fresh = [];\nconst duplicates = [];\nfor (const a of data.alerts) {\n  const key = (a.fingerprint || (a.alert_name + '|' + a.service_name)) + '|' + a.started_at;\n  if (seen[key]) { duplicates.push({ alert_name: a.alert_name, service_name: a.service_name, key }); continue; }\n  seen[key] = now;\n  fresh.push({ ...a, dedup_key: key });\n}\n\nreturn [{\n  json: {\n    ...data,\n    alerts: fresh,\n    duplicates,\n    response: {\n      accepted: true,\n      new_alerts: fresh.length,\n      duplicate_alerts: duplicates.length,\n      resolved_alerts: data.resolved,\n      rejected_alerts: data.rejected.length,\n      rejected: data.rejected,\n    },\n  },\n}];\n"
+      },
+      "id": "a5a7c5c7-ccc4-440b-a9f4-cb0631ead3da",
+      "name": "Detect duplicate alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        -180
+      ],
+      "notes": "fingerprint + startsAt, kept DEDUP_WINDOW_MINUTES (static data; production executions only)."
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "960c33aa-8c53-4c44-aebd-f9b7d245f408",
+              "name": "http_status",
+              "value": "={{ 202 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "7cb31d94-6c45-431a-a01d-78db591541bc",
+      "name": "Accepted response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1040,
+        -180
+      ],
+      "notes": "Adds the HTTP status for the response."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "e8e22393-6355-4d0c-a74b-7fe03664f164",
+      "name": "Respond 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1300,
+        -180
+      ],
+      "notes": "Answers Alertmanager before the long investigation starts."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 01 – Node: \"Create incident (backend) – BLOCKED\".\n// One item per new alert.\n//\n// BLOCKED: the backend has no machine endpoint that creates an incident from an\n// alert. The approved contract (database/API_AND_INTEGRATION_CONTRACTS.md, B.3)\n// lists only start/complete, investigations/:id/analysis, recovery-checks and\n// incident-events, and none of them creates incidents. Until the backend adds\n// one, this node does NOT invent a URL: it passes the alert on with\n// incident_id = null and records why, so the investigation can still run and\n// be tested. When the endpoint exists, replace this node with\n// \"Sign request\" + \"HTTP Request\" (see workflow 07 for the pattern).\n\nreturn $input.first().json.alerts.map((a) => ({\n  json: {\n    incident_id: null,\n    investigation_id: null,\n    incident_created: false,\n    incident_blocker: 'Backend endpoint for creating an incident from an alert does not exist yet (backend dependency BD-1).',\n    alert_name: a.alert_name,\n    service_name: a.service_name,\n    severity: a.severity,\n    started_at: a.started_at,\n    summary: a.summary,\n    dedup_key: a.dedup_key,\n  },\n}));\n"
+      },
+      "id": "55bcf8b5-4865-46bf-ac3c-80771a471f6d",
+      "name": "Create incident (backend) – BLOCKED",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        -180
+      ],
+      "notes": "BLOCKED (BD-1): no backend endpoint creates incidents from alerts. No URL is invented."
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "dc33wf05rootcaus",
+          "mode": "list",
+          "cachedResultName": "05 - Root Cause Analysis"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "d05a3a4b-6517-4170-a6ce-d6c922e0c53d",
+      "name": "Run 05 Root Cause",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1820,
+        -180
+      ],
+      "notes": "One sub-workflow run per new alert.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 01 – Node: \"Intake result\". Summarizes what happened to each alert\n// (visible in the n8n execution log).\nconst alerts = $('Create incident (backend) – BLOCKED').all().map((i) => i.json);\nreturn $input.all().map((item, idx) => {\n  const rca = item.json || {};\n  const a = alerts[idx] || {};\n  return {\n    json: {\n      alert_name: a.alert_name,\n      service_name: a.service_name,\n      incident_id: a.incident_id,\n      incident_created: a.incident_created,\n      rca_status: rca.status || (rca.error ? 'workflow_error' : 'unknown'),\n      rca_stored: rca.stored === true,\n      error: rca.error || null,\n    },\n  };\n});\n"
+      },
+      "id": "56609745-fdcf-4604-a153-48915a3ca2da",
+      "name": "Intake result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        -180
+      ]
+    }
+  ],
+  "connections": {
+    "Alertmanager webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse and validate alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and validate alerts": {
+      "main": [
+        [
+          {
+            "node": "Valid payload?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid payload?": {
+      "main": [
+        [
+          {
+            "node": "Detect duplicate alerts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect duplicate alerts": {
+      "main": [
+        [
+          {
+            "node": "Accepted response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accepted response": {
+      "main": [
+        [
+          {
+            "node": "Respond 202",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 202": {
+      "main": [
+        [
+          {
+            "node": "Create incident (backend) – BLOCKED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create incident (backend) – BLOCKED": {
+      "main": [
+        [
+          {
+            "node": "Run 05 Root Cause",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run 05 Root Cause": {
+      "main": [
+        [
+          {
+            "node": "Intake result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "dc33wf09errorhnd"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

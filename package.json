@@ -1,0 +1,11 @@
+{
+  "name": "ai-devops-command-center",
+  "private": true,
+  "description": "Repository-level tooling (Supabase CLI for version-controlled database migrations, decision D-004).",
+  "scripts": {
+    "supabase": "supabase"
+  },
+  "devDependencies": {
+    "supabase": "2.122.0"
+  }
+}

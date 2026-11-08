@@ -1,0 +1,669 @@
+{
+  "id": "dc33wf05rootcaus",
+  "name": "05 - Root Cause Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 05 – Root Cause Analysis (owner: Vishwa)\nRuns 02, 03, 04 → combines evidence → Groq (only if some source found evidence) → validates against `rca-output.schema.json` → stores via `POST /api/machine/investigations/:id/analysis` (**contract path, backend route not implemented: BD-2**).\nThe AI result is data only. Nothing here starts a remediation.",
+        "width": 800,
+        "height": 240
+      },
+      "id": "b211b9f6-947c-4ac2-a584-5845e4bb61fb",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -540
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "9975f896-b6aa-4d66-a932-f82a7f4bf854",
+      "name": "When called by 01 Alert Intake",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Input: { incident_id|null, investigation_id|null, service_name, alert_name, severity, started_at, summary }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 05 – Root Cause Analysis (owner: Vishwa)\n// Node: \"Validate RCA input\". Input (from workflow 01 or a test):\n// { incident_id|null, investigation_id|null, service_name, alert_name, severity, started_at, summary }\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\nconst j = $input.first().json;\nconst input = readInvestigationInput(j);\nif (j.investigation_id != null && !isUuid(j.investigation_id)) {\n  input.ok = false;\n  input.error = (input.error ? input.error + ' ' : '') + 'investigation_id must be a UUID or null.';\n}\nreturn [{\n  json: {\n    valid: input.ok,\n    error: input.error,\n    ...input.ctx,\n    investigation_id: j.investigation_id || null,\n    alert_summary: truncate(redact(j.summary || ''), 300),\n  },\n}];\n"
+      },
+      "id": "97e6438b-bdea-4177-ac21-2b73bd25ed9e",
+      "name": "Validate RCA input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bc2abebb-b206-4567-a177-96086fa60bed",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "4740e6c7-fbcb-475b-af7a-7bf2e27890a0",
+      "name": "Input valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 05 – Node: \"RCA result (invalid input)\".\nconst d = $input.first().json;\nreturn [{ json: { incident_id: d.incident_id || null, valid: false, status: 'invalid_input', rca: null, stored: false, analysis_id: null, error: { kind: 'invalid_input', message: d.error } } }];\n"
+      },
+      "id": "84a32d81-78f0-4b9d-a0c0-5075f71561c8",
+      "name": "RCA result (invalid input)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "dc33wf02loganaly",
+          "mode": "list",
+          "cachedResultName": "02 - Log Analysis"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "5e14fa1c-00f0-4a61-a4cb-22cc41c29b5a",
+      "name": "Run 02 Log Analysis",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        780,
+        -180
+      ],
+      "notes": "A failure continues as { error } (partial evidence).",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "dc33wf03metricsa",
+          "mode": "list",
+          "cachedResultName": "03 - Metrics Analysis"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "84d2ee79-5eea-4cf1-a3d4-d4b2cdb233a5",
+      "name": "Run 03 Metrics Analysis",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        780,
+        0
+      ],
+      "notes": "A failure continues as { error } (partial evidence).",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "dc33wf04deploycr",
+          "mode": "list",
+          "cachedResultName": "04 - Deployment Correlation"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "848ac3ec-a1f3-418c-ae15-9e97e4574572",
+      "name": "Run 04 Deployment Correlation",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        780,
+        180
+      ],
+      "notes": "A failure continues as { error } (partial evidence).",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "81716f13-7a43-47c7-ac33-bf338be247e2",
+      "name": "Collect results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1040,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 05 – Node: \"Combine evidence\". Collects the results of workflows\n// 02/03/04 (one item each; a failed sub-workflow arrives as { error }).\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\nconst ctx = $('Validate RCA input').first().json;\nconst expected = ['logs', 'metrics', 'deployments'];\nconst results = {};\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  if (r.source && expected.includes(r.source)) results[r.source] = r;\n}\n// A sub-workflow that crashed returns { error } without a source: mark the\n// missing sources as workflow failures (not as \"no evidence\").\nconst sources = expected.map((s) => results[s] || {\n  source: s,\n  status: 'workflow_failed',\n  ok: false,\n  summary: 'The ' + s + ' workflow failed or returned nothing.',\n  findings: [], evidence: [], confidence: 0,\n  error: { kind: 'workflow_failed', message: 'Sub-workflow error (see the n8n execution log).' },\n});\n\nconst withEvidence = sources.filter((s) => s.status === 'evidence_found');\nconst okSources = sources.filter((s) => s.ok);\nlet decision;\nif (withEvidence.length) decision = 'analyze';\nelse if (okSources.length) decision = 'no_evidence';\nelse decision = 'sources_unavailable';\n\nreturn [{\n  json: {\n    ctx,\n    decision,\n    sources,\n    source_status: sources.map((s) => ({ source: s.source, status: s.status, error: s.error ? s.error.kind : null })),\n    partial: okSources.length < expected.length,\n  },\n}];\n"
+      },
+      "id": "f395e9ef-bd56-4936-a8e9-4e19f753180e",
+      "name": "Combine evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        0
+      ],
+      "notes": "decision: analyze | no_evidence | sources_unavailable"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "28c9bc93-c839-43d8-a1b7-ed057e9d88da",
+              "leftValue": "={{ $json.decision }}",
+              "rightValue": "analyze",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "0c1c4d91-aa3d-4418-ae4b-29eff026dff7",
+      "name": "Evidence found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 05 – Node: \"RCA result (no AI call)\". Used when no source found\n// evidence (\"no_evidence\") or every source failed (\"sources_unavailable\").\n// The AI is not called, so it cannot invent a cause from nothing.\nconst d = $input.first().json;\nconst ctx = d.ctx;\nreturn [{\n  json: {\n    incident_id: ctx.incident_id,\n    investigation_id: ctx.investigation_id,\n    service_name: ctx.service_name,\n    valid: false,\n    status: d.decision,\n    sources: d.source_status,\n    partial_evidence: d.partial,\n    rca: null,\n    requires_human_review: true,\n    stored: false,\n    analysis_id: null,\n    error: d.decision === 'sources_unavailable' ? { kind: 'sources_unavailable', message: 'All evidence sources failed; no investigation result.' } : null,\n  },\n}];\n"
+      },
+      "id": "6010015d-2071-4324-abd2-360156e4d31d",
+      "name": "RCA result (no AI call)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        180
+      ],
+      "notes": "No evidence or all sources failed: the AI is not asked to guess."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 05 – Node: \"Build RCA prompt\". Keeps the prompt small and\n// structured; every source keeps its status so the model can see what is missing.\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\n// ---- shared: AI (Groq) helpers ----\n// Allowed values come from the database CHECK constraints\n// (ai_analyses_action_allowed, ai_analyses_severity_allowed, playbooks_action_type_allowed).\nconst AI_ACTIONS = ['restart', 'rollback', 'scale', 'circuit_breaker'];\nconst AI_SEVERITIES = ['low', 'medium', 'high', 'critical'];\n\nfunction groqBaseUrl(env) {\n  return String(env.GROQ_API_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\\/+$/, '');\n}\n\nfunction groqModel(env) {\n  const m = env.GROQ_MODEL;\n  if (!m || !/^[A-Za-z0-9._:/-]{1,100}$/.test(m)) throw new Error('GROQ_MODEL is not configured.');\n  return m;\n}\n\nfunction groqRequest(env, system, user, maxTokens) {\n  return {\n    model: groqModel(env),\n    temperature: 0.1,\n    max_tokens: maxTokens || 1200,\n    response_format: { type: 'json_object' },\n    messages: [\n      { role: 'system', content: system },\n      { role: 'user', content: user },\n    ],\n  };\n}\n\n// Extract the JSON object the model returned. Returns { ok, value, error }.\nfunction parseModelJson(httpItem) {\n  const body = httpItem && httpItem.body;\n  const content = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;\n  if (typeof content !== 'string' || !content.trim()) return { ok: false, error: 'Model response has no content.' };\n  let text = content.trim();\n  const fence = text.match(/^```(?:json)?\\s*([\\s\\S]*?)\\s*```$/);\n  if (fence) text = fence[1];\n  try {\n    const value = JSON.parse(text);\n    if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, error: 'Model response is not a JSON object.' };\n    return { ok: true, value, model: body.model || null, usage: body.usage || null };\n  } catch (e) {\n    return { ok: false, error: 'Model response is not valid JSON.' };\n  }\n}\n\nfunction asStringArray(v, maxItems, maxLen) {\n  if (!Array.isArray(v)) return null;\n  return v.filter((x) => typeof x === 'string' && x.trim()).slice(0, maxItems).map((x) => x.trim().slice(0, maxLen));\n}\n\n// Validate an RCA object (automation/schemas/rca-output.schema.json).\n// Never trusts the model: unknown actions are rejected, text is length-limited,\n// and the result is always marked for human review.\nfunction validateRca(o) {\n  const errors = [];\n  const out = {};\n  if (typeof o.summary !== 'string' || !o.summary.trim()) errors.push('summary is required');\n  else out.summary = o.summary.trim().slice(0, 2000);\n  if (typeof o.root_cause !== 'string' || !o.root_cause.trim()) errors.push('root_cause is required');\n  else out.root_cause = o.root_cause.trim().slice(0, 2000);\n  if (!AI_SEVERITIES.includes(o.severity)) errors.push('severity must be one of ' + AI_SEVERITIES.join(', '));\n  else out.severity = o.severity;\n  if (typeof o.confidence !== 'number' || !(o.confidence >= 0 && o.confidence <= 1)) errors.push('confidence must be a number 0..1');\n  else out.confidence = Math.round(o.confidence * 100) / 100;\n  for (const key of ['evidence', 'confirmed_findings', 'possible_causes']) {\n    const arr = asStringArray(o[key], 20, 500);\n    if (arr === null) errors.push(key + ' must be an array of strings');\n    else out[key] = arr;\n  }\n  if (o.recommended_action === null || o.recommended_action === undefined || o.recommended_action === 'none') {\n    out.recommended_action = null;\n  } else if (AI_ACTIONS.includes(o.recommended_action)) {\n    out.recommended_action = o.recommended_action;\n  } else {\n    errors.push('recommended_action must be one of ' + AI_ACTIONS.join(', ') + ' or null');\n  }\n  const recs = asStringArray(o.recommendations || [], 10, 500);\n  out.recommendations = recs || [];\n  out.requires_human_review = true;\n  return { ok: errors.length === 0, value: errors.length ? null : out, errors };\n}\n\n// Validate a postmortem object (automation/schemas/postmortem-output.schema.json).\nfunction validatePostmortem(o) {\n  const errors = [];\n  const out = {};\n  for (const key of ['title', 'summary', 'root_cause', 'impact', 'remediation', 'recovery_result']) {\n    if (typeof o[key] !== 'string' || !o[key].trim()) errors.push(key + ' is required');\n    else out[key] = o[key].trim().slice(0, 4000);\n  }\n  for (const key of ['evidence', 'lessons_learned', 'preventive_actions']) {\n    const arr = asStringArray(o[key], 20, 500);\n    if (arr === null) errors.push(key + ' must be an array of strings');\n    else out[key] = arr;\n  }\n  if (!Array.isArray(o.timeline)) errors.push('timeline must be an array');\n  else {\n    out.timeline = o.timeline\n      .filter((t) => t && typeof t.time === 'string' && typeof t.event === 'string')\n      .slice(0, 50)\n      .map((t) => ({ time: t.time.slice(0, 40), event: t.event.slice(0, 500) }));\n  }\n  return { ok: errors.length === 0, value: errors.length ? null : out, errors };\n}\n// ---- end shared: AI ----\nconst RCA_SYSTEM_PROMPT = \"You are the root cause analysis assistant of a DevOps incident command center.\\nYou receive one alert and the results of up to three investigations: logs (Loki), metrics (Prometheus) and recent changes (GitHub commits and workflow runs).\\n\\nRules:\\n1. Use ONLY the data provided. Never invent log lines, metric values, commits or timestamps.\\n2. Put facts that the data directly shows in \\\"confirmed_findings\\\". Put explanations that are likely but not proven in \\\"possible_causes\\\".\\n3. \\\"root_cause\\\" is your single most probable explanation. If the data is not enough, say so in \\\"root_cause\\\" and use a low \\\"confidence\\\".\\n4. Every item in \\\"evidence\\\" must quote or point to a specific item from the input (metric value, log message, commit or run).\\n5. \\\"confidence\\\" is a number from 0 to 1. Lower it when sources are missing, unavailable or contradict each other.\\n6. \\\"recommended_action\\\" must be exactly one of: \\\"restart\\\", \\\"rollback\\\", \\\"scale\\\", \\\"circuit_breaker\\\", or null when no action is justified.\\n7. You only recommend. You never write commands, scripts or code. A human must approve any action.\\n\\nReply with ONLY one JSON object, no extra text, in this exact shape:\\n{\\\"summary\\\": \\\"\\\", \\\"root_cause\\\": \\\"\\\", \\\"severity\\\": \\\"low|medium|high|critical\\\", \\\"confidence\\\": 0.0, \\\"confirmed_findings\\\": [], \\\"possible_causes\\\": [], \\\"evidence\\\": [], \\\"recommended_action\\\": \\\"restart|rollback|scale|circuit_breaker|null\\\", \\\"recommendations\\\": []}\";\nconst env = $env;\nconst d = $input.first().json;\nconst ctx = d.ctx;\nconst payload = {\n  alert: { name: ctx.alert_name, service: ctx.service_name, severity: ctx.severity, started_at: ctx.started_at, summary: ctx.alert_summary },\n  sources: d.sources.map((s) => ({\n    source: s.source,\n    status: s.status,\n    summary: truncate(s.summary, 300),\n    findings: (s.findings || []).slice(0, 8).map((f) => truncate(f, 300)),\n    evidence: (s.evidence || []).slice(0, 8),\n    confidence: s.confidence,\n  })),\n};\nlet user = 'Investigation data (JSON):\\n' + JSON.stringify(payload);\nif (user.length > 12000) user = user.slice(0, 12000) + '\\n[truncated]';\n\nconst request = groqRequest(env, RCA_SYSTEM_PROMPT, user, 1200);\nreturn [{\n  json: {\n    ...d,\n    url: groqBaseUrl(env) + '/chat/completions',\n    timeout_ms: envInt(env, 'GROQ_TIMEOUT_MS', 30000, 1000, 120000),\n    model: request.model,\n    groq_request: request,\n  },\n}];\n"
+      },
+      "id": "e252beaf-1f5d-4c5e-a8b0-7c65957a983f",
+      "name": "Build RCA prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        -180
+      ],
+      "notes": "System prompt: automation/prompts/rca-system-prompt.txt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.groq_request) }}",
+        "options": {
+          "timeout": "={{ $json.timeout_ms || 15000 }}",
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "f04974bd-d7ef-49eb-a54d-3552dd09177d",
+      "name": "Groq: RCA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        -180
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Groq chat completions (OpenAI-compatible). Auth: n8n credential \"Groq API\" (Header Auth: Authorization = Bearer <key>).",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dc33credgroqapi1",
+          "name": "Groq API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 05 – Node: \"Validate RCA\". Checks the Groq answer against\n// automation/schemas/rca-output.schema.json. AI text is stored as data only;\n// it is never turned into a command, and nothing here starts a remediation.\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\n// ---- shared: AI (Groq) helpers ----\n// Allowed values come from the database CHECK constraints\n// (ai_analyses_action_allowed, ai_analyses_severity_allowed, playbooks_action_type_allowed).\nconst AI_ACTIONS = ['restart', 'rollback', 'scale', 'circuit_breaker'];\nconst AI_SEVERITIES = ['low', 'medium', 'high', 'critical'];\n\nfunction groqBaseUrl(env) {\n  return String(env.GROQ_API_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\\/+$/, '');\n}\n\nfunction groqModel(env) {\n  const m = env.GROQ_MODEL;\n  if (!m || !/^[A-Za-z0-9._:/-]{1,100}$/.test(m)) throw new Error('GROQ_MODEL is not configured.');\n  return m;\n}\n\nfunction groqRequest(env, system, user, maxTokens) {\n  return {\n    model: groqModel(env),\n    temperature: 0.1,\n    max_tokens: maxTokens || 1200,\n    response_format: { type: 'json_object' },\n    messages: [\n      { role: 'system', content: system },\n      { role: 'user', content: user },\n    ],\n  };\n}\n\n// Extract the JSON object the model returned. Returns { ok, value, error }.\nfunction parseModelJson(httpItem) {\n  const body = httpItem && httpItem.body;\n  const content = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;\n  if (typeof content !== 'string' || !content.trim()) return { ok: false, error: 'Model response has no content.' };\n  let text = content.trim();\n  const fence = text.match(/^```(?:json)?\\s*([\\s\\S]*?)\\s*```$/);\n  if (fence) text = fence[1];\n  try {\n    const value = JSON.parse(text);\n    if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, error: 'Model response is not a JSON object.' };\n    return { ok: true, value, model: body.model || null, usage: body.usage || null };\n  } catch (e) {\n    return { ok: false, error: 'Model response is not valid JSON.' };\n  }\n}\n\nfunction asStringArray(v, maxItems, maxLen) {\n  if (!Array.isArray(v)) return null;\n  return v.filter((x) => typeof x === 'string' && x.trim()).slice(0, maxItems).map((x) => x.trim().slice(0, maxLen));\n}\n\n// Validate an RCA object (automation/schemas/rca-output.schema.json).\n// Never trusts the model: unknown actions are rejected, text is length-limited,\n// and the result is always marked for human review.\nfunction validateRca(o) {\n  const errors = [];\n  const out = {};\n  if (typeof o.summary !== 'string' || !o.summary.trim()) errors.push('summary is required');\n  else out.summary = o.summary.trim().slice(0, 2000);\n  if (typeof o.root_cause !== 'string' || !o.root_cause.trim()) errors.push('root_cause is required');\n  else out.root_cause = o.root_cause.trim().slice(0, 2000);\n  if (!AI_SEVERITIES.includes(o.severity)) errors.push('severity must be one of ' + AI_SEVERITIES.join(', '));\n  else out.severity = o.severity;\n  if (typeof o.confidence !== 'number' || !(o.confidence >= 0 && o.confidence <= 1)) errors.push('confidence must be a number 0..1');\n  else out.confidence = Math.round(o.confidence * 100) / 100;\n  for (const key of ['evidence', 'confirmed_findings', 'possible_causes']) {\n    const arr = asStringArray(o[key], 20, 500);\n    if (arr === null) errors.push(key + ' must be an array of strings');\n    else out[key] = arr;\n  }\n  if (o.recommended_action === null || o.recommended_action === undefined || o.recommended_action === 'none') {\n    out.recommended_action = null;\n  } else if (AI_ACTIONS.includes(o.recommended_action)) {\n    out.recommended_action = o.recommended_action;\n  } else {\n    errors.push('recommended_action must be one of ' + AI_ACTIONS.join(', ') + ' or null');\n  }\n  const recs = asStringArray(o.recommendations || [], 10, 500);\n  out.recommendations = recs || [];\n  out.requires_human_review = true;\n  return { ok: errors.length === 0, value: errors.length ? null : out, errors };\n}\n\n// Validate a postmortem object (automation/schemas/postmortem-output.schema.json).\nfunction validatePostmortem(o) {\n  const errors = [];\n  const out = {};\n  for (const key of ['title', 'summary', 'root_cause', 'impact', 'remediation', 'recovery_result']) {\n    if (typeof o[key] !== 'string' || !o[key].trim()) errors.push(key + ' is required');\n    else out[key] = o[key].trim().slice(0, 4000);\n  }\n  for (const key of ['evidence', 'lessons_learned', 'preventive_actions']) {\n    const arr = asStringArray(o[key], 20, 500);\n    if (arr === null) errors.push(key + ' must be an array of strings');\n    else out[key] = arr;\n  }\n  if (!Array.isArray(o.timeline)) errors.push('timeline must be an array');\n  else {\n    out.timeline = o.timeline\n      .filter((t) => t && typeof t.time === 'string' && typeof t.event === 'string')\n      .slice(0, 50)\n      .map((t) => ({ time: t.time.slice(0, 40), event: t.event.slice(0, 500) }));\n  }\n  return { ok: errors.length === 0, value: errors.length ? null : out, errors };\n}\n// ---- end shared: AI ----\nconst prev = $('Build RCA prompt').first().json;\nconst ctx = prev.ctx;\nconst response = $input.first().json;\nconst c = classifyHttp(response);\nconst base = {\n  incident_id: ctx.incident_id,\n  investigation_id: ctx.investigation_id,\n  service_name: ctx.service_name,\n  model: prev.model,\n  sources: prev.source_status,\n  partial_evidence: prev.partial,\n  requires_human_review: true,\n};\n\nif (c.kind !== 'ok') {\n  return [{ json: { ...base, valid: false, can_store: false, status: 'ai_unavailable', rca: null, error: { kind: c.kind, http_status: c.status, retryable: c.retryable, message: c.message } } }];\n}\nconst parsed = parseModelJson(response);\nif (!parsed.ok) {\n  return [{ json: { ...base, valid: false, can_store: false, status: 'invalid_ai_response', rca: null, error: { kind: 'invalid_response', message: parsed.error } } }];\n}\nconst v = validateRca(parsed.value);\nif (!v.ok) {\n  return [{ json: { ...base, valid: false, can_store: false, status: 'invalid_ai_response', rca: null, error: { kind: 'schema_validation', message: v.errors.join('; ') } } }];\n}\n\nlet blocker = null;\nif (!ctx.incident_id) blocker = 'No incident_id: incidents cannot be created by n8n yet (backend dependency BD-1).';\nelse if (!ctx.investigation_id) blocker = 'No investigation_id: the analysis endpoint needs an investigation (backend dependency BD-2).';\n\nreturn [{\n  json: {\n    ...base,\n    valid: true,\n    can_store: !blocker,\n    store_blocker: blocker,\n    status: 'analysis_ready',\n    model: parsed.model || prev.model,\n    rca: v.value,\n    error: null,\n  },\n}];\n"
+      },
+      "id": "e7559722-482d-428c-aac9-54bc1555f7e5",
+      "name": "Validate RCA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        -180
+      ],
+      "notes": "Schema: automation/schemas/rca-output.schema.json"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2e030147-63b5-47b7-a002-5dd99b8d466b",
+              "leftValue": "={{ $json.can_store }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "afeed8b5-a9e3-4cb4-a4de-563cf22ffaf5",
+      "name": "Can store?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2600,
+        -180
+      ],
+      "notes": "Needs a valid RCA + incident_id + investigation_id."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 05 – Node: \"Sign store request\". Builds the signed request for\n//   POST /api/machine/investigations/:id/analysis\n// (path and body from database/API_AND_INTEGRATION_CONTRACTS.md B.3, which maps\n// to record_ai_analysis). The backend route is NOT implemented yet (BD-2), so\n// today the call returns 404 and is reported as \"not_implemented\".\n// ---- shared: HMAC signing (same scheme as backend/src/middleware/machine-auth.ts) ----\n// canonical = timestamp + \".\" + nonce + \".\" + METHOD + \".\" + path + \".\" + rawBody\n// header X-DC-Signature = \"sha256=\" + hex(HMAC-SHA256(secret, canonical))\nconst __crypto = require('crypto');\nconst HMAC_MAX_SKEW_SECONDS = 300;\nconst HMAC_MIN_SECRET_LENGTH = 32;\nconst HMAC_NONCE_PATTERN = /^[A-Za-z0-9_-]{16,200}$/;\nconst HMAC_SIGNATURE_PATTERN = /^sha256=[0-9a-f]{64}$/;\n\nfunction hmacCanonical(timestamp, nonce, method, path, body) {\n  return [String(timestamp), nonce, String(method).toUpperCase(), path, body].join('.');\n}\n\nfunction hmacSignature(secret, timestamp, nonce, method, path, body) {\n  return 'sha256=' + __crypto.createHmac('sha256', secret)\n    .update(hmacCanonical(timestamp, nonce, method, path, body), 'utf8').digest('hex');\n}\n\nfunction hmacSecret(value) {\n  if (typeof value !== 'string' || value.length < HMAC_MIN_SECRET_LENGTH) {\n    throw new Error('MACHINE_SIGNING_SECRET is missing or shorter than 32 characters.');\n  }\n  return value;\n}\n\nfunction hmacNonce() {\n  return __crypto.randomBytes(24).toString('base64url');\n}\n\n// Build a signed backend request. `path` must be the full request path (e.g.\n// /api/machine/playbook-runs/<id>/start) because the backend signs req.originalUrl.\nfunction signedBackendRequest(env, method, path, payload, now) {\n  const secret = hmacSecret(env.MACHINE_SIGNING_SECRET);\n  const base = String(env.BACKEND_BASE_URL || '').replace(/\\/+$/, '');\n  if (!/^https?:\\/\\//.test(base)) throw new Error('BACKEND_BASE_URL is not configured.');\n  const body = payload === undefined ? '' : JSON.stringify(payload);\n  const timestamp = Math.floor((now || Date.now()) / 1000);\n  const nonce = hmacNonce();\n  return {\n    method: method.toUpperCase(),\n    url: base + path,\n    path,\n    body,\n    headers: {\n      'X-DC-Timestamp': String(timestamp),\n      'X-DC-Nonce': nonce,\n      'X-DC-Signature': hmacSignature(secret, timestamp, nonce, method, path, body),\n    },\n  };\n}\n\n// Verify an incoming signed request (backend -> n8n). Returns { ok, status, reason }.\n// `seen` is a plain object used as the replay store (workflow static data).\nfunction verifySignedRequest(secret, headers, method, path, rawBody, seen, nowMs) {\n  const now = nowMs || Date.now();\n  const h = {};\n  for (const [k, v] of Object.entries(headers || {})) h[String(k).toLowerCase()] = v;\n  const ts = h['x-dc-timestamp'];\n  const nonce = h['x-dc-nonce'];\n  const sig = h['x-dc-signature'];\n  if (!ts || !nonce || !sig) return { ok: false, status: 401, reason: 'Signed request headers are required.' };\n  if (!/^\\d{1,12}$/.test(String(ts))) return { ok: false, status: 401, reason: 'Invalid request timestamp.' };\n  if (Math.abs(now / 1000 - Number(ts)) > HMAC_MAX_SKEW_SECONDS) {\n    return { ok: false, status: 401, reason: 'Signed request is outside the 5 minute window.' };\n  }\n  if (!HMAC_NONCE_PATTERN.test(nonce) || !HMAC_SIGNATURE_PATTERN.test(sig)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  const expected = Buffer.from(hmacSignature(hmacSecret(secret), Number(ts), nonce, method, path, rawBody), 'utf8');\n  const given = Buffer.from(sig, 'utf8');\n  if (given.length !== expected.length || !__crypto.timingSafeEqual(given, expected)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  // Replay protection: each nonce once within 15 minutes (3x the skew window).\n  const cutoff = now - 15 * 60 * 1000;\n  for (const [k, at] of Object.entries(seen)) if (at < cutoff) delete seen[k];\n  if (seen[nonce]) return { ok: false, status: 409, reason: 'Replayed request.' };\n  seen[nonce] = now;\n  return { ok: true, status: 200, reason: null };\n}\n// ---- end shared: HMAC ----\nconst d = $input.first().json;\nconst r = d.rca;\nconst path = '/api/machine/investigations/' + d.investigation_id + '/analysis';\nconst req = signedBackendRequest($env, 'POST', path, {\n  incident_id: d.incident_id,\n  summary: r.summary,\n  root_cause: r.root_cause,\n  severity: r.severity,\n  confidence: r.confidence,\n  evidence: r.evidence,\n  recommended_action: r.recommended_action,\n  model_name: d.model,\n});\nreturn [{ json: { ...d, request: req } }];\n"
+      },
+      "id": "d6b52302-11b5-4ea6-a731-ba7dfbb82c40",
+      "name": "Sign store request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -360
+      ],
+      "notes": "HMAC (MACHINE_SIGNING_SECRET from the environment)."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.request.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-DC-Timestamp",
+              "value": "={{ $json.request.headers[\"X-DC-Timestamp\"] }}"
+            },
+            {
+              "name": "X-DC-Nonce",
+              "value": "={{ $json.request.headers[\"X-DC-Nonce\"] }}"
+            },
+            {
+              "name": "X-DC-Signature",
+              "value": "={{ $json.request.headers[\"X-DC-Signature\"] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.request.body }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "934a6d07-b8f1-4dfe-aa6d-ec39212d5463",
+      "name": "Backend: store AI analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        -360
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "POST {BACKEND_BASE_URL}/api/machine/investigations/:id/analysis (BD-2: 404 until implemented)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 05 – Node: \"RCA result (store attempted)\".\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\nconst d = $('Sign store request').first().json;\nconst response = $input.first().json;\nconst c = classifyHttp(response, { notFoundMeansNotImplemented: true, serviceUnavailableMeansNotConfigured: true });\nconst { request, ...rest } = d;\nconst analysisId = c.kind === 'ok' && response.body && response.body.data ? (response.body.data.analysis_id || response.body.data.id || null) : null;\nreturn [{\n  json: {\n    ...rest,\n    stored: c.kind === 'ok',\n    analysis_id: analysisId,\n    store_error: c.kind === 'ok' ? null : { kind: c.kind, http_status: c.status, retryable: c.retryable, message: c.message },\n  },\n}];\n"
+      },
+      "id": "640abcf7-a04d-4856-a92a-292c21f93bf0",
+      "name": "RCA result (store attempted)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3380,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 05 – Node: \"RCA result (not stored)\". Invalid AI answers and\n// analyses without an incident/investigation id end here.\nconst d = $input.first().json;\nreturn [{ json: { ...d, stored: false, analysis_id: null, store_error: d.valid ? { kind: 'blocked', message: d.store_blocker } : null } }];\n"
+      },
+      "id": "77da04f0-75dc-4772-a66e-1200490ae979",
+      "name": "RCA result (not stored)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When called by 01 Alert Intake": {
+      "main": [
+        [
+          {
+            "node": "Validate RCA input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate RCA input": {
+      "main": [
+        [
+          {
+            "node": "Input valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input valid?": {
+      "main": [
+        [
+          {
+            "node": "Run 02 Log Analysis",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Run 03 Metrics Analysis",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Run 04 Deployment Correlation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RCA result (invalid input)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run 02 Log Analysis": {
+      "main": [
+        [
+          {
+            "node": "Collect results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run 03 Metrics Analysis": {
+      "main": [
+        [
+          {
+            "node": "Collect results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Run 04 Deployment Correlation": {
+      "main": [
+        [
+          {
+            "node": "Collect results",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Collect results": {
+      "main": [
+        [
+          {
+            "node": "Combine evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine evidence": {
+      "main": [
+        [
+          {
+            "node": "Evidence found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evidence found?": {
+      "main": [
+        [
+          {
+            "node": "Build RCA prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RCA result (no AI call)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build RCA prompt": {
+      "main": [
+        [
+          {
+            "node": "Groq: RCA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq: RCA": {
+      "main": [
+        [
+          {
+            "node": "Validate RCA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate RCA": {
+      "main": [
+        [
+          {
+            "node": "Can store?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can store?": {
+      "main": [
+        [
+          {
+            "node": "Sign store request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RCA result (not stored)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign store request": {
+      "main": [
+        [
+          {
+            "node": "Backend: store AI analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backend: store AI analysis": {
+      "main": [
+        [
+          {
+            "node": "RCA result (store attempted)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "dc33wf09errorhnd"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
