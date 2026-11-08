@@ -110,7 +110,7 @@ export async function updateUserRoleController(
 
     const idParam = req.params.id;
     const id = Array.isArray(idParam) ? idParam[0] : idParam;
-    const { role } = req.body;
+    const { role } = req.body ?? {};
 
     if (!id) {
     return res.status(400).json({

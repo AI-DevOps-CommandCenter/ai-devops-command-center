@@ -62,7 +62,7 @@ export async function createRemediationExecutionController(
       });
     }
 
-    const { incident_id, playbook_id, input_data } = req.body;
+    const { incident_id, playbook_id, input_data } = req.body ?? {};
 
     if (
       typeof incident_id !== "string" ||
@@ -296,7 +296,7 @@ export async function updateRemediationExecutionController(
       playbook_id,
       triggered_by,
       input_data
-    } = req.body;
+    } = req.body ?? {};
 
     // Prevent changes to protected fields.
     if (

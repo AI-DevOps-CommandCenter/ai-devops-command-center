@@ -1,3 +1,4 @@
+
 import type { Request, Response } from "express";
 import { createAuditLog } from "../services/audit.service.js";
 
@@ -128,6 +129,7 @@ export async function createIncidentController(
         message: "Unable to create incident."
       });
     }
+
     // Record incident creation in the audit log
     try {
       await createAuditLog(
@@ -177,15 +179,42 @@ export async function getIncidentsController(
       });
     }
 
-    const status =
-      typeof req.query.status === "string"
-        ? req.query.status
-        : undefined;
+    const statusValue = req.query.status;
 
-    const severity =
-      typeof req.query.severity === "string"
-        ? req.query.severity
-        : undefined;
+    if (
+      statusValue !== undefined &&
+      (
+        typeof statusValue !== "string" ||
+        !allowedStatuses.includes(statusValue as IncidentStatus)
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid incident status."
+      });
+    }
+
+    // TypeScript now knows this is a valid IncidentStatus or undefined
+    const status: IncidentStatus | undefined =
+      statusValue as IncidentStatus | undefined;
+
+    const severityValue = req.query.severity;
+
+    if (
+      severityValue !== undefined &&
+      (
+        typeof severityValue !== "string" ||
+        !allowedSeverities.includes(severityValue as IncidentSeverity)
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid incident severity."
+      });
+    }
+
+    const severity: IncidentSeverity | undefined =
+      severityValue as IncidentSeverity | undefined;
 
     const service_name =
       typeof req.query.service_name === "string"
@@ -215,25 +244,11 @@ export async function getIncidentsController(
       });
     }
 
-    if (status && !allowedStatuses.includes(status as IncidentStatus)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid incident status."
-      });
-    }
-
-    if (severity && !allowedSeverities.includes(severity as IncidentSeverity)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid incident severity."
-      });
-    }
-
     const { data, error } = await getIncidents(
       req.userSupabase,
       {
         status,
-        severity: severity as IncidentSeverity | undefined,
+        severity,
         service_name,
         limit: limitValue,
         offset: offsetValue
@@ -363,11 +378,7 @@ export async function updateIncidentController(
       });
     }
 
-    // Prevent destructuring an undefined or invalid request body
     if (!isValidBody(req.body)) {
-      console.log("PATCH Content-Type:", req.headers["content-type"]);
-      console.log("PATCH request body:", req.body);
-
       return res.status(400).json({
         success: false,
         message: "A valid JSON request body is required."
@@ -495,6 +506,7 @@ export async function updateIncidentController(
         message: "Unable to update incident."
       });
     }
+
     // Record incident update in the audit log
     try {
       await createAuditLog(

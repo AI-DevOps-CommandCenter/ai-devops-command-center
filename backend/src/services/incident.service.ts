@@ -19,7 +19,7 @@ export interface CreateIncidentInput {
 
 // Filters for retrieving incidents
 export interface IncidentFilters {
-  status?: string;
+  status?: IncidentStatus;
   severity?: IncidentSeverity;
   service_name?: string;
   limit?: number;

@@ -59,7 +59,7 @@ export async function createIntegrationController(
       return res.status(403).json({ message: "Admin access required." });
     }
 
-    const { name, provider, is_active, settings } = req.body;
+    const { name, provider, is_active, settings } = req.body ?? {};
 
     if (typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ message: "A valid name is required." });
@@ -142,7 +142,7 @@ export async function updateIntegrationController(
       return res.status(400).json({ message: "A valid integration ID is required." });
     }
 
-    const { name, provider, is_active, settings } = req.body;
+    const { name, provider, is_active, settings } = req.body ?? {};
 
     if (
       name === undefined &&

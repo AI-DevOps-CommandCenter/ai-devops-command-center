@@ -50,7 +50,7 @@ export async function createPlaybookRunController(
       playbook_id,
       incident_id,
       request_payload
-    } = req.body;
+    } = req.body ?? {};
 
     if (!playbook_id || !uuidRegex.test(playbook_id)) {
       return res.status(400).json({
@@ -281,7 +281,7 @@ export async function decidePlaybookRunController(
       });
     }
 
-    const { status } = req.body;
+    const { status } = req.body ?? {};
 
     if (!["approved", "rejected"].includes(status)) {
       return res.status(400).json({
@@ -378,7 +378,7 @@ export async function updatePlaybookRunStatusController(
       });
     }
 
-    const { status, result_payload } = req.body;
+    const { status, result_payload } = req.body ?? {};
 
     const allowedUpdates = [
       "running",

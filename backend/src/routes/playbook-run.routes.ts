@@ -6,7 +6,6 @@ import {
   getPlaybookRunsController,
   getPlaybookRunByIdController,
   decidePlaybookRunController,
-  updatePlaybookRunStatusController
 } from "../controllers/playbook-run.controller.js";
 
 const router = Router();
@@ -25,7 +24,5 @@ router.get("/:id", getPlaybookRunByIdController);
 
 // Approve or reject a playbook request
 router.patch("/:id/decision", decidePlaybookRunController);
-
-// Update execution status and results
 
 export default router;
