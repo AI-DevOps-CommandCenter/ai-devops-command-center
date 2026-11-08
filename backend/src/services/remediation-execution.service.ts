@@ -1,5 +1,10 @@
 import type { UserSupabaseClient } from "../config/supabase.js";
 
+// remediation_executions is a legacy, read-only table (decisions A2/A3).
+// Client writes were revoked by migration 000700: remediation is requested,
+// approved, executed and completed as a playbook run instead
+// (request_playbook_run -> decide_approval -> start/complete_playbook_run).
+
 export type RemediationExecutionStatus =
   | "pending"
   | "running"
@@ -15,44 +20,8 @@ export interface RemediationExecutionFilters {
   offset?: number;
 }
 
-export interface CreateRemediationExecutionInput {
-  incident_id: string;
-  playbook_id?: string | null;
-  input_data?: Record<string, unknown>;
-}
-
-export interface UpdateRemediationExecutionInput {
-  status?: RemediationExecutionStatus;
-  output_data?: Record<string, unknown>;
-  started_at?: string | null;
-  completed_at?: string | null;
-}
-
 const executionSelect =
   "id, incident_id, playbook_id, triggered_by, status, input_data, output_data, started_at, completed_at, created_at";
-
-export async function createRemediationExecution(
-  client: UserSupabaseClient,
-  input: CreateRemediationExecutionInput,
-  userId: string
-) {
-  const { data, error } = await client
-    .from("remediation_executions")
-    .insert({
-      incident_id: input.incident_id,
-      playbook_id: input.playbook_id ?? null,
-      triggered_by: userId,
-      status: "pending",
-      input_data: input.input_data ?? {},
-      output_data: {}
-    })
-    .select(executionSelect)
-    .single();
-
-  if (error) throw error;
-
-  return data;
-}
 
 export async function getRemediationExecutions(
   client: UserSupabaseClient,
@@ -94,23 +63,6 @@ export async function getRemediationExecutionById(
     .from("remediation_executions")
     .select(executionSelect)
     .eq("id", id)
-    .maybeSingle();
-
-  if (error) throw error;
-
-  return data;
-}
-
-export async function updateRemediationExecution(
-  client: UserSupabaseClient,
-  id: string,
-  input: UpdateRemediationExecutionInput
-) {
-  const { data, error } = await client
-    .from("remediation_executions")
-    .update(input)
-    .eq("id", id)
-    .select(executionSelect)
     .maybeSingle();
 
   if (error) throw error;

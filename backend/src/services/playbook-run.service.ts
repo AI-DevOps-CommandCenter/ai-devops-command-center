@@ -1,5 +1,11 @@
 import type { UserSupabaseClient } from "../config/supabase.js";
 
+// Playbook run writes go through the database workflow functions
+// (migration 000700, decisions A2/A3/A4/A5). The functions enforce the
+// lifecycle (pending_approval -> approved -> running -> success|failed, or
+// cancelled/rejected), require a human approval for every run (A4), prevent
+// duplicate execution, and write the audit entry in the same transaction.
+
 export type PlaybookRunStatus =
   | "pending_approval"
   | "approved"
@@ -9,72 +15,9 @@ export type PlaybookRunStatus =
   | "rejected"
   | "cancelled";
 
-export interface CreatePlaybookRunInput {
-  playbook_id: string;
-  incident_id: string;
-  request_payload?: Record<string, unknown>;
-}
-
 export interface PlaybookRunFilters {
   status?: PlaybookRunStatus;
   incident_id?: string;
-}
-
-// Create a playbook execution request
-export async function createPlaybookRun(
-  client: UserSupabaseClient,
-  input: CreatePlaybookRunInput,
-  userId: string
-) {
-  // Check whether the requested playbook exists and is enabled
-  const { data: playbook, error: playbookError } = await client
-    .from("playbooks")
-    .select("id, name, action_type, enabled, requires_approval")
-    .eq("id", input.playbook_id)
-    .maybeSingle();
-
-  if (playbookError) throw playbookError;
-
-  if (!playbook || !playbook.enabled) {
-    return null;
-  }
-
-  // Check whether the incident exists
-  const { data: incident, error: incidentError } = await client
-    .from("incidents")
-    .select("id")
-    .eq("id", input.incident_id)
-    .maybeSingle();
-
-  if (incidentError) throw incidentError;
-
-  if (!incident) {
-    return null;
-  }
-
-  // Determine whether approval is required
-  const approvalRequired = playbook.requires_approval;
-
-  const initialStatus: PlaybookRunStatus =
-    approvalRequired ? "pending_approval" : "approved";
-
-  const { data, error } = await client
-    .from("playbook_runs")
-    .insert({
-      playbook_id: input.playbook_id,
-      incident_id: input.incident_id,
-      requested_by: userId,
-      status: initialStatus,
-      approval_required: approvalRequired,
-      request_payload: input.request_payload ?? {},
-      result_payload: {}
-    })
-    .select("*")
-    .single();
-
-  if (error) throw error;
-
-  return data;
 }
 
 // Get accessible playbook runs
@@ -118,95 +61,104 @@ export async function getPlaybookRunById(
   return data;
 }
 
-export interface DecidePlaybookRunInput {
-  status: "approved" | "rejected";
+export interface RequestPlaybookRunInput {
+  incident_id: string;
+  playbook_id: string;
+  idempotency_key?: string | null;
+  request_payload?: Record<string, unknown>;
 }
 
-// Approve or reject a playbook execution request
-export async function decidePlaybookRun(
+export interface RequestPlaybookRunResult {
+  run_id: string;
+  status: PlaybookRunStatus;
+  approval_id: string | null;
+  // false when an earlier request with the same idempotency key is returned
+  created: boolean;
+}
+
+// Request a run; always creates its pending approval (A4).
+// rpc: request_playbook_run(p_incident_id, p_playbook_id, p_idempotency_key, p_request_payload)
+export async function requestPlaybookRun(
   client: UserSupabaseClient,
-  id: string,
-  input: DecidePlaybookRunInput,
-  adminId: string
+  input: RequestPlaybookRunInput
 ) {
-  const { data, error } = await client
-    .from("playbook_runs")
-    .update({
-      status: input.status,
-      approved_by: adminId,
-      approved_at: new Date().toISOString()
-    })
-    .eq("id", id)
-    .eq("status", "pending_approval")
-    .eq("approval_required", true)
-    .select("*")
-    .maybeSingle();
+  const { data, error } = await client.rpc("request_playbook_run", {
+    p_incident_id: input.incident_id,
+    p_playbook_id: input.playbook_id,
+    p_idempotency_key: input.idempotency_key ?? null,
+    p_request_payload: input.request_payload ?? {}
+  });
 
   if (error) throw error;
-
-  return data;
+  return data as RequestPlaybookRunResult;
 }
 
-export interface UpdatePlaybookRunStatusInput {
-  status: "running" | "success" | "failed" | "cancelled";
+// Requester (pending) or admin/operator with a reason (approved/running).
+// rpc: cancel_playbook_run(p_run_id, p_reason)
+export async function cancelPlaybookRun(
+  client: UserSupabaseClient,
+  id: string,
+  reason?: string | null
+) {
+  const { data, error } = await client.rpc("cancel_playbook_run", {
+    p_run_id: id,
+    p_reason: reason ?? null
+  });
+
+  if (error) throw error;
+  return data as { run_id: string; status: "cancelled" };
+}
+
+export interface CompletePlaybookRunInput {
+  status: "success" | "failed";
   result_payload?: Record<string, unknown>;
+  n8n_execution_id?: string | null;
+  reason?: string | null;
 }
 
-// Update the execution status and result
-export async function updatePlaybookRunStatus(
+// Automation: completes with the execution id that started the run.
+// Admin/operator: manual override, reason required (A3-Q3).
+// rpc: complete_playbook_run(p_run_id, p_status, p_result, p_n8n_execution_id, p_reason)
+export async function completePlaybookRun(
   client: UserSupabaseClient,
   id: string,
-  input: UpdatePlaybookRunStatusInput
+  input: CompletePlaybookRunInput
 ) {
-  const { data: existingRun, error: fetchError } = await client
-    .from("playbook_runs")
-    .select("id, status")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (fetchError) throw fetchError;
-
-  if (!existingRun) return null;
-
-  // Validate allowed status transitions
-  const allowedTransitions: Record<string, string[]> = {
-    approved: ["running", "cancelled"],
-    running: ["success", "failed", "cancelled"]
-  };
-
-  if (!allowedTransitions[existingRun.status]?.includes(input.status)) {
-    return null;
-  }
-
-  const updates: Record<string, unknown> = {
-    status: input.status
-  };
-
-  if (input.result_payload !== undefined) {
-    updates.result_payload = input.result_payload;
-  }
-
-  if (input.status === "running") {
-    updates.started_at = new Date().toISOString();
-  }
-
-  if (
-    input.status === "success" ||
-    input.status === "failed" ||
-    input.status === "cancelled"
-  ) {
-    updates.completed_at = new Date().toISOString();
-  }
-
-  const { data, error } = await client
-    .from("playbook_runs")
-    .update(updates)
-    .eq("id", id)
-    .eq("status", existingRun.status)
-    .select("*")
-    .maybeSingle();
+  const { data, error } = await client.rpc("complete_playbook_run", {
+    p_run_id: id,
+    p_status: input.status,
+    p_result: input.result_payload ?? {},
+    p_n8n_execution_id: input.n8n_execution_id ?? null,
+    p_reason: input.reason ?? null
+  });
 
   if (error) throw error;
+  return data as { run_id: string; status: "success" | "failed"; manual: boolean };
+}
 
-  return data;
+export interface StartPlaybookRunResult {
+  run_id: string;
+  status: "running";
+  automation_run_id: string;
+  incident_id: string;
+  action_type: string;
+  request_payload: Record<string, unknown>;
+}
+
+// Automation identity only: starts an approved run (A5).
+// rpc: start_playbook_run(p_run_id, p_n8n_execution_id, p_workflow_name)
+export async function startPlaybookRun(
+  client: UserSupabaseClient,
+  id: string,
+  n8nExecutionId: string,
+  workflowName = "remediation"
+) {
+  const { data, error } = await client.rpc("start_playbook_run", {
+    p_run_id: id,
+    p_n8n_execution_id: n8nExecutionId,
+    p_workflow_name: workflowName
+  });
+
+  if (error) throw error;
+  return data as StartPlaybookRunResult;
 }

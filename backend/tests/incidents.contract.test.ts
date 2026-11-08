@@ -59,11 +59,10 @@ describe("POST /api/incidents (existing contract preserved)", () => {
     });
   });
 
-  it("creates the incident through the user's client and audits it", async () => {
+  it("creates the incident through the user's client; the database audits it", async () => {
     mockValidUser();
     const { client, calls } = createMockUserClient({
-      incidents: { data: createdRow, error: null },
-      audit_logs: { data: null, error: null }
+      incidents: { data: createdRow, error: null }
     });
     supabaseMocks.createUserSupabaseClient.mockReturnValue(client);
 
@@ -89,18 +88,16 @@ describe("POST /api/incidents (existing contract preserved)", () => {
       created_by: TEST_USER.id
     });
 
-    const [audit] = callsFor(calls, "audit_logs", "insert");
-    expect(audit?.args[0]).toMatchObject({
-      actor_id: TEST_USER.id,
-      action: "INCIDENT_CREATED",
-      entity_type: "incident",
-      entity_id: createdRow.id
-    });
+    // A7 / migration 000800: the INCIDENT_CREATED audit entry is written by a
+    // database trigger in the same transaction, so the backend must not write
+    // one itself (it has no INSERT permission on audit_logs, and a second
+    // entry would be a duplicate).
+    expect(calls.some((call) => call.table === "audit_logs")).toBe(false);
   });
 
-  it("still succeeds when the audit write fails (current best-effort behaviour, pending A7)", async () => {
+  it("does not depend on an audit write (previously best-effort, now done by the database)", async () => {
     mockValidUser();
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { client } = createMockUserClient({
       incidents: { data: createdRow, error: null },
       audit_logs: { data: null, error: { message: "insert denied" } }
@@ -113,5 +110,6 @@ describe("POST /api/incidents (existing contract preserved)", () => {
       .send(validBody);
 
     expect(res.status).toBe(201);
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 });
