@@ -1,0 +1,1020 @@
+{
+  "id": "dc33wf06remediat",
+  "name": "06 - Remediation",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 06 – Remediation (owner: Vishwa)\nBackend → `POST /webhook/remediation` (HMAC signed) → verify signature, time window, nonce → **backend start** (`start_playbook_run` only succeeds for an APPROVED run) → fixed branch per action → **backend complete** → 07 Recovery Check.\nNever executes commands from the webhook or the AI. **Execution integration is BLOCKED** (no playbook executor yet): `REMEDIATION_EXECUTION_MODE=disabled` refuses; `simulate` records a clearly marked simulated result for tests.",
+        "width": 900,
+        "height": 260
+      },
+      "id": "45322fcb-b36d-4c4e-a54e-fc7a923d7e10",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "remediation",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "24e15284-4bd8-446a-ad1f-0d323efe55c1",
+      "name": "Remediation webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "c717b452-5f23-4605-af1e-33c26e6c68cf",
+      "notes": "POST /webhook/remediation. Raw Body ON: the signature covers the exact bytes."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 06 – Remediation (owner: Vishwa)\n// Node: \"Verify signature and payload\".\n// Contract (database/API_AND_INTEGRATION_CONTRACTS.md B.3):\n//   POST <n8n>/webhook/remediation, headers X-DC-Timestamp/X-DC-Nonce/X-DC-Signature\n//   body { playbook_run_id, incident_id, action_type, request_payload }\n// The signature covers timestamp.nonce.METHOD.path.rawBody (same as the backend).\n// Nothing from this request is ever executed as a command: action_type only\n// selects one of four fixed branches, and the backend's start call (next\n// nodes) is the authority on whether the run is approved.\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\n// ---- shared: HMAC signing (same scheme as backend/src/middleware/machine-auth.ts) ----\n// canonical = timestamp + \".\" + nonce + \".\" + METHOD + \".\" + path + \".\" + rawBody\n// header X-DC-Signature = \"sha256=\" + hex(HMAC-SHA256(secret, canonical))\nconst __crypto = require('crypto');\nconst HMAC_MAX_SKEW_SECONDS = 300;\nconst HMAC_MIN_SECRET_LENGTH = 32;\nconst HMAC_NONCE_PATTERN = /^[A-Za-z0-9_-]{16,200}$/;\nconst HMAC_SIGNATURE_PATTERN = /^sha256=[0-9a-f]{64}$/;\n\nfunction hmacCanonical(timestamp, nonce, method, path, body) {\n  return [String(timestamp), nonce, String(method).toUpperCase(), path, body].join('.');\n}\n\nfunction hmacSignature(secret, timestamp, nonce, method, path, body) {\n  return 'sha256=' + __crypto.createHmac('sha256', secret)\n    .update(hmacCanonical(timestamp, nonce, method, path, body), 'utf8').digest('hex');\n}\n\nfunction hmacSecret(value) {\n  if (typeof value !== 'string' || value.length < HMAC_MIN_SECRET_LENGTH) {\n    throw new Error('MACHINE_SIGNING_SECRET is missing or shorter than 32 characters.');\n  }\n  return value;\n}\n\nfunction hmacNonce() {\n  return __crypto.randomBytes(24).toString('base64url');\n}\n\n// Build a signed backend request. `path` must be the full request path (e.g.\n// /api/machine/playbook-runs/<id>/start) because the backend signs req.originalUrl.\nfunction signedBackendRequest(env, method, path, payload, now) {\n  const secret = hmacSecret(env.MACHINE_SIGNING_SECRET);\n  const base = String(env.BACKEND_BASE_URL || '').replace(/\\/+$/, '');\n  if (!/^https?:\\/\\//.test(base)) throw new Error('BACKEND_BASE_URL is not configured.');\n  const body = payload === undefined ? '' : JSON.stringify(payload);\n  const timestamp = Math.floor((now || Date.now()) / 1000);\n  const nonce = hmacNonce();\n  return {\n    method: method.toUpperCase(),\n    url: base + path,\n    path,\n    body,\n    headers: {\n      'X-DC-Timestamp': String(timestamp),\n      'X-DC-Nonce': nonce,\n      'X-DC-Signature': hmacSignature(secret, timestamp, nonce, method, path, body),\n    },\n  };\n}\n\n// Verify an incoming signed request (backend -> n8n). Returns { ok, status, reason }.\n// `seen` is a plain object used as the replay store (workflow static data).\nfunction verifySignedRequest(secret, headers, method, path, rawBody, seen, nowMs) {\n  const now = nowMs || Date.now();\n  const h = {};\n  for (const [k, v] of Object.entries(headers || {})) h[String(k).toLowerCase()] = v;\n  const ts = h['x-dc-timestamp'];\n  const nonce = h['x-dc-nonce'];\n  const sig = h['x-dc-signature'];\n  if (!ts || !nonce || !sig) return { ok: false, status: 401, reason: 'Signed request headers are required.' };\n  if (!/^\\d{1,12}$/.test(String(ts))) return { ok: false, status: 401, reason: 'Invalid request timestamp.' };\n  if (Math.abs(now / 1000 - Number(ts)) > HMAC_MAX_SKEW_SECONDS) {\n    return { ok: false, status: 401, reason: 'Signed request is outside the 5 minute window.' };\n  }\n  if (!HMAC_NONCE_PATTERN.test(nonce) || !HMAC_SIGNATURE_PATTERN.test(sig)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  const expected = Buffer.from(hmacSignature(hmacSecret(secret), Number(ts), nonce, method, path, rawBody), 'utf8');\n  const given = Buffer.from(sig, 'utf8');\n  if (given.length !== expected.length || !__crypto.timingSafeEqual(given, expected)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  // Replay protection: each nonce once within 15 minutes (3x the skew window).\n  const cutoff = now - 15 * 60 * 1000;\n  for (const [k, at] of Object.entries(seen)) if (at < cutoff) delete seen[k];\n  if (seen[nonce]) return { ok: false, status: 409, reason: 'Replayed request.' };\n  seen[nonce] = now;\n  return { ok: true, status: 200, reason: null };\n}\n// ---- end shared: HMAC ----\nconst env = $env;\nconst item = $input.first();\nconst j = item.json;\nconst reject = (status, reason) => [{ json: { valid: false, http_status: status, response: { accepted: false, message: reason } } }];\n\n// Exact bytes the backend signed: the Webhook node keeps them (option \"Raw Body\").\nlet raw = null;\nconst bin = item.binary && item.binary.data;\nif (bin && typeof bin.data === 'string' && bin.id === undefined) raw = Buffer.from(bin.data, 'base64').toString('utf8');\nif (raw === null && bin) {\n  try { raw = (await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8'); } catch (e) { raw = null; }\n}\nif (raw === null) return reject(400, 'Raw request body is not available; enable \"Raw Body\" on the Webhook node.');\n\nconst secret = env.MACHINE_SIGNING_SECRET;\nif (!secret || secret.length < 32) return reject(503, 'Remediation is not configured (signing secret missing).');\n\nconst signedPath = env.N8N_REMEDIATION_SIGNED_PATH || '/webhook/remediation';\nconst store = $getWorkflowStaticData('global');\nstore.seenNonces = store.seenNonces || {};\nconst check = verifySignedRequest(secret, j.headers, 'POST', signedPath, raw, store.seenNonces, Date.now());\nif (!check.ok) return reject(check.status, check.reason);\n\nlet body;\ntry { body = JSON.parse(raw); } catch (e) { return reject(400, 'Body is not valid JSON.'); }\nconst ACTIONS = ['restart', 'rollback', 'scale', 'circuit_breaker'];\nconst problems = [];\nif (!isUuid(body.playbook_run_id)) problems.push('playbook_run_id must be a UUID');\nif (!isUuid(body.incident_id)) problems.push('incident_id must be a UUID');\nif (!ACTIONS.includes(body.action_type)) problems.push('action_type must be one of ' + ACTIONS.join(', '));\nif (body.request_payload !== undefined && (typeof body.request_payload !== 'object' || body.request_payload === null || Array.isArray(body.request_payload))) problems.push('request_payload must be an object');\nconst extra = Object.keys(body).filter((k) => !['playbook_run_id', 'incident_id', 'action_type', 'request_payload'].includes(k));\nif (extra.length) problems.push('unexpected fields: ' + extra.join(', '));\nif (problems.length) return reject(400, problems.join('; '));\n\nconst mode = String(env.REMEDIATION_EXECUTION_MODE || 'disabled').toLowerCase();\nreturn [{\n  json: {\n    valid: true,\n    execution_mode: ['simulate'].includes(mode) ? mode : 'disabled',\n    playbook_run_id: body.playbook_run_id,\n    incident_id: body.incident_id,\n    requested_action: body.action_type,\n    request_payload: body.request_payload || {},\n  },\n}];\n"
+      },
+      "id": "e7d06d7a-3c74-4380-aacb-098988c5a786",
+      "name": "Verify signature and payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "notes": "HMAC-SHA256, 300 s window, nonce once (static data), strict body."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b9b52854-b65c-4650-a926-d6eed51f9d8e",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "ed2c0246-ec0e-4fc0-aee3-7e08964337ba",
+      "name": "Request valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "fc56844c-b738-4cdf-aefb-3b75b6a542de",
+      "name": "Respond rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        360
+      ],
+      "notes": "401 bad signature / 409 replay / 400 bad body / 503 not configured."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9be9dc9e-f5c5-487d-ab65-0405cfb78c43",
+              "leftValue": "={{ $json.execution_mode }}",
+              "rightValue": "simulate",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "22da5533-1909-4339-a074-31a6017de0ca",
+      "name": "Execution available?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        780,
+        0
+      ],
+      "notes": "disabled (default) → refuse before the run is started."
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b9b2a838-2a8e-4d9e-ab60-44dc51fd0885",
+              "name": "http_status",
+              "value": "={{ 503 }}",
+              "type": "number"
+            },
+            {
+              "id": "b99c8e17-a1a3-4cd8-a565-50df60279a8a",
+              "name": "response",
+              "value": "={{ { accepted: false, message: \"Remediation execution integration is not available (BLOCKED: no playbook executor). The run was not started.\" } }}",
+              "type": "object"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "c923fa87-9353-4eba-a93d-29ab05d1e319",
+      "name": "Execution blocked response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1040,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "dad2e182-6e04-4e9b-af03-ac52099f6587",
+      "name": "Respond 503",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1300,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 06 – Node: \"Sign start request\".\n//   POST /api/machine/playbook-runs/:id/start   { n8n_execution_id, workflow_name }\n// Implemented in backend/src/routes/machine.routes.ts -> start_playbook_run,\n// which only succeeds if the run is \"approved\", the playbook is enabled and an\n// approved approval exists (decision A4). This is the approval check.\n// ---- shared: HMAC signing (same scheme as backend/src/middleware/machine-auth.ts) ----\n// canonical = timestamp + \".\" + nonce + \".\" + METHOD + \".\" + path + \".\" + rawBody\n// header X-DC-Signature = \"sha256=\" + hex(HMAC-SHA256(secret, canonical))\nconst __crypto = require('crypto');\nconst HMAC_MAX_SKEW_SECONDS = 300;\nconst HMAC_MIN_SECRET_LENGTH = 32;\nconst HMAC_NONCE_PATTERN = /^[A-Za-z0-9_-]{16,200}$/;\nconst HMAC_SIGNATURE_PATTERN = /^sha256=[0-9a-f]{64}$/;\n\nfunction hmacCanonical(timestamp, nonce, method, path, body) {\n  return [String(timestamp), nonce, String(method).toUpperCase(), path, body].join('.');\n}\n\nfunction hmacSignature(secret, timestamp, nonce, method, path, body) {\n  return 'sha256=' + __crypto.createHmac('sha256', secret)\n    .update(hmacCanonical(timestamp, nonce, method, path, body), 'utf8').digest('hex');\n}\n\nfunction hmacSecret(value) {\n  if (typeof value !== 'string' || value.length < HMAC_MIN_SECRET_LENGTH) {\n    throw new Error('MACHINE_SIGNING_SECRET is missing or shorter than 32 characters.');\n  }\n  return value;\n}\n\nfunction hmacNonce() {\n  return __crypto.randomBytes(24).toString('base64url');\n}\n\n// Build a signed backend request. `path` must be the full request path (e.g.\n// /api/machine/playbook-runs/<id>/start) because the backend signs req.originalUrl.\nfunction signedBackendRequest(env, method, path, payload, now) {\n  const secret = hmacSecret(env.MACHINE_SIGNING_SECRET);\n  const base = String(env.BACKEND_BASE_URL || '').replace(/\\/+$/, '');\n  if (!/^https?:\\/\\//.test(base)) throw new Error('BACKEND_BASE_URL is not configured.');\n  const body = payload === undefined ? '' : JSON.stringify(payload);\n  const timestamp = Math.floor((now || Date.now()) / 1000);\n  const nonce = hmacNonce();\n  return {\n    method: method.toUpperCase(),\n    url: base + path,\n    path,\n    body,\n    headers: {\n      'X-DC-Timestamp': String(timestamp),\n      'X-DC-Nonce': nonce,\n      'X-DC-Signature': hmacSignature(secret, timestamp, nonce, method, path, body),\n    },\n  };\n}\n\n// Verify an incoming signed request (backend -> n8n). Returns { ok, status, reason }.\n// `seen` is a plain object used as the replay store (workflow static data).\nfunction verifySignedRequest(secret, headers, method, path, rawBody, seen, nowMs) {\n  const now = nowMs || Date.now();\n  const h = {};\n  for (const [k, v] of Object.entries(headers || {})) h[String(k).toLowerCase()] = v;\n  const ts = h['x-dc-timestamp'];\n  const nonce = h['x-dc-nonce'];\n  const sig = h['x-dc-signature'];\n  if (!ts || !nonce || !sig) return { ok: false, status: 401, reason: 'Signed request headers are required.' };\n  if (!/^\\d{1,12}$/.test(String(ts))) return { ok: false, status: 401, reason: 'Invalid request timestamp.' };\n  if (Math.abs(now / 1000 - Number(ts)) > HMAC_MAX_SKEW_SECONDS) {\n    return { ok: false, status: 401, reason: 'Signed request is outside the 5 minute window.' };\n  }\n  if (!HMAC_NONCE_PATTERN.test(nonce) || !HMAC_SIGNATURE_PATTERN.test(sig)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  const expected = Buffer.from(hmacSignature(hmacSecret(secret), Number(ts), nonce, method, path, rawBody), 'utf8');\n  const given = Buffer.from(sig, 'utf8');\n  if (given.length !== expected.length || !__crypto.timingSafeEqual(given, expected)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  // Replay protection: each nonce once within 15 minutes (3x the skew window).\n  const cutoff = now - 15 * 60 * 1000;\n  for (const [k, at] of Object.entries(seen)) if (at < cutoff) delete seen[k];\n  if (seen[nonce]) return { ok: false, status: 409, reason: 'Replayed request.' };\n  seen[nonce] = now;\n  return { ok: true, status: 200, reason: null };\n}\n// ---- end shared: HMAC ----\nconst d = $input.first().json;\nconst executionId = String($execution.id);\nconst req = signedBackendRequest($env, 'POST', '/api/machine/playbook-runs/' + d.playbook_run_id + '/start', {\n  n8n_execution_id: executionId,\n  workflow_name: 'remediation',\n});\nreturn [{ json: { ...d, n8n_execution_id: executionId, request: req } }];\n"
+      },
+      "id": "18913513-e8c5-496f-a549-952937c20a44",
+      "name": "Sign start request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.request.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-DC-Timestamp",
+              "value": "={{ $json.request.headers[\"X-DC-Timestamp\"] }}"
+            },
+            {
+              "name": "X-DC-Nonce",
+              "value": "={{ $json.request.headers[\"X-DC-Nonce\"] }}"
+            },
+            {
+              "name": "X-DC-Signature",
+              "value": "={{ $json.request.headers[\"X-DC-Signature\"] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.request.body }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "535b0832-5bc5-4fc8-ad95-8c89f5825f44",
+      "name": "Backend: start run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        -180
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "POST /api/machine/playbook-runs/:id/start → start_playbook_run (approval enforced in the database)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 06 – Node: \"Check start result\". The action that runs is the one\n// the DATABASE returns for this run (start_playbook_run -> action_type), not\n// the one in the webhook. A mismatch means the request is not trustworthy.\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\nconst d = $('Sign start request').first().json;\nconst response = $input.first().json;\nconst c = classifyHttp(response, { serviceUnavailableMeansNotConfigured: true });\nconst { request, ...ctx } = d;\n\nif (c.kind !== 'ok') {\n  // 409 = not approved / already started / playbook disabled (DC409);\n  // 404 = run not found; 401 = signature rejected; 503 = backend machine config missing.\n  const http = c.status === 409 || c.status === 404 || c.status === 400 ? c.status : 502;\n  return [{ json: { ...ctx, started: false, http_status: http, response: { accepted: false, message: 'Backend refused to start the run: ' + (c.message || c.kind) } } }];\n}\n\nconst data = (response.body && response.body.data) || {};\nconst problems = [];\nif (data.status !== 'running') problems.push('run status is ' + data.status);\nif (data.incident_id && data.incident_id !== ctx.incident_id) problems.push('incident_id does not match the run');\nif (data.action_type !== ctx.requested_action) problems.push('action_type does not match the approved playbook (' + data.action_type + ')');\n\nreturn [{\n  json: {\n    ...ctx,\n    started: problems.length === 0,\n    started_but_rejected: problems.length > 0,\n    rejection: problems.length ? problems.join('; ') : null,\n    action_type: data.action_type,\n    automation_run_id: data.automation_run_id || null,\n    http_status: problems.length ? 409 : 202,\n    response: problems.length\n      ? { accepted: false, message: 'Run started but rejected: ' + problems.join('; ') + '. It will be completed as failed.' }\n      : { accepted: true, playbook_run_id: ctx.playbook_run_id, action_type: data.action_type, mode: ctx.execution_mode },\n  },\n}];\n"
+      },
+      "id": "d78d968d-9be6-4811-a355-1cbd9745e40c",
+      "name": "Check start result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        -180
+      ],
+      "notes": "Uses the action_type returned by the DATABASE."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d80fd651-99f1-4179-a277-589ebe526b7a",
+              "leftValue": "={{ $json.started }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "34bf56c9-3ffd-4cd2-aae8-8a7a168d32df",
+      "name": "Run started?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1820,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "2043cde7-0bdc-464d-a9f4-c424a0d3bd39",
+      "name": "Respond 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2080,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "5c129bdd-11fe-437f-a798-a58c415994db",
+                    "leftValue": "={{ $json.action_type }}",
+                    "rightValue": "restart",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "restart"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ea056d05-79e8-415f-acfe-6f9c07f74c1d",
+                    "leftValue": "={{ $json.action_type }}",
+                    "rightValue": "rollback",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "rollback"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b4d80c30-b3e4-4cda-a6bc-d4b8a91b8628",
+                    "leftValue": "={{ $json.action_type }}",
+                    "rightValue": "scale",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "scale"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8ede4bf1-30f0-4844-a9f3-e98d086702a5",
+                    "leftValue": "={{ $json.action_type }}",
+                    "rightValue": "circuit_breaker",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "circuit_breaker"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "unsupported"
+        }
+      },
+      "id": "683bf362-0516-4951-afda-4ee0c22fb736",
+      "name": "Action type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2340,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 06 – Nodes: \"Execute: restart / rollback / scale / circuit_breaker\".\n// (The same code is used in the four branches; ACTION is set by the builder.)\n//\n// BLOCKED: the project has no playbook executor yet (planned in\n// infrastructure/playbooks/, Gantt tasks 30-31). This node does NOT run shell\n// commands and does NOT accept commands from the webhook or the AI.\n//   REMEDIATION_EXECUTION_MODE=simulate -> records a clearly marked simulated\n//                                          result (for end-to-end tests only)\n//   anything else                       -> never reaches this node (the workflow\n//                                          refuses before starting the run)\n// When the executor exists, replace this node with a signed HTTP Request to it,\n// passing only { action, service_name, playbook_run_id }.\n\nconst d = $input.first().json;\nconst ACTION = \"restart\";\nif (d.action_type !== ACTION) throw new Error('Branch/action mismatch: ' + d.action_type + ' in ' + ACTION + ' branch.');\n\nif (d.execution_mode !== 'simulate') {\n  return [{ json: { ...d, outcome: 'failed', result: { action: ACTION, executed: false, reason: 'No playbook executor is configured (integration BLOCKED).' } } }];\n}\nreturn [{\n  json: {\n    ...d,\n    outcome: 'success',\n    result: {\n      action: ACTION,\n      executed: false,\n      simulated: true,\n      note: 'SIMULATED result: no real system was changed (REMEDIATION_EXECUTION_MODE=simulate).',\n      service_name: (d.request_payload && typeof d.request_payload.service_name === 'string') ? d.request_payload.service_name.slice(0, 100) : null,\n    },\n  },\n}];\n"
+      },
+      "id": "369f88b9-e19d-4c87-ab8f-b2dedd06fb1f",
+      "name": "Execute: restart",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        -630
+      ],
+      "notes": "BLOCKED: no executor. simulate mode only. No shell commands."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 06 – Nodes: \"Execute: restart / rollback / scale / circuit_breaker\".\n// (The same code is used in the four branches; ACTION is set by the builder.)\n//\n// BLOCKED: the project has no playbook executor yet (planned in\n// infrastructure/playbooks/, Gantt tasks 30-31). This node does NOT run shell\n// commands and does NOT accept commands from the webhook or the AI.\n//   REMEDIATION_EXECUTION_MODE=simulate -> records a clearly marked simulated\n//                                          result (for end-to-end tests only)\n//   anything else                       -> never reaches this node (the workflow\n//                                          refuses before starting the run)\n// When the executor exists, replace this node with a signed HTTP Request to it,\n// passing only { action, service_name, playbook_run_id }.\n\nconst d = $input.first().json;\nconst ACTION = \"rollback\";\nif (d.action_type !== ACTION) throw new Error('Branch/action mismatch: ' + d.action_type + ' in ' + ACTION + ' branch.');\n\nif (d.execution_mode !== 'simulate') {\n  return [{ json: { ...d, outcome: 'failed', result: { action: ACTION, executed: false, reason: 'No playbook executor is configured (integration BLOCKED).' } } }];\n}\nreturn [{\n  json: {\n    ...d,\n    outcome: 'success',\n    result: {\n      action: ACTION,\n      executed: false,\n      simulated: true,\n      note: 'SIMULATED result: no real system was changed (REMEDIATION_EXECUTION_MODE=simulate).',\n      service_name: (d.request_payload && typeof d.request_payload.service_name === 'string') ? d.request_payload.service_name.slice(0, 100) : null,\n    },\n  },\n}];\n"
+      },
+      "id": "025b0015-daa3-4207-a04e-4af073c5e0b4",
+      "name": "Execute: rollback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        -450
+      ],
+      "notes": "BLOCKED: no executor. simulate mode only. No shell commands."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 06 – Nodes: \"Execute: restart / rollback / scale / circuit_breaker\".\n// (The same code is used in the four branches; ACTION is set by the builder.)\n//\n// BLOCKED: the project has no playbook executor yet (planned in\n// infrastructure/playbooks/, Gantt tasks 30-31). This node does NOT run shell\n// commands and does NOT accept commands from the webhook or the AI.\n//   REMEDIATION_EXECUTION_MODE=simulate -> records a clearly marked simulated\n//                                          result (for end-to-end tests only)\n//   anything else                       -> never reaches this node (the workflow\n//                                          refuses before starting the run)\n// When the executor exists, replace this node with a signed HTTP Request to it,\n// passing only { action, service_name, playbook_run_id }.\n\nconst d = $input.first().json;\nconst ACTION = \"scale\";\nif (d.action_type !== ACTION) throw new Error('Branch/action mismatch: ' + d.action_type + ' in ' + ACTION + ' branch.');\n\nif (d.execution_mode !== 'simulate') {\n  return [{ json: { ...d, outcome: 'failed', result: { action: ACTION, executed: false, reason: 'No playbook executor is configured (integration BLOCKED).' } } }];\n}\nreturn [{\n  json: {\n    ...d,\n    outcome: 'success',\n    result: {\n      action: ACTION,\n      executed: false,\n      simulated: true,\n      note: 'SIMULATED result: no real system was changed (REMEDIATION_EXECUTION_MODE=simulate).',\n      service_name: (d.request_payload && typeof d.request_payload.service_name === 'string') ? d.request_payload.service_name.slice(0, 100) : null,\n    },\n  },\n}];\n"
+      },
+      "id": "0d05af52-57dc-464a-a772-c95b29b6efda",
+      "name": "Execute: scale",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        -270
+      ],
+      "notes": "BLOCKED: no executor. simulate mode only. No shell commands."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 06 – Nodes: \"Execute: restart / rollback / scale / circuit_breaker\".\n// (The same code is used in the four branches; ACTION is set by the builder.)\n//\n// BLOCKED: the project has no playbook executor yet (planned in\n// infrastructure/playbooks/, Gantt tasks 30-31). This node does NOT run shell\n// commands and does NOT accept commands from the webhook or the AI.\n//   REMEDIATION_EXECUTION_MODE=simulate -> records a clearly marked simulated\n//                                          result (for end-to-end tests only)\n//   anything else                       -> never reaches this node (the workflow\n//                                          refuses before starting the run)\n// When the executor exists, replace this node with a signed HTTP Request to it,\n// passing only { action, service_name, playbook_run_id }.\n\nconst d = $input.first().json;\nconst ACTION = \"circuit_breaker\";\nif (d.action_type !== ACTION) throw new Error('Branch/action mismatch: ' + d.action_type + ' in ' + ACTION + ' branch.');\n\nif (d.execution_mode !== 'simulate') {\n  return [{ json: { ...d, outcome: 'failed', result: { action: ACTION, executed: false, reason: 'No playbook executor is configured (integration BLOCKED).' } } }];\n}\nreturn [{\n  json: {\n    ...d,\n    outcome: 'success',\n    result: {\n      action: ACTION,\n      executed: false,\n      simulated: true,\n      note: 'SIMULATED result: no real system was changed (REMEDIATION_EXECUTION_MODE=simulate).',\n      service_name: (d.request_payload && typeof d.request_payload.service_name === 'string') ? d.request_payload.service_name.slice(0, 100) : null,\n    },\n  },\n}];\n"
+      },
+      "id": "ab517ac9-ddbd-47fa-a13d-0530db67436d",
+      "name": "Execute: circuit_breaker",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        -90
+      ],
+      "notes": "BLOCKED: no executor. simulate mode only. No shell commands."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 06 – Node: \"Unsupported or rejected action\". Reached when the\n// approved playbook's action is not one of the four supported branches, or when\n// the start result did not match the request. Nothing is executed.\nconst d = $input.first().json;\nreturn [{ json: { ...d, outcome: 'failed', result: { action: d.action_type || null, executed: false, reason: d.rejection || 'Unsupported action type.' } } }];\n"
+      },
+      "id": "9d71c5a0-c9ec-445f-ad30-4237f892b15e",
+      "name": "Unsupported or rejected action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        90
+      ],
+      "notes": "Completes the run as failed. Nothing is executed."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "fa0ea497-7eac-46e8-a856-5de70d7c568b",
+      "name": "Respond refused",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2080,
+        0
+      ],
+      "notes": "Backend refused (not approved / not found) or mismatch."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3f4984d4-36db-4858-a6e9-089444d25cf5",
+              "leftValue": "={{ $json.started_but_rejected === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "59ad1abb-133c-4b64-a99b-9b7a7a00f5b3",
+      "name": "Started but mismatched?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2340,
+        0
+      ],
+      "notes": "A started run must be completed (as failed)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 06 – Node: \"Sign complete request\".\n//   POST /api/machine/playbook-runs/:id/complete\n//   { n8n_execution_id, status: \"success\"|\"failed\", result }\n// Must use the same n8n_execution_id that started the run (else DC403).\n// ---- shared: HMAC signing (same scheme as backend/src/middleware/machine-auth.ts) ----\n// canonical = timestamp + \".\" + nonce + \".\" + METHOD + \".\" + path + \".\" + rawBody\n// header X-DC-Signature = \"sha256=\" + hex(HMAC-SHA256(secret, canonical))\nconst __crypto = require('crypto');\nconst HMAC_MAX_SKEW_SECONDS = 300;\nconst HMAC_MIN_SECRET_LENGTH = 32;\nconst HMAC_NONCE_PATTERN = /^[A-Za-z0-9_-]{16,200}$/;\nconst HMAC_SIGNATURE_PATTERN = /^sha256=[0-9a-f]{64}$/;\n\nfunction hmacCanonical(timestamp, nonce, method, path, body) {\n  return [String(timestamp), nonce, String(method).toUpperCase(), path, body].join('.');\n}\n\nfunction hmacSignature(secret, timestamp, nonce, method, path, body) {\n  return 'sha256=' + __crypto.createHmac('sha256', secret)\n    .update(hmacCanonical(timestamp, nonce, method, path, body), 'utf8').digest('hex');\n}\n\nfunction hmacSecret(value) {\n  if (typeof value !== 'string' || value.length < HMAC_MIN_SECRET_LENGTH) {\n    throw new Error('MACHINE_SIGNING_SECRET is missing or shorter than 32 characters.');\n  }\n  return value;\n}\n\nfunction hmacNonce() {\n  return __crypto.randomBytes(24).toString('base64url');\n}\n\n// Build a signed backend request. `path` must be the full request path (e.g.\n// /api/machine/playbook-runs/<id>/start) because the backend signs req.originalUrl.\nfunction signedBackendRequest(env, method, path, payload, now) {\n  const secret = hmacSecret(env.MACHINE_SIGNING_SECRET);\n  const base = String(env.BACKEND_BASE_URL || '').replace(/\\/+$/, '');\n  if (!/^https?:\\/\\//.test(base)) throw new Error('BACKEND_BASE_URL is not configured.');\n  const body = payload === undefined ? '' : JSON.stringify(payload);\n  const timestamp = Math.floor((now || Date.now()) / 1000);\n  const nonce = hmacNonce();\n  return {\n    method: method.toUpperCase(),\n    url: base + path,\n    path,\n    body,\n    headers: {\n      'X-DC-Timestamp': String(timestamp),\n      'X-DC-Nonce': nonce,\n      'X-DC-Signature': hmacSignature(secret, timestamp, nonce, method, path, body),\n    },\n  };\n}\n\n// Verify an incoming signed request (backend -> n8n). Returns { ok, status, reason }.\n// `seen` is a plain object used as the replay store (workflow static data).\nfunction verifySignedRequest(secret, headers, method, path, rawBody, seen, nowMs) {\n  const now = nowMs || Date.now();\n  const h = {};\n  for (const [k, v] of Object.entries(headers || {})) h[String(k).toLowerCase()] = v;\n  const ts = h['x-dc-timestamp'];\n  const nonce = h['x-dc-nonce'];\n  const sig = h['x-dc-signature'];\n  if (!ts || !nonce || !sig) return { ok: false, status: 401, reason: 'Signed request headers are required.' };\n  if (!/^\\d{1,12}$/.test(String(ts))) return { ok: false, status: 401, reason: 'Invalid request timestamp.' };\n  if (Math.abs(now / 1000 - Number(ts)) > HMAC_MAX_SKEW_SECONDS) {\n    return { ok: false, status: 401, reason: 'Signed request is outside the 5 minute window.' };\n  }\n  if (!HMAC_NONCE_PATTERN.test(nonce) || !HMAC_SIGNATURE_PATTERN.test(sig)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  const expected = Buffer.from(hmacSignature(hmacSecret(secret), Number(ts), nonce, method, path, rawBody), 'utf8');\n  const given = Buffer.from(sig, 'utf8');\n  if (given.length !== expected.length || !__crypto.timingSafeEqual(given, expected)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  // Replay protection: each nonce once within 15 minutes (3x the skew window).\n  const cutoff = now - 15 * 60 * 1000;\n  for (const [k, at] of Object.entries(seen)) if (at < cutoff) delete seen[k];\n  if (seen[nonce]) return { ok: false, status: 409, reason: 'Replayed request.' };\n  seen[nonce] = now;\n  return { ok: true, status: 200, reason: null };\n}\n// ---- end shared: HMAC ----\nconst d = $input.first().json;\nconst req = signedBackendRequest($env, 'POST', '/api/machine/playbook-runs/' + d.playbook_run_id + '/complete', {\n  n8n_execution_id: d.n8n_execution_id,\n  status: d.outcome === 'success' ? 'success' : 'failed',\n  result: d.result,\n});\nreturn [{ json: { ...d, request: req } }];\n"
+      },
+      "id": "9d61ed32-bd4d-4636-a2c5-60621b176097",
+      "name": "Sign complete request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.request.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-DC-Timestamp",
+              "value": "={{ $json.request.headers[\"X-DC-Timestamp\"] }}"
+            },
+            {
+              "name": "X-DC-Nonce",
+              "value": "={{ $json.request.headers[\"X-DC-Nonce\"] }}"
+            },
+            {
+              "name": "X-DC-Signature",
+              "value": "={{ $json.request.headers[\"X-DC-Signature\"] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.request.body }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "072cc31e-ed1f-4913-a3da-1cea074e2458",
+      "name": "Backend: complete run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        -180
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "POST /api/machine/playbook-runs/:id/complete (same n8n_execution_id)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 06 – Node: \"Check completion\". Builds the input for the recovery\n// check (workflow 07). Recovery is only checked after a reported success.\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\nconst d = $('Sign complete request').first().json;\nconst response = $input.first().json;\nconst c = classifyHttp(response);\nconst { request, ...ctx } = d;\nconst completed = c.kind === 'ok';\nconst serviceName = ctx.result && ctx.result.service_name\n  ? ctx.result.service_name\n  : (ctx.request_payload && typeof ctx.request_payload.service_name === 'string' ? ctx.request_payload.service_name : null);\nreturn [{\n  json: {\n    incident_id: ctx.incident_id,\n    playbook_run_id: ctx.playbook_run_id,\n    action_type: ctx.action_type,\n    outcome: ctx.outcome,\n    simulated: !!(ctx.result && ctx.result.simulated),\n    completed,\n    complete_error: completed ? null : { kind: c.kind, http_status: c.status, retryable: c.retryable, message: c.message },\n    check_recovery: completed && ctx.outcome === 'success',\n    service_name: serviceName,\n  },\n}];\n"
+      },
+      "id": "e4096f24-c874-4fbf-aea5-aa2ed63cec97",
+      "name": "Check completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3380,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "133e2eed-0456-4d51-a5a6-126eb4dbc5fb",
+              "leftValue": "={{ $json.check_recovery }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "804afbd0-a077-4c8e-a9c7-66dceb37042f",
+      "name": "Check recovery?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3640,
+        -180
+      ],
+      "notes": "Only after a reported success."
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "dc33wf07recovery",
+          "mode": "list",
+          "cachedResultName": "07 - Recovery Check"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "789bcd16-84ad-4d4d-a5f0-be4877109d04",
+      "name": "Run 07 Recovery Check",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3900,
+        -360
+      ],
+      "notes": "Recovery verification (Tharindu).",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "5f841969-a905-4de1-ae11-e4aa1260ab0c",
+      "name": "Done (no recovery check)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3900,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Action type": {
+      "main": [
+        [
+          {
+            "node": "Execute: restart",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute: rollback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute: scale",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute: circuit_breaker",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unsupported or rejected action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: restart": {
+      "main": [
+        [
+          {
+            "node": "Sign complete request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: rollback": {
+      "main": [
+        [
+          {
+            "node": "Sign complete request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: scale": {
+      "main": [
+        [
+          {
+            "node": "Sign complete request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: circuit_breaker": {
+      "main": [
+        [
+          {
+            "node": "Sign complete request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remediation webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify signature and payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature and payload": {
+      "main": [
+        [
+          {
+            "node": "Request valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request valid?": {
+      "main": [
+        [
+          {
+            "node": "Execution available?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execution available?": {
+      "main": [
+        [
+          {
+            "node": "Sign start request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execution blocked response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execution blocked response": {
+      "main": [
+        [
+          {
+            "node": "Respond 503",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign start request": {
+      "main": [
+        [
+          {
+            "node": "Backend: start run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backend: start run": {
+      "main": [
+        [
+          {
+            "node": "Check start result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check start result": {
+      "main": [
+        [
+          {
+            "node": "Run started?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run started?": {
+      "main": [
+        [
+          {
+            "node": "Respond 202",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond refused",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 202": {
+      "main": [
+        [
+          {
+            "node": "Action type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond refused": {
+      "main": [
+        [
+          {
+            "node": "Started but mismatched?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Started but mismatched?": {
+      "main": [
+        [
+          {
+            "node": "Unsupported or rejected action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unsupported or rejected action": {
+      "main": [
+        [
+          {
+            "node": "Sign complete request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign complete request": {
+      "main": [
+        [
+          {
+            "node": "Backend: complete run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backend: complete run": {
+      "main": [
+        [
+          {
+            "node": "Check completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check completion": {
+      "main": [
+        [
+          {
+            "node": "Check recovery?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check recovery?": {
+      "main": [
+        [
+          {
+            "node": "Run 07 Recovery Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Done (no recovery check)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "dc33wf09errorhnd"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
