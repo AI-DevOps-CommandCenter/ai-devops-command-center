@@ -1,0 +1,24 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "streams",
+    "result": [
+      {
+        "stream": { "service": "checkout-api", "level": "error" },
+        "values": [
+          ["1794132180000000000", "ERROR PaymentService: NullPointerException at PaymentService.charge(PaymentService.java:88) order=48213"],
+          ["1794132170000000000", "ERROR PaymentService: NullPointerException at PaymentService.charge(PaymentService.java:88) order=48207"],
+          ["1794132160000000000", "ERROR PaymentService: NullPointerException at PaymentService.charge(PaymentService.java:88) order=48199"],
+          ["1794132150000000000", "ERROR HTTP 500 POST /api/checkout took 1830ms"],
+          ["1794132060000000000", "ERROR PaymentService: NullPointerException at PaymentService.charge(PaymentService.java:88) order=48150"]
+        ]
+      },
+      {
+        "stream": { "service": "checkout-api", "level": "warn" },
+        "values": [
+          ["1794132100000000000", "WARN Retrying payment gateway call attempt=2 token=abcd1234secret"]
+        ]
+      }
+    ]
+  }
+}
