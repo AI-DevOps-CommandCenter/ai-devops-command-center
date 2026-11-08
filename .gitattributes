@@ -1,0 +1,4 @@
+# Keep shell scripts and SQL with LF line endings on every platform
+# (bash fails on CRLF scripts; keeps migration checksums stable).
+*.sh   text eol=lf
+*.sql  text eol=lf
