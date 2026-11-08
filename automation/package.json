@@ -1,0 +1,13 @@
+{
+  "name": "dc33-automation",
+  "private": true,
+  "description": "n8n workflows for the AI-Powered Mobile DevOps Command Center (Group 33). No runtime dependencies.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node scripts/build-workflows.mjs",
+    "test": "node --test tests/unit.test.mjs",
+    "test:hmac": "npx --prefix ../backend tsx tests/hmac-interop.mjs",
+    "test:n8n": "node tests/integration/run-n8n-integration.mjs"
+  }
+}

@@ -1,10 +1,14 @@
 services:
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    # Pinned: the workflows were built and tested against n8n 2.40.5.
+    image: docker.n8n.io/n8nio/n8n:2.40.5
     container_name: n8n
     restart: unless-stopped
     ports:
       - "${N8N_PORT:-5678}:5678"
+    extra_hosts:
+      # Lets the container reach the backend/Loki/Prometheus on the host (also on Linux).
+      - "host.docker.internal:host-gateway"
     environment:
       N8N_HOST: "${N8N_HOST:-localhost}"
       N8N_PORT: "5678"
@@ -13,12 +17,58 @@ services:
       N8N_ENCRYPTION_KEY: "${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in .env}"
       GENERIC_TIMEZONE: "Asia/Colombo"
       TZ: "Asia/Colombo"
-      GROQ_API_KEY: "${GROQ_API_KEY:-}"
-      GROQ_MODEL: "${GROQ_MODEL:-}"
-      N8N_WEBHOOK_SECRET: "${N8N_WEBHOOK_SECRET:-}"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      # The Code nodes sign/verify HMAC requests with Node's crypto module.
+      NODE_FUNCTION_ALLOW_BUILTIN: "crypto"
+      # Workflows read their configuration (and MACHINE_SIGNING_SECRET) with $env.
+      # NOTE: decision A5 asked for "true". n8n Community Edition has no other
+      # place for a secret that a Code node can use, so this stays "false" until
+      # the team decides (docs/automation-integration-requirements.md, D-N8N-1).
+      # API keys are NOT passed here: Groq/GitHub/Alertmanager keys live in n8n
+      # Credentials. Only the variables below reach the container.
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # --- workflow configuration (see .env.example) ---
+      BACKEND_BASE_URL: "${BACKEND_BASE_URL:-}"
+      MACHINE_SIGNING_SECRET: "${MACHINE_SIGNING_SECRET:-}"
+      N8N_REMEDIATION_SIGNED_PATH: "${N8N_REMEDIATION_SIGNED_PATH:-/webhook/remediation}"
+      REMEDIATION_EXECUTION_MODE: "${REMEDIATION_EXECUTION_MODE:-disabled}"
+      GROQ_API_BASE_URL: "${GROQ_API_BASE_URL:-https://api.groq.com/openai/v1}"
+      GROQ_MODEL: "${GROQ_MODEL:-}"
+      GROQ_TIMEOUT_MS: "${GROQ_TIMEOUT_MS:-30000}"
+      LOKI_URL: "${LOKI_URL:-}"
+      LOKI_SERVICE_LABEL: "${LOKI_SERVICE_LABEL:-service}"
+      LOKI_LOOKBACK_MINUTES: "${LOKI_LOOKBACK_MINUTES:-15}"
+      LOKI_AFTER_MINUTES: "${LOKI_AFTER_MINUTES:-5}"
+      LOKI_MAX_LINES: "${LOKI_MAX_LINES:-200}"
+      PROMETHEUS_URL: "${PROMETHEUS_URL:-}"
+      PROM_SERVICE_LABEL: "${PROM_SERVICE_LABEL:-job}"
+      PROM_BASELINE_OFFSET_MINUTES: "${PROM_BASELINE_OFFSET_MINUTES:-30}"
+      PROM_ANOMALY_FACTOR: "${PROM_ANOMALY_FACTOR:-2}"
+      PROM_QUERY_CPU: "${PROM_QUERY_CPU:-}"
+      PROM_QUERY_MEMORY: "${PROM_QUERY_MEMORY:-}"
+      PROM_QUERY_ERROR_RATE: "${PROM_QUERY_ERROR_RATE:-}"
+      PROM_QUERY_LATENCY_P95: "${PROM_QUERY_LATENCY_P95:-}"
+      PROM_QUERY_REQUEST_RATE: "${PROM_QUERY_REQUEST_RATE:-}"
+      PROM_THRESHOLD_CPU: "${PROM_THRESHOLD_CPU:-}"
+      PROM_THRESHOLD_MEMORY: "${PROM_THRESHOLD_MEMORY:-}"
+      PROM_THRESHOLD_ERROR_RATE: "${PROM_THRESHOLD_ERROR_RATE:-}"
+      PROM_THRESHOLD_LATENCY_P95: "${PROM_THRESHOLD_LATENCY_P95:-}"
+      RECOVERY_WAIT_SECONDS: "${RECOVERY_WAIT_SECONDS:-60}"
+      RECOVERY_MAX_CHECKS: "${RECOVERY_MAX_CHECKS:-3}"
+      RECOVERY_REQUIRE_ERROR_RATE: "${RECOVERY_REQUIRE_ERROR_RATE:-true}"
+      GITHUB_API_URL: "${GITHUB_API_URL:-https://api.github.com}"
+      GITHUB_OWNER: "${GITHUB_OWNER:-}"
+      GITHUB_REPO: "${GITHUB_REPO:-}"
+      DEPLOY_LOOKBACK_HOURS: "${DEPLOY_LOOKBACK_HOURS:-24}"
+      DEPLOY_SUSPECT_MINUTES: "${DEPLOY_SUSPECT_MINUTES:-60}"
+      DEPLOY_WORKFLOW_PATTERN: "${DEPLOY_WORKFLOW_PATTERN:-}"
+      ALERT_SERVICE_LABEL: "${ALERT_SERVICE_LABEL:-service}"
+      DEDUP_WINDOW_MINUTES: "${DEDUP_WINDOW_MINUTES:-360}"
+      ERROR_NOTIFY_WEBHOOK_URL: "${ERROR_NOTIFY_WEBHOOK_URL:-}"
     volumes:
       - n8n_data:/home/node/.n8n
+      # Read-only copy of the workflow files for `n8n import:workflow` inside the container.
+      - ./workflows:/import/workflows:ro
 
 volumes:
   n8n_data:
