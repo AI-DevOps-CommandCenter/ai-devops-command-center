@@ -1,0 +1,204 @@
+{
+  "id": "dc33wf03metricsa",
+  "name": "03 - Metrics Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 03 – Metrics Analysis (owner: Tharindu)\nCurrent vs baseline for cpu, memory (prom-client defaults) and error_rate / latency_p95 / request_rate (only when `PROM_QUERY_*` is set).\nAbnormal = above `PROM_THRESHOLD_*` or ≥ `PROM_ANOMALY_FACTOR` × baseline.",
+        "width": 700,
+        "height": 220
+      },
+      "id": "c3db5ddd-6770-4553-a9ee-9671674b32c7",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "4fe6919a-50f1-478a-aacc-cc8e9b9a9e94",
+      "name": "When called by 05 Root Cause",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Input: { incident_id, service_name, alert_name, severity, started_at }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 03 – Metrics Analysis (owner: Tharindu)\r\n// Node: \"Build PromQL queries\". One item per (metric, phase): the value at the\r\n// incident time (\"current\") and at a baseline time before it (\"baseline\").\r\n//\r\n// Metric names are NOT invented here:\r\n// - cpu / memory default to prom-client's built-in default metrics\r\n//   (process_cpu_seconds_total, process_resident_memory_bytes), which the sample\r\n//   app is planned to expose; confirm with the monitoring owner.\r\n// - error_rate / latency_p95 / request_rate have no default: they depend on the\r\n//   app's own metrics and must be set in PROM_QUERY_* (otherwise \"not_configured\").\r\n// Every query is a template where {{service}} is replaced by the service name.\r\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\nconst env = $env;\r\nconst input = readInvestigationInput($input.first().json);\r\nconst ctx = input.ctx;\r\n\r\nif (!input.ok) {\r\n  return [{ json: { skip: true, result: investigationResult('metrics', ctx, { status: 'invalid_input', error: { kind: 'invalid_input', message: input.error } }) } }];\r\n}\r\nconst promUrl = String(env.PROMETHEUS_URL || '').replace(/\\/+$/, '');\r\nif (!/^https?:\\/\\//.test(promUrl)) {\r\n  return [{ json: { skip: true, result: investigationResult('metrics', ctx, { status: 'not_configured', summary: 'Prometheus is not configured (PROMETHEUS_URL).', error: { kind: 'not_configured', message: 'Set PROMETHEUS_URL in the n8n environment.' } }) } }];\r\n}\r\n\r\nconst label = String(env.PROM_SERVICE_LABEL || 'job');\r\nif (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(label)) throw new Error('PROM_SERVICE_LABEL is not a valid label name.');\r\nconst sel = label + '=\"{{service}}\"';\r\n\r\nconst METRICS = [\r\n  { name: 'cpu', unit: 'cores', env: 'PROM_QUERY_CPU', fallback: 'sum(rate(process_cpu_seconds_total{' + sel + '}[5m]))', threshold: 'PROM_THRESHOLD_CPU' },\r\n  { name: 'memory', unit: 'bytes', env: 'PROM_QUERY_MEMORY', fallback: 'sum(process_resident_memory_bytes{' + sel + '})', threshold: 'PROM_THRESHOLD_MEMORY' },\r\n  { name: 'error_rate', unit: 'ratio', env: 'PROM_QUERY_ERROR_RATE', fallback: null, threshold: 'PROM_THRESHOLD_ERROR_RATE' },\r\n  { name: 'latency_p95', unit: 'seconds', env: 'PROM_QUERY_LATENCY_P95', fallback: null, threshold: 'PROM_THRESHOLD_LATENCY_P95' },\r\n  { name: 'request_rate', unit: 'req/s', env: 'PROM_QUERY_REQUEST_RATE', fallback: null, threshold: null },\r\n];\r\n\r\nconst started = new Date(ctx.started_at).getTime();\r\nconst baselineOffset = envInt(env, 'PROM_BASELINE_OFFSET_MINUTES', 30, 5, 1440);\r\nconst times = { current: new Date(Math.min(Date.now(), started + 2 * 60000)), baseline: new Date(started - baselineOffset * 60000) };\r\nconst timeout = envInt(env, 'PROMETHEUS_TIMEOUT_MS', 10000, 1000, 60000);\r\n\r\nconst items = [];\r\nconst notConfigured = [];\r\nfor (const m of METRICS) {\r\n  const template = env[m.env] || m.fallback;\r\n  if (!template) { notConfigured.push(m.name); continue; }\r\n  const query = String(template).split('{{service}}').join(ctx.service_name);\r\n  for (const phase of ['current', 'baseline']) {\r\n    items.push({\r\n      json: {\r\n        skip: false,\r\n        ctx,\r\n        metric: m.name,\r\n        unit: m.unit,\r\n        phase,\r\n        query,\r\n        at: times[phase].toISOString(),\r\n        threshold: m.threshold && env[m.threshold] !== undefined && env[m.threshold] !== '' ? Number(env[m.threshold]) : null,\r\n        not_configured: notConfigured,\r\n        url: promUrl + '/api/v1/query?' + toQuery({ query, time: times[phase].toISOString() }),\r\n        timeout_ms: timeout,\r\n      },\r\n    });\r\n  }\r\n}\r\nif (!items.length) {\r\n  return [{ json: { skip: true, result: investigationResult('metrics', ctx, { status: 'not_configured', summary: 'No PromQL queries are configured.', error: { kind: 'not_configured', message: 'Set PROM_QUERY_* in the n8n environment.' } }) } }];\r\n}\r\n// not_configured is final only after the loop; copy it onto every item.\r\nfor (const it of items) it.json.not_configured = notConfigured;\r\nreturn items;\r\n"
+      },
+      "id": "939aa914-624d-4176-a258-0f346a2dd54e",
+      "name": "Build PromQL queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "628d59f2-f022-4c38-a23c-2f48ed2fc0e1",
+              "leftValue": "={{ !$json.skip }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "8a78a148-1f29-4565-a271-f7b6522bf57a",
+      "name": "Request ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": "={{ $json.timeout_ms || 15000 }}",
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "b8858ace-a839-42fd-a093-dec5b4e44ece",
+      "name": "Prometheus: instant query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        -180
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "GET {PROMETHEUS_URL}/api/v1/query, one call per metric and phase.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 03 – Node: \"Evaluate metrics\". Pairs every Prometheus answer with\n// its request (same position), compares current vs baseline and thresholds.\n// A metric is abnormal when it is above its configured threshold, or when it is\n// at least PROM_ANOMALY_FACTOR times its baseline (default 2).\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\nconst env = $env;\nconst reqs = $('Build PromQL queries').all().map((i) => i.json);\nconst resps = $input.all().map((i) => i.json);\nconst ctx = reqs[0].ctx;\nconst factor = envNumber(env, 'PROM_ANOMALY_FACTOR', 2);\n\nconst metrics = {};\nlet failures = 0;\nlet lastError = null;\nreqs.forEach((req, idx) => {\n  const r = resps[idx] || {};\n  const m = metrics[req.metric] || (metrics[req.metric] = { name: req.metric, unit: req.unit, query: req.query, threshold: req.threshold, current: null, baseline: null, errors: [] });\n  const c = classifyHttp(r);\n  if (c.kind !== 'ok') {\n    failures++;\n    lastError = { kind: c.kind, http_status: c.status, retryable: c.retryable, message: c.message };\n    m.errors.push(req.phase + ': ' + c.kind);\n    return;\n  }\n  const b = r.body;\n  if (!b || b.status !== 'success' || !b.data || !Array.isArray(b.data.result)) {\n    failures++;\n    lastError = { kind: 'invalid_response', message: 'Unexpected Prometheus response.' };\n    m.errors.push(req.phase + ': invalid response');\n    return;\n  }\n  // Sum all series of an instant vector (queries already aggregate with sum()).\n  const values = b.data.result.map((s) => Number(s.value && s.value[1])).filter((v) => Number.isFinite(v));\n  m[req.phase] = values.length ? values.reduce((a, v) => a + v, 0) : null;\n});\n\nconst all = Object.values(metrics);\nconst window = { current_at: (reqs.find((r) => r.phase === 'current') || {}).at, baseline_at: (reqs.find((r) => r.phase === 'baseline') || {}).at };\n\nif (failures === reqs.length) {\n  const status = lastError && lastError.kind === 'client_error' ? 'query_rejected' : lastError && lastError.kind === 'invalid_response' ? 'invalid_response' : 'unavailable';\n  return [{ json: investigationResult('metrics', ctx, { status, window, summary: 'Prometheus queries failed.', error: lastError }) }];\n}\n\nconst findings = [];\nconst evidence = [];\nconst missing = [];\nlet abnormal = 0;\nfor (const m of all) {\n  if (m.current === null) { missing.push(m.name); continue; }\n  const ratio = m.baseline && m.baseline > 0 ? m.current / m.baseline : null;\n  const reasons = [];\n  if (m.threshold !== null && Number.isFinite(m.threshold) && m.current > m.threshold) reasons.push('above threshold ' + m.threshold);\n  if (ratio !== null && ratio >= factor) reasons.push(ratio.toFixed(1) + 'x baseline');\n  if ((m.baseline === 0 || m.baseline === null) && m.current > 0 && m.name === 'error_rate') reasons.push('errors appeared (baseline 0)');\n  m.abnormal = reasons.length > 0;\n  const fmt = (v) => (v === null ? 'n/a' : Math.abs(v) >= 1000 ? v.toExponential(2) : Number(v.toFixed(4)));\n  evidence.push({ type: 'metric', source: 'prometheus', metric: m.name, unit: m.unit, query: m.query, current: m.current, baseline: m.baseline, ratio: ratio === null ? null : Number(ratio.toFixed(2)), abnormal: m.abnormal });\n  if (m.abnormal) {\n    abnormal++;\n    findings.push(m.name + ' is abnormal: ' + fmt(m.current) + ' ' + m.unit + ' (baseline ' + fmt(m.baseline) + '; ' + reasons.join(', ') + ').');\n  }\n}\nconst notConfigured = reqs[0].not_configured || [];\nif (missing.length) findings.push('No data for: ' + missing.join(', ') + ' (metric missing or label mismatch).');\nif (notConfigured.length) findings.push('Not configured: ' + notConfigured.join(', ') + ' (set PROM_QUERY_* to enable).');\n\nconst partial = failures > 0 ? { kind: 'partial', message: failures + ' of ' + reqs.length + ' queries failed', last: lastError } : null;\nif (abnormal === 0) {\n  return [{ json: investigationResult('metrics', ctx, { status: evidence.length ? 'no_evidence' : 'unavailable', window, summary: evidence.length ? 'No abnormal metrics for ' + ctx.service_name + '.' : 'No metric data found for ' + ctx.service_name + '.', findings, evidence, confidence: 0.2, error: partial || (evidence.length ? null : { kind: 'no_data', message: 'All configured metrics returned no data.' }) }) }];\n}\nreturn [{ json: investigationResult('metrics', ctx, { status: 'evidence_found', window, summary: abnormal + ' abnormal metric(s) for ' + ctx.service_name + '.', findings, evidence, confidence: Math.min(0.9, 0.5 + 0.15 * abnormal), error: partial }) }];\n"
+      },
+      "id": "c7b65ec6-5aa9-4fbf-aed0-2d5f6c69b767",
+      "name": "Evaluate metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -180
+      ],
+      "notes": "Returns automation/schemas/investigation-output.schema.json"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Shared terminal node for 02/03/04: \"Return skipped result\".\n// Used when no HTTP call is made (invalid input or source not configured).\nreturn [{ json: $input.first().json.result }];\n"
+      },
+      "id": "22ad8a66-92c8-470c-a8dd-c4879c459c95",
+      "name": "Return skipped result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        180
+      ],
+      "notes": "Invalid input or source not configured: no HTTP call."
+    }
+  ],
+  "connections": {
+    "When called by 05 Root Cause": {
+      "main": [
+        [
+          {
+            "node": "Build PromQL queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build PromQL queries": {
+      "main": [
+        [
+          {
+            "node": "Request ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request ready?": {
+      "main": [
+        [
+          {
+            "node": "Prometheus: instant query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return skipped result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prometheus: instant query": {
+      "main": [
+        [
+          {
+            "node": "Evaluate metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "dc33wf09errorhnd"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
