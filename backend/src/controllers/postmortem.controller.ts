@@ -1,3 +1,4 @@
+
 import type { Request, Response } from "express";
 
 import {
@@ -19,7 +20,21 @@ import { createAuditLog } from "../services/audit.service.js";
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function isStringArray(value: unknown): boolean {
+// Check whether a value is a JSON object
+function isJsonObject(
+  value: unknown
+): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+// Check whether a value is an array of JSON objects
+function isObjectArray(
+  value: unknown
+): value is Record<string, unknown>[] {
   return (
     Array.isArray(value) &&
     value.every(
@@ -31,7 +46,10 @@ function isStringArray(value: unknown): boolean {
   );
 }
 
-function isValidOptionalText(value: unknown): boolean {
+// Check whether an optional text value is valid
+function isValidOptionalText(
+  value: unknown
+): value is string | null | undefined {
   return (
     value === undefined ||
     value === null ||
@@ -39,6 +57,7 @@ function isValidOptionalText(value: unknown): boolean {
   );
 }
 
+// Check whether the user is an administrator or operator
 async function isIncidentManager(
   client: NonNullable<Request["userSupabase"]>,
   userId: string
@@ -70,6 +89,15 @@ export async function createPostmortemController(
       });
     }
 
+    const body = req.body ?? {};
+
+    if (!isJsonObject(body)) {
+      return res.status(400).json({
+        success: false,
+        message: "Request body must be a JSON object."
+      });
+    }
+
     const {
       incident_id,
       summary,
@@ -78,7 +106,7 @@ export async function createPostmortemController(
       timeline,
       lessons_learned,
       action_items
-    } = req.body ?? {};
+    } = body;
 
     if (
       typeof incident_id !== "string" ||
@@ -111,14 +139,14 @@ export async function createPostmortemController(
       });
     }
 
-    if (timeline !== undefined && !isStringArray(timeline)) {
+    if (timeline !== undefined && !isObjectArray(timeline)) {
       return res.status(400).json({
         success: false,
         message: "Timeline must be an array of JSON objects."
       });
     }
 
-    if (action_items !== undefined && !isStringArray(action_items)) {
+    if (action_items !== undefined && !isObjectArray(action_items)) {
       return res.status(400).json({
         success: false,
         message: "Action items must be an array of JSON objects."
@@ -180,7 +208,6 @@ export async function createPostmortemController(
       });
     }
 
-    // Handle other errors
     return res.status(500).json({
       success: false,
       message: "Failed to create postmortem."
@@ -339,6 +366,15 @@ export async function updatePostmortemController(
       });
     }
 
+    const body = req.body ?? {};
+
+    if (!isJsonObject(body)) {
+      return res.status(400).json({
+        success: false,
+        message: "Request body must be a JSON object."
+      });
+    }
+
     const {
       summary,
       root_cause,
@@ -346,7 +382,7 @@ export async function updatePostmortemController(
       timeline,
       lessons_learned,
       action_items
-    } = req.body ?? {};
+    } = body;
 
     const input: UpdatePostmortemInput = {};
 
@@ -357,6 +393,7 @@ export async function updatePostmortemController(
           message: "Summary must be non-empty text."
         });
       }
+
       input.summary = summary.trim();
     }
 
@@ -367,6 +404,7 @@ export async function updatePostmortemController(
           message: "Root cause must be text."
         });
       }
+
       input.root_cause = root_cause;
     }
 
@@ -397,22 +435,24 @@ export async function updatePostmortemController(
     }
 
     if (timeline !== undefined) {
-      if (!isStringArray(timeline)) {
+      if (!isObjectArray(timeline)) {
         return res.status(400).json({
           success: false,
           message: "Timeline must be an array of JSON objects."
         });
       }
+
       input.timeline = timeline;
     }
 
     if (action_items !== undefined) {
-      if (!isStringArray(action_items)) {
+      if (!isObjectArray(action_items)) {
         return res.status(400).json({
           success: false,
           message: "Action items must be an array of JSON objects."
         });
       }
+
       input.action_items = action_items;
     }
 

@@ -2,12 +2,12 @@
   "name": "devops-command-center-backend",
   "version": "1.0.0",
   "type": "module",
-  "description": "REST API for the AI-Powered Mobile DevOps Command Center (Express + Supabase, user JWT + RLS).",
+  "description": "Backend API for the AI-Powered Mobile DevOps Command Center (Express + Supabase, user JWT + RLS)",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
     "build": "tsc",
+    "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

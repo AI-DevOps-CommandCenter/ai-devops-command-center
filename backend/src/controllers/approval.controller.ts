@@ -23,7 +23,7 @@ export async function createApprovalController(
       });
     }
 
-    const { incident_id } = req.body;
+    const { incident_id } = req.body ?? {};
 
     // Validate incident ID
     const uuidRegex =
@@ -210,12 +210,12 @@ export async function decideApprovalController(
       });
     }
 
-    const { status, comments } = req.body;
+    const { status, comments } = req.body ?? {};
 
-    if (!["approved", "rejected"].includes(status)) {
+    if (status !== "approved" && status !== "rejected") {
       return res.status(400).json({
-        success: false,
-        message: "Status must be approved or rejected."
+      success: false,
+      message: "Status must be approved or rejected."
       });
     }
 

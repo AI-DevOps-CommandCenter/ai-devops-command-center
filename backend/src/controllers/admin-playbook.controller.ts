@@ -145,7 +145,7 @@ export async function createPlaybookController(
       configuration,
       enabled,
       requires_approval
-    } = req.body;
+    } = req.body ?? {};
 
     if (typeof name !== "string" || !name.trim()) {
       return res.status(400).json({
@@ -278,7 +278,7 @@ export async function updatePlaybookController(
       configuration,
       enabled,
       requires_approval
-    } = req.body;
+    } = req.body ?? {};
 
     const input: UpdatePlaybookInput = {};
 
