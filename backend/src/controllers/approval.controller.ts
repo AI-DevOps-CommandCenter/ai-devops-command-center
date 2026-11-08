@@ -1,13 +1,34 @@
 import type { Request, Response } from "express";
 import {
-  createApproval,
   getApprovals,
   getApprovalById,
-  getUserRole,
-  decideApproval
+  decideApproval,
+  cancelApproval
 } from "../services/approval.service.js";
-import { createAuditLog } from "../services/audit.service.js";
+import { requestPlaybookRun } from "../services/playbook-run.service.js";
+import { sendDbError } from "../lib/db-errors.js";
 
+// Approval writes use the database workflow functions (decisions A2/A3).
+// The functions enforce who may decide (admin or operator, never their own
+// request), and write the audit entry themselves, so no audit call is made
+// here.
+
+const uuidRegex =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const validStatuses = ["pending", "approved", "rejected", "cancelled"];
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isOptionalText(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+// Request an approval. Under A3 every approval belongs to exactly one
+// playbook run, so this creates the run and its pending approval together
+// (request_playbook_run). `playbook_id` is therefore required.
 export async function createApprovalController(
   req: Request,
   res: Response
@@ -23,57 +44,71 @@ export async function createApprovalController(
       });
     }
 
-    const { incident_id } = req.body ?? {};
+    const body = req.body ?? {};
+    const { incident_id, playbook_id, request_payload, idempotency_key } = body;
 
-    // Validate incident ID
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-    if (!incident_id || !uuidRegex.test(incident_id)) {
+    if (typeof incident_id !== "string" || !uuidRegex.test(incident_id)) {
       return res.status(400).json({
         success: false,
         message: "A valid incident ID is required."
       });
     }
 
-    const approval = await createApproval(
-      client,
-      { incident_id },
-      userId
-    );
-    // Record approval request in audit log
-    try {
-    await createAuditLog(
-        client,
-        {
-        action: "APPROVAL_REQUESTED",
-        entity_type: "approval",
-        entity_id: approval.id,
-        details: {
-            incident_id: approval.incident_id
-        }
-        },
-        userId
-    );
-    } catch (auditError) {
-    console.error("Approval request audit log error:", auditError);
+    if (typeof playbook_id !== "string" || !uuidRegex.test(playbook_id)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "A valid playbook ID is required. Approvals are created together with a playbook run."
+      });
     }
 
-    return res.status(201).json({
+    if (request_payload !== undefined && !isJsonObject(request_payload)) {
+      return res.status(400).json({
+        success: false,
+        message: "Request payload must be a JSON object."
+      });
+    }
+
+    if (idempotency_key !== undefined && typeof idempotency_key !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Idempotency key must be a string."
+      });
+    }
+
+    const result = await requestPlaybookRun(client, {
+      incident_id,
+      playbook_id,
+      idempotency_key,
+      request_payload
+    });
+
+    const approval = result.approval_id
+      ? await getApprovalById(client, result.approval_id)
+      : null;
+
+    return res.status(result.created ? 201 : 200).json({
       success: true,
-      message: "Approval request created successfully.",
-      data: approval
+      message: result.created
+        ? "Approval request created successfully."
+        : "Approval request already exists.",
+      data: approval ?? {
+        id: result.approval_id,
+        playbook_run_id: result.run_id,
+        status: "pending"
+      }
     });
 
   } catch (error) {
-    console.error("Create approval error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create approval request."
-    });
+    return sendDbError(
+      res,
+      error,
+      "Create approval error:",
+      "Failed to create approval request."
+    );
   }
 }
+
 // Get all approval requests
 export async function getApprovalsController(
   req: Request,
@@ -90,8 +125,6 @@ export async function getApprovalsController(
     }
 
     const { status } = req.query;
-
-    const validStatuses = ["pending", "approved", "rejected"];
 
     if (status && !validStatuses.includes(status as string)) {
       return res.status(400).json({
@@ -135,17 +168,7 @@ export async function getApprovalByIdController(
 
     const id = req.params.id;
 
-if (typeof id !== "string") {
-  return res.status(400).json({
-    success: false,
-    message: "Invalid approval ID."
-  });
-}
-
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-    if (!uuidRegex.test(id)) {
+    if (typeof id !== "string" || !uuidRegex.test(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid approval ID."
@@ -175,7 +198,11 @@ if (typeof id !== "string") {
     });
   }
 }
-// Admin approves or rejects an approval request
+
+// Admin or operator approves or rejects a request (never their own).
+// The database decides who is allowed (decide_approval); its message is
+// returned with the matching status (403 own request / role, 409 already
+// decided, 404 not found).
 export async function decideApprovalController(
   req: Request,
   res: Response
@@ -191,19 +218,9 @@ export async function decideApprovalController(
       });
     }
 
-    // Check whether the authenticated user is an admin
-    const role = await getUserRole(client, userId);
-
-    if (role !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Only administrators can decide approval requests."
-      });
-    }
-
     const { id } = req.params;
 
-    if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    if (typeof id !== "string" || !uuidRegex.test(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid approval ID."
@@ -214,53 +231,21 @@ export async function decideApprovalController(
 
     if (status !== "approved" && status !== "rejected") {
       return res.status(400).json({
-      success: false,
-      message: "Status must be approved or rejected."
+        success: false,
+        message: "Status must be approved or rejected."
       });
     }
 
-    if (comments !== undefined && comments !== null && typeof comments !== "string") {
+    if (!isOptionalText(comments)) {
       return res.status(400).json({
         success: false,
         message: "Comments must be a string."
       });
     }
 
-    const approval = await decideApproval(
-      client,
-      id,
-      { status, comments },
-      userId
-    );
+    await decideApproval(client, id, { status, comments });
 
-    if (!approval) {
-      return res.status(404).json({
-        success: false,
-        message: "Approval request not found, already decided, or you are not permitted to decide it."
-      });
-    }
-    // Record admin decision in audit log
-    try {
-    await createAuditLog(
-        client,
-        {
-        action:
-            status === "approved"
-            ? "APPROVAL_APPROVED"
-            : "APPROVAL_REJECTED",
-        entity_type: "approval",
-        entity_id: approval.id,
-        details: {
-            incident_id: approval.incident_id,
-            requested_by: approval.requested_by,
-            comments: comments ?? null
-        }
-        },
-        userId
-    );
-    } catch (auditError) {
-    console.error("Approval decision audit log error:", auditError);
-    }
+    const approval = await getApprovalById(client, id);
 
     return res.status(200).json({
       success: true,
@@ -269,11 +254,65 @@ export async function decideApprovalController(
     });
 
   } catch (error) {
-    console.error("Decide approval error:", error);
+    return sendDbError(
+      res,
+      error,
+      "Decide approval error:",
+      "Failed to decide approval request."
+    );
+  }
+}
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to decide approval request."
+// The requester withdraws a pending request (its run is cancelled too).
+export async function cancelApprovalController(
+  req: Request,
+  res: Response
+) {
+  try {
+    const client = req.userSupabase;
+    const userId = req.user?.id;
+
+    if (!client || !userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required."
+      });
+    }
+
+    const { id } = req.params;
+
+    if (typeof id !== "string" || !uuidRegex.test(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid approval ID."
+      });
+    }
+
+    const { reason } = req.body ?? {};
+
+    if (!isOptionalText(reason)) {
+      return res.status(400).json({
+        success: false,
+        message: "Reason must be a string."
+      });
+    }
+
+    await cancelApproval(client, id, reason);
+
+    const approval = await getApprovalById(client, id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Approval request cancelled successfully.",
+      data: approval
     });
+
+  } catch (error) {
+    return sendDbError(
+      res,
+      error,
+      "Cancel approval error:",
+      "Failed to cancel approval request."
+    );
   }
 }

@@ -14,7 +14,6 @@ import type {
 } from "../services/postmortem.service.js";
 
 import { getUserRole } from "../services/approval.service.js";
-import { createAuditLog } from "../services/audit.service.js";
 
 // UUID validation
 const uuidRegex =
@@ -168,24 +167,6 @@ export async function createPostmortemController(
       input,
       userId
     );
-
-    try {
-      await createAuditLog(
-        client,
-        {
-          action: "POSTMORTEM_CREATED",
-          entity_type: "postmortem",
-          entity_id: postmortem.id,
-          details: {
-            incident_id,
-            summary: postmortem.summary
-          }
-        },
-        userId
-      );
-    } catch (auditError) {
-      console.error("Postmortem creation audit error:", auditError);
-    }
 
     return res.status(201).json({
       success: true,
@@ -470,24 +451,6 @@ export async function updatePostmortemController(
         success: false,
         message: "Postmortem not found or not accessible."
       });
-    }
-
-    try {
-      await createAuditLog(
-        client,
-        {
-          action: "POSTMORTEM_UPDATED",
-          entity_type: "postmortem",
-          entity_id: postmortem.id,
-          details: {
-            incident_id: postmortem.incident_id,
-            updated_fields: Object.keys(input)
-          }
-        },
-        userId
-      );
-    } catch (auditError) {
-      console.error("Postmortem update audit error:", auditError);
     }
 
     return res.status(200).json({

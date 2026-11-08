@@ -46,7 +46,8 @@ function createQueryBuilder(
 }
 
 // Creates a fake user-scoped client. `results` maps a table name to one
-// result (reused) or a queue of results (consumed in order).
+// result (reused) or a queue of results (consumed in order). Database
+// function results use the key `rpc:<function name>`.
 export function createMockUserClient(
   results: Record<string, MockResult | MockResult[]> = {}
 ) {
@@ -57,16 +58,21 @@ export function createMockUserClient(
     queues.set(table, Array.isArray(value) ? [...value] : [value]);
   }
 
+  const next = (key: string): MockResult => {
+    const queue = queues.get(key) ?? [{ data: null, error: null }];
+    return queue.length > 1 ? queue.shift()! : queue[0];
+  };
+
   const client = {
     from(table: string) {
-      const queue = queues.get(table) ?? [{ data: null, error: null }];
-      const result = queue.length > 1 ? queue.shift()! : queue[0];
+      const result = next(table);
       calls.push({ table, method: "from", args: [table] });
       return createQueryBuilder(table, result, calls);
     },
     rpc(fn: string, args: unknown) {
-      calls.push({ table: `rpc:${fn}`, method: "rpc", args: [args] });
-      return Promise.resolve({ data: null, error: null });
+      const key = `rpc:${fn}`;
+      calls.push({ table: key, method: "rpc", args: [args] });
+      return Promise.resolve({ data: null, error: null, ...next(key) });
     }
   };
 

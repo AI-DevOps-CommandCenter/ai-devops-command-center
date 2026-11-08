@@ -1,6 +1,5 @@
 
 import type { Request, Response } from "express";
-import { createAuditLog } from "../services/audit.service.js";
 
 import {
   createIncident,
@@ -131,24 +130,6 @@ export async function createIncidentController(
     }
 
     // Record incident creation in the audit log
-    try {
-      await createAuditLog(
-        req.userSupabase,
-        {
-          action: "INCIDENT_CREATED",
-          entity_type: "incident",
-          entity_id: data.id,
-          details: {
-            title: data.title,
-            service_name: data.service_name,
-            severity: data.severity
-          }
-        },
-        req.user.id
-      );
-    } catch (auditError) {
-      console.error("Incident creation audit log error:", auditError);
-    }
 
     return res.status(201).json({
       success: true,
@@ -508,22 +489,6 @@ export async function updateIncidentController(
     }
 
     // Record incident update in the audit log
-    try {
-      await createAuditLog(
-        req.userSupabase,
-        {
-          action: "INCIDENT_UPDATED",
-          entity_type: "incident",
-          entity_id: incidentId,
-          details: {
-            updated_fields: updates
-          }
-        },
-        req.user.id
-      );
-    } catch (auditError) {
-      console.error("Incident update audit log error:", auditError);
-    }
 
     return res.status(200).json({
       success: true,

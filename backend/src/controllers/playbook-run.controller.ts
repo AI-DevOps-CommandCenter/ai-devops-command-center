@@ -1,20 +1,25 @@
 import type { Request, Response } from "express";
 
 import {
-  createPlaybookRun,
+  requestPlaybookRun,
   getPlaybookRuns,
   getPlaybookRunById,
-  decidePlaybookRun,
-  updatePlaybookRunStatus
+  cancelPlaybookRun,
+  completePlaybookRun
 } from "../services/playbook-run.service.js";
 
 import {
-  getUserRole
+  getApprovalByRunId,
+  decideApproval
 } from "../services/approval.service.js";
 
-import {
-  createAuditLog
-} from "../services/audit.service.js";
+import { sendDbError } from "../lib/db-errors.js";
+
+// Playbook run writes use the database workflow functions (decisions
+// A2/A3/A4). Every run needs a human approval (A4), the database prevents
+// duplicate active runs and duplicate execution, and it writes the audit
+// entry itself, so no audit call is made here. Starting a run is reserved
+// for n8n (machine endpoints, A5).
 
 // UUID validation
 const uuidRegex =
@@ -30,7 +35,20 @@ const validStatuses = [
   "cancelled"
 ];
 
-// Create a playbook execution request
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isOptionalText(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function readRunId(req: Request): string | null {
+  const { id } = req.params;
+  return typeof id === "string" && uuidRegex.test(id) ? id : null;
+}
+
+// Create a playbook execution request (and its pending approval)
 export async function createPlaybookRunController(
   req: Request,
   res: Response
@@ -49,86 +67,65 @@ export async function createPlaybookRunController(
     const {
       playbook_id,
       incident_id,
-      request_payload
+      request_payload,
+      idempotency_key
     } = req.body ?? {};
 
-    if (!playbook_id || !uuidRegex.test(playbook_id)) {
+    if (typeof playbook_id !== "string" || !uuidRegex.test(playbook_id)) {
       return res.status(400).json({
         success: false,
         message: "A valid playbook ID is required."
       });
     }
 
-    if (!incident_id || !uuidRegex.test(incident_id)) {
+    if (typeof incident_id !== "string" || !uuidRegex.test(incident_id)) {
       return res.status(400).json({
         success: false,
         message: "A valid incident ID is required."
       });
     }
 
-    if (
-      request_payload !== undefined &&
-      (
-        request_payload === null ||
-        typeof request_payload !== "object" ||
-        Array.isArray(request_payload)
-      )
-    ) {
+    if (request_payload !== undefined && !isJsonObject(request_payload)) {
       return res.status(400).json({
         success: false,
         message: "Request payload must be a JSON object."
       });
     }
 
-    const playbookRun = await createPlaybookRun(
-      client,
-      {
-        playbook_id,
-        incident_id,
-        request_payload
-      },
-      userId
-    );
-
-    if (!playbookRun) {
-      return res.status(404).json({
+    if (idempotency_key !== undefined && typeof idempotency_key !== "string") {
+      return res.status(400).json({
         success: false,
-        message: "Enabled playbook or accessible incident not found."
+        message: "Idempotency key must be a string."
       });
     }
 
-    try {
-      await createAuditLog(
-        client,
-        {
-          action: "PLAYBOOK_RUN_REQUESTED",
-          entity_type: "playbook_run",
-          entity_id: playbookRun.id,
-          details: {
-            playbook_id,
-            incident_id,
-            status: playbookRun.status
-          }
-        },
-        userId
-      );
-    } catch (auditError) {
-      console.error("Playbook request audit log error:", auditError);
-    }
+    const result = await requestPlaybookRun(client, {
+      incident_id,
+      playbook_id,
+      idempotency_key,
+      request_payload
+    });
 
-    return res.status(201).json({
+    const playbookRun = await getPlaybookRunById(client, result.run_id);
+
+    return res.status(result.created ? 201 : 200).json({
       success: true,
-      message: "Playbook execution request created successfully.",
-      data: playbookRun
+      message: result.created
+        ? "Playbook execution request created successfully."
+        : "Playbook execution request already exists.",
+      data: {
+        ...(playbookRun ?? { id: result.run_id, status: result.status }),
+        approval_id: result.approval_id
+      }
     });
 
   } catch (error) {
-    console.error("Create playbook run error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create playbook execution request."
-    });
+    return sendDbError(
+      res,
+      error,
+      "Create playbook run error:",
+      "Failed to create playbook execution request."
+    );
   }
 }
 
@@ -208,12 +205,9 @@ export async function getPlaybookRunByIdController(
       });
     }
 
-    const { id } = req.params;
+    const id = readRunId(req);
 
-    if (
-      typeof id !== "string" ||
-      !uuidRegex.test(id)
-    ) {
+    if (!id) {
       return res.status(400).json({
         success: false,
         message: "Invalid playbook run ID."
@@ -244,7 +238,8 @@ export async function getPlaybookRunByIdController(
   }
 }
 
-// Admins and operators approve or reject requests
+// Admins and operators approve or reject requests (never their own).
+// A run is decided through its linked approval: one approval path (A3).
 export async function decidePlaybookRunController(
   req: Request,
   res: Response
@@ -260,70 +255,43 @@ export async function decidePlaybookRunController(
       });
     }
 
-    const role = await getUserRole(client, userId);
+    const id = readRunId(req);
 
-    if (!["admin", "operator"].includes(role)) {
-      return res.status(403).json({
-        success: false,
-        message: "Only administrators and operators can decide playbook requests."
-      });
-    }
-
-    const { id } = req.params;
-
-    if (
-      typeof id !== "string" ||
-      !uuidRegex.test(id)
-    ) {
+    if (!id) {
       return res.status(400).json({
         success: false,
         message: "Invalid playbook run ID."
       });
     }
 
-    const { status } = req.body ?? {};
+    const { status, comments } = req.body ?? {};
 
-    if (!["approved", "rejected"].includes(status)) {
+    if (status !== "approved" && status !== "rejected") {
       return res.status(400).json({
         success: false,
         message: "Status must be approved or rejected."
       });
     }
 
-    const run = await decidePlaybookRun(
-      client,
-      id,
-      { status },
-      userId
-    );
-
-    if (!run) {
-      return res.status(404).json({
+    if (!isOptionalText(comments)) {
+      return res.status(400).json({
         success: false,
-        message: "Playbook request not found, already decided, or self-approval is not allowed."
+        message: "Comments must be a string."
       });
     }
 
-    try {
-      await createAuditLog(
-        client,
-        {
-          action:
-            status === "approved"
-              ? "PLAYBOOK_RUN_APPROVED"
-              : "PLAYBOOK_RUN_REJECTED",
-          entity_type: "playbook_run",
-          entity_id: run.id,
-          details: {
-            incident_id: run.incident_id,
-            playbook_id: run.playbook_id
-          }
-        },
-        userId
-      );
-    } catch (auditError) {
-      console.error("Playbook decision audit log error:", auditError);
+    const approval = await getApprovalByRunId(client, id);
+
+    if (!approval) {
+      return res.status(404).json({
+        success: false,
+        message: "No approval request found for this playbook run."
+      });
     }
+
+    await decideApproval(client, approval.id, { status, comments });
+
+    const run = await getPlaybookRunById(client, id);
 
     return res.status(200).json({
       success: true,
@@ -332,17 +300,18 @@ export async function decidePlaybookRunController(
     });
 
   } catch (error) {
-    console.error("Decide playbook run error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to decide playbook request."
-    });
+    return sendDbError(
+      res,
+      error,
+      "Decide playbook run error:",
+      "Failed to decide playbook request."
+    );
   }
 }
 
-// Update execution status and results
-export async function updatePlaybookRunStatusController(
+// Cancel a run: the requester while it waits for approval; admins and
+// operators (with a reason) once it is approved or running.
+export async function cancelPlaybookRunController(
   req: Request,
   res: Response
 ) {
@@ -357,100 +326,114 @@ export async function updatePlaybookRunStatusController(
       });
     }
 
-    const role = await getUserRole(client, userId);
+    const id = readRunId(req);
 
-    if (!["admin", "operator"].includes(role)) {
-      return res.status(403).json({
-        success: false,
-        message: "Only administrators and operators can update execution status."
-      });
-    }
-
-    const { id } = req.params;
-
-    if (
-      typeof id !== "string" ||
-      !uuidRegex.test(id)
-    ) {
+    if (!id) {
       return res.status(400).json({
         success: false,
         message: "Invalid playbook run ID."
       });
     }
 
-    const { status, result_payload } = req.body ?? {};
+    const { reason } = req.body ?? {};
 
-    const allowedUpdates = [
-      "running",
-      "success",
-      "failed",
-      "cancelled"
-    ];
-
-    if (!allowedUpdates.includes(status)) {
+    if (!isOptionalText(reason)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid execution status."
+        message: "Reason must be a string."
       });
     }
 
-    if (
-      result_payload !== undefined &&
-      (
-        result_payload === null ||
-        typeof result_payload !== "object" ||
-        Array.isArray(result_payload)
-      )
-    ) {
+    await cancelPlaybookRun(client, id, reason);
+
+    const run = await getPlaybookRunById(client, id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Playbook execution request cancelled successfully.",
+      data: run
+    });
+
+  } catch (error) {
+    return sendDbError(
+      res,
+      error,
+      "Cancel playbook run error:",
+      "Failed to cancel playbook execution request."
+    );
+  }
+}
+
+// Manual completion of a running run by an admin or operator (A3-Q3).
+// A reason is required and the override is audited by the database.
+// n8n completes runs through the machine endpoint instead.
+export async function completePlaybookRunController(
+  req: Request,
+  res: Response
+) {
+  try {
+    const client = req.userSupabase;
+    const userId = req.user?.id;
+
+    if (!client || !userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required."
+      });
+    }
+
+    const id = readRunId(req);
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid playbook run ID."
+      });
+    }
+
+    const { status, result_payload, reason } = req.body ?? {};
+
+    if (status !== "success" && status !== "failed") {
+      return res.status(400).json({
+        success: false,
+        message: "Status must be success or failed."
+      });
+    }
+
+    if (result_payload !== undefined && !isJsonObject(result_payload)) {
       return res.status(400).json({
         success: false,
         message: "Result payload must be a JSON object."
       });
     }
 
-    const run = await updatePlaybookRunStatus(
-      client,
-      id,
-      { status, result_payload }
-    );
-
-    if (!run) {
+    if (typeof reason !== "string" || reason.trim().length < 5) {
       return res.status(400).json({
         success: false,
-        message: "Playbook run not found or invalid status transition."
+        message: "A reason of at least 5 characters is required to complete a run manually."
       });
     }
 
-    try {
-      await createAuditLog(
-        client,
-        {
-          action: "PLAYBOOK_RUN_STATUS_UPDATED",
-          entity_type: "playbook_run",
-          entity_id: run.id,
-          details: {
-            status: run.status,
-            incident_id: run.incident_id
-          }
-        },
-        userId
-      );
-    } catch (auditError) {
-      console.error("Playbook status audit log error:", auditError);
-    }
+    await completePlaybookRun(client, id, {
+      status,
+      result_payload,
+      reason
+    });
+
+    const run = await getPlaybookRunById(client, id);
 
     return res.status(200).json({
       success: true,
-      message: "Playbook execution status updated successfully.",
+      message: "Playbook execution completed manually.",
       data: run
     });
 
   } catch (error) {
-    console.error("Update playbook status error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update playbook execution status."
-    });
+    return sendDbError(
+      res,
+      error,
+      "Complete playbook run error:",
+      "Failed to complete playbook execution."
+    );
   }
 }

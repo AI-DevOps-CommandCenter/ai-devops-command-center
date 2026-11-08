@@ -1,33 +1,13 @@
 import type { UserSupabaseClient } from "../config/supabase.js";
 
-export interface CreateAuditLogInput {
-  action: string;
-  entity_type?: string;
-  entity_id?: string;
-  details?: Record<string, unknown>;
-}
+// The backend never writes audit entries (decision A7). They are written by
+// the database itself, in the same transaction as the action:
+// - workflow functions (approvals, playbook runs, AI analyses, recovery
+//   checks), migration 000700;
+// - triggers for incidents, postmortems, playbooks, integrations and role
+//   changes, migration 000800.
+// Clients have no INSERT permission on audit_logs (migration 000500).
 
-export async function createAuditLog(
-  client: UserSupabaseClient,
-  input: CreateAuditLogInput,
-  actorId: string
-) {
-  const { error } = await client
-    .from("audit_logs")
-    .insert({
-      actor_id: actorId,
-      action: input.action,
-      entity_type: input.entity_type ?? null,
-      entity_id: input.entity_id ?? null,
-      details: input.details ?? {}
-    });
-
-  if (error) {
-    throw error;
-  }
-
-  return { success: true };
-}
 export interface AuditLogFilters {
   action?: string;
   entity_type?: string;

@@ -4,7 +4,6 @@ import {
   updateUserRole
 } from "../services/admin.service.js";
 import { getUserRole } from "../services/approval.service.js";
-import { createAuditLog } from "../services/audit.service.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -145,22 +144,6 @@ export async function updateUserRoleController(
     });
 
     // Best-effort audit logging
-    try {
-      await createAuditLog(
-        req.userSupabase,
-        {
-          action: "USER_ROLE_UPDATED",
-          entity_type: "profile",
-          entity_id: id,
-          details: {
-            new_role: role
-          }
-        },
-        req.user.id
-      );
-    } catch (auditError) {
-      console.error("Role update audit error:", auditError);
-    }
 
     return res.status(200).json({
       success: true,

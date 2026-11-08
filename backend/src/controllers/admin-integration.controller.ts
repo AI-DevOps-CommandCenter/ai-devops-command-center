@@ -6,7 +6,6 @@ import {
   deleteIntegration
 } from "../services/admin-integration.service.js";
 import { getUserRole } from "../services/approval.service.js";
-import { createAuditLog } from "../services/audit.service.js";
 
 const allowedProviders = [
   "github",
@@ -97,21 +96,6 @@ export async function createIntegrationController(
       req.user.id
     );
 
-    try {
-      await createAuditLog(
-        req.userSupabase,
-        {
-          action: "INTEGRATION_CREATED",
-          entity_type: "integration",
-          entity_id: data.id,
-          details: { name: data.name, provider: data.provider }
-        },
-        req.user.id
-      );
-    } catch (auditError) {
-      console.error("Integration audit log error:", auditError);
-    }
-
     return res.status(201).json({
       message: "Integration created successfully.",
       data
@@ -189,21 +173,6 @@ export async function updateIntegrationController(
       return res.status(404).json({ message: "Integration not found." });
     }
 
-    try {
-      await createAuditLog(
-        req.userSupabase,
-        {
-          action: "INTEGRATION_UPDATED",
-          entity_type: "integration",
-          entity_id: id,
-          details: { updated_fields: Object.keys(input) }
-        },
-        req.user.id
-      );
-    } catch (auditError) {
-      console.error("Integration audit log error:", auditError);
-    }
-
     return res.status(200).json({
       message: "Integration updated successfully.",
       data
@@ -238,20 +207,6 @@ export async function deleteIntegrationController(
 
     if (!deleted) {
       return res.status(404).json({ message: "Integration not found." });
-    }
-
-    try {
-      await createAuditLog(
-        req.userSupabase,
-        {
-          action: "INTEGRATION_DELETED",
-          entity_type: "integration",
-          entity_id: id
-        },
-        req.user.id
-      );
-    } catch (auditError) {
-      console.error("Integration audit log error:", auditError);
     }
 
     return res.status(200).json({

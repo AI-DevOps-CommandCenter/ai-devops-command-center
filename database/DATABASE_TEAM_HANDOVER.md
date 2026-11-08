@@ -23,6 +23,8 @@
 | **Notifications** | Backend notification module (A6): claim pending deliveries with `claim_notification_deliveries()`, send them with provider credentials kept on the backend, then record each result with `record_notification_delivery()`. | Part B.4 (implemented) |
 
 ### 1a. Release gate: backend switch (owner: backend team)
+> **Status (2026-11-08):** implemented on branch `feature/backend-rpc-integration` (not merged yet). All rows below are done. Approvals and playbook runs use the database functions, remediation writes return 410, and the backend no longer writes `audit_logs`. Machine endpoints for n8n are mounted but disabled until the automation user exists (A5-Q2). Tests: backend 121, database suite 14 (exactly one audit entry per action).
+
 Migrations 000500 and 000700 revoke the direct client writes the current controllers use. These calls must change in the **same release** as the migrations:
 
 | Current code (`backend/src/services/…`) | Replace with |

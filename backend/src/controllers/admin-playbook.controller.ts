@@ -13,7 +13,6 @@ import type {
 } from "../services/admin-playbook.service.js";
 
 import { getUserRole } from "../services/approval.service.js";
-import { createAuditLog } from "../services/audit.service.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -53,30 +52,6 @@ async function isAdmin(req: Request): Promise<boolean> {
   );
 
   return role === "admin";
-}
-
-async function logPlaybookAction(
-  req: Request,
-  action: string,
-  playbookId?: string,
-  details: Record<string, unknown> = {}
-) {
-  if (!req.userSupabase || !req.user) return;
-
-  try {
-    await createAuditLog(
-      req.userSupabase,
-      {
-        action,
-        entity_type: "playbook",
-        entity_id: playbookId,
-        details
-      },
-      req.user.id
-    );
-  } catch (error) {
-    console.error("Playbook audit logging error:", error);
-  }
 }
 
 // GET /api/admin/playbooks
@@ -211,16 +186,6 @@ export async function createPlaybookController(
         configuration,
         enabled,
         requires_approval
-      }
-    );
-
-    await logPlaybookAction(
-      req,
-      "PLAYBOOK_CREATED",
-      playbook.id,
-      {
-        name: playbook.name,
-        action_type: playbook.action_type
       }
     );
 
@@ -371,15 +336,6 @@ export async function updatePlaybookController(
       });
     }
 
-    await logPlaybookAction(
-      req,
-      "PLAYBOOK_UPDATED",
-      id,
-      {
-        updated_fields: Object.keys(input)
-      }
-    );
-
     return res.status(200).json({
       success: true,
       message: "Playbook updated successfully.",
@@ -437,12 +393,6 @@ export async function deletePlaybookController(
         message: "Playbook not found."
       });
     }
-
-    await logPlaybookAction(
-      req,
-      "PLAYBOOK_DELETED",
-      id
-    );
 
     return res.status(200).json({
       success: true,
