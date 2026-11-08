@@ -1,0 +1,178 @@
+{
+  "id": "dc33wf09errorhnd",
+  "name": "09 - Error Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 09 – Error Handler (shared)\nSet as \"Error workflow\" of 00–08. Builds a short, redacted summary (no stack, no data) and posts it to `ERROR_NOTIFY_WEBHOOK_URL` (Slack or Discord incoming webhook) when configured.",
+        "width": 700,
+        "height": 200
+      },
+      "id": "94ab1894-1365-4f42-a6df-9cc18ad25769",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -360
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "224da03c-49a7-48b3-a298-4694bb7f296b",
+      "name": "On workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 09 – Error Handler (shared)\n// Node: \"Summarize error\". Input from the Error Trigger:\n// { execution: { id, url, error: { message, stack, node? }, lastNodeExecuted, mode }, workflow: { id, name } }\n// Only a short, redacted summary leaves n8n: no stack traces, no input data.\n// ---- shared: common helpers ----\r\nconst SECRET_PATTERNS = [\r\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\r\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\r\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\r\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\r\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\r\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\r\n];\r\n\r\nfunction redact(text) {\r\n  let out = String(text == null ? '' : text);\r\n  for (const re of SECRET_PATTERNS) {\r\n    // Only the first pattern has capture groups (key + separator are kept).\r\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\r\n  }\r\n  return out;\r\n}\r\n\r\nfunction truncate(text, max) {\r\n  const s = String(text == null ? '' : text);\r\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\r\n}\r\n\r\nfunction envInt(env, name, fallback, min, max) {\r\n  const raw = env[name];\r\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\r\n  if (!Number.isFinite(n)) return fallback;\r\n  return Math.min(max, Math.max(min, Math.round(n)));\r\n}\r\n\r\nfunction envNumber(env, name, fallback) {\r\n  const n = Number(env[name]);\r\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\r\n}\r\n\r\n// Classify the output of an HTTP Request node that runs with\r\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\r\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\r\nfunction classifyHttp(item, opts) {\r\n  const o = opts || {};\r\n  if (item && item.error) {\r\n    const msg = String(item.error.message || item.error.description || item.error || '');\r\n    const code = String(item.error.code || '');\r\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\r\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\r\n    }\r\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\r\n  }\r\n  const status = Number(item && item.statusCode);\r\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\r\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\r\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\r\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\r\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\r\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\r\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\r\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\r\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\r\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\r\n  return { kind: 'client_error', retryable: false, status, message };\r\n}\r\n\r\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\r\nfunction investigationResult(source, ctx, fields) {\r\n  const f = fields || {};\r\n  return {\r\n    incident_id: ctx.incident_id || null,\r\n    source,\r\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\r\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\r\n    summary: f.summary || '',\r\n    findings: f.findings || [],\r\n    evidence: f.evidence || [],\r\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\r\n    window: f.window || null,\r\n    error: f.error || null,\r\n    collected_at: new Date().toISOString(),\r\n  };\r\n}\r\n\r\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\r\nfunction toQuery(params) {\r\n  return Object.entries(params)\r\n    .filter(([, v]) => v !== undefined && v !== null)\r\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\r\n    .join('&');\r\n}\r\n\r\nfunction isUuid(v) {\r\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\r\n}\r\n\r\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\r\nfunction readInvestigationInput(json) {\r\n  const j = json || {};\r\n  const started = j.started_at ? new Date(j.started_at) : null;\r\n  const errors = [];\r\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\r\n    errors.push('service_name is required (letters, digits, _ . : - only).');\r\n  }\r\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\r\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\r\n  return {\r\n    ok: errors.length === 0,\r\n    error: errors.join(' ') || null,\r\n    ctx: {\r\n      incident_id: j.incident_id || null,\r\n      service_name: j.service_name,\r\n      alert_name: j.alert_name || null,\r\n      severity: j.severity || null,\r\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\r\n    },\r\n  };\r\n}\r\n// ---- end shared: common ----\nconst env = $env;\nconst j = $input.first().json;\nconst ex = j.execution || {};\nconst err = ex.error || {};\nconst message = redact(truncate(err.message || 'Unknown error', 300));\nconst node = (err.node && err.node.name) || ex.lastNodeExecuted || null;\n\n// Transient problems are worth retrying; configuration and validation errors are not.\nconst retryable = /timeout|timed out|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|429|rate limit|502|503|504/i.test(err.message || '');\nconst permanent = /401|403|unauthori[sz]ed|forbidden|not configured|invalid|must be|required/i.test(err.message || '');\n\nconst summary = {\n  workflow: (j.workflow && j.workflow.name) || 'unknown',\n  workflow_id: (j.workflow && j.workflow.id) || null,\n  execution_id: ex.id || null,\n  execution_url: ex.url || null,\n  mode: ex.mode || null,\n  failed_node: node,\n  message,\n  retryable: retryable && !permanent,\n  at: new Date().toISOString(),\n};\nconst text = '[n8n] ' + summary.workflow + ' failed at \"' + (node || '?') + '\": ' + message + (summary.retryable ? ' (retryable)' : '') + (summary.execution_url ? '\\n' + summary.execution_url : '');\nconst url = env.ERROR_NOTIFY_WEBHOOK_URL || '';\nreturn [{\n  json: {\n    ...summary,\n    notify: /^https:\\/\\//.test(url),\n    url,\n    // Slack incoming webhooks read \"text\", Discord webhooks read \"content\".\n    body: JSON.stringify({ text, content: text }),\n    timeout_ms: 10000,\n  },\n}];\n"
+      },
+      "id": "faf45c1e-ed7c-4be7-a3a9-2cb6aaa9f513",
+      "name": "Summarize error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "notes": "Redacts tokens, keys, JWTs and webhook URLs."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "99a1180b-234e-43cf-a709-cde2eb945915",
+              "leftValue": "={{ $json.notify }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "2d7b4bd9-fa87-43b9-adf9-ac60e5aeb174",
+      "name": "Notification configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": "={{ $json.timeout_ms || 15000 }}",
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "19a32589-9260-41a6-a386-e4c648dd40fc",
+      "name": "Send notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        -180
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "POST ERROR_NOTIFY_WEBHOOK_URL (secret URL: keep it only in the environment).",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {},
+      "id": "faed2c82-e955-47ec-a6bf-562d42814026",
+      "name": "Logged only",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        780,
+        180
+      ],
+      "notes": "The summary stays in the n8n execution log."
+    }
+  ],
+  "connections": {
+    "On workflow error": {
+      "main": [
+        [
+          {
+            "node": "Summarize error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize error": {
+      "main": [
+        [
+          {
+            "node": "Notification configured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notification configured?": {
+      "main": [
+        [
+          {
+            "node": "Send notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Logged only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
