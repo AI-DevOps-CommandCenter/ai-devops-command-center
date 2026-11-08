@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Postmortem Output (workflow 08, Groq answer after validation)",
+  "type": "object",
+  "required": ["title", "summary", "timeline", "root_cause", "impact", "evidence", "remediation", "recovery_result", "lessons_learned", "preventive_actions"],
+  "additionalProperties": false,
+  "properties": {
+    "title": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "timeline": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": ["time", "event"],
+        "properties": { "time": { "type": "string", "maxLength": 40 }, "event": { "type": "string", "maxLength": 500 } }
+      }
+    },
+    "root_cause": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "impact": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "evidence": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } },
+    "remediation": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "recovery_result": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "lessons_learned": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } },
+    "preventive_actions": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } }
+  }
+}
