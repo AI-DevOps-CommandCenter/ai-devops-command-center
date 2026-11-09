@@ -97,14 +97,14 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: colors.badgeAmberBg,
+            color: colors.warnBg,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Text(
             'Impact: brief request failures during switchover (about 30 s). Nothing runs until you confirm.',
             style: TextStyle(
               fontSize: 12,
-              color: colors.badgeAmberText,
+              color: colors.warnText,
               height: 1.4,
             ),
           ),

@@ -75,6 +75,11 @@ class AppColorScheme {
     required this.warnBg,
     required this.warnText,
   });
+
+  Color get badgeAmberText => warnText;
+  Color get badgeRedText => red;
+  Color get badgeGreenText => green;
+  Color get badgeTealText => teal;
 }
 
 /// Exact colors from the official 28-screen specifications (Light & Dark)
