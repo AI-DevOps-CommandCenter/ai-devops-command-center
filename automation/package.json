@@ -6,7 +6,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "build": "node scripts/build-workflows.mjs",
-    "test": "node --test tests/unit.test.mjs",
+    "test": "node --test tests/unit.test.mjs tests/remediation-db-payload.test.mjs tests/env-config.test.mjs tests/integration-response.test.mjs",
     "test:hmac": "npx --prefix ../backend tsx tests/hmac-interop.mjs",
     "test:n8n": "node tests/integration/run-n8n-integration.mjs"
   }
