@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { buildAll, WF, CRED } from '../../scripts/build-workflows.mjs';
 import { startMocks } from './mock-services.mjs';
+import { parseBody, isWebhookReady, jsonField, messageOf, jsonText, describeProbe } from './http-response.mjs';
 
 const WORK = process.argv[2] || mkdtempSync(join(tmpdir(), 'dc33-n8n-it-'));
 // The n8n CLI is started with `node <n8n>/bin/n8n` (no shell), so it can be stopped reliably.
@@ -86,9 +87,10 @@ const HARNESS = { logs: WF.logs, metrics: WF.metrics, deploys: WF.deploys, rca: 
 async function post(path, body, headers = {}) {
   const raw = typeof body === 'string' ? body : JSON.stringify(body);
   const res = await fetch(`http://127.0.0.1:${PORT}/webhook/${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: raw });
-  const text = await res.text();
-  let json; try { json = JSON.parse(text); } catch { json = text; }
-  return { status: res.status, json };
+  const text = await res.text().catch(() => '');
+  // Invalid JSON keeps the raw text; an empty body is undefined. Read fields
+  // with jsonField()/messageOf(), never r.json.<field> directly.
+  return { status: res.status, json: parseBody(text) };
 }
 const first = (r) => (Array.isArray(r.json) ? r.json[0] : r.json) || {};
 const signed = (body, { path = '/webhook/remediation', ts = Math.floor(Date.now() / 1000), nonce = randomBytes(18).toString('base64url'), secret = SECRET } = {}) => {
@@ -144,13 +146,18 @@ async function main() {
   let up = false;
   for (let i = 0; i < 90 && !up; i++) { await sleep(2000); try { up = (await fetch(`http://127.0.0.1:${PORT}/healthz`)).ok; } catch {} }
   // Published webhooks are registered some seconds after /healthz is up.
+  // Ready = the harness webhook answers 2xx. 404 (not registered yet) and 503
+  // ("Database is not ready") are NOT ready.
   let ready = false;
+  let lastProbe = null;
   for (let i = 0; i < 60 && up && !ready; i++) {
-    const probe = await fetch(`http://127.0.0.1:${PORT}/webhook/it-logs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => null);
-    ready = !!probe && probe.status !== 404;
+    const res = await fetch(`http://127.0.0.1:${PORT}/webhook/it-logs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => null);
+    lastProbe = res ? { status: res.status, json: parseBody(await res.text().catch(() => '')) } : null;
+    if (lastProbe) lastProbe.message = messageOf(lastProbe);
+    ready = isWebhookReady(lastProbe);
     if (!ready) await sleep(2000);
   }
-  check('n8n server started and webhooks registered', up && ready, log.slice(-1500));
+  check('n8n server started and webhooks registered', up && ready, 'last probe: ' + describeProbe(lastProbe) + '\n' + log.slice(-1500));
   if (!up || !ready) return finish(server, mocks);
 
   const ctx = { incident_id: null, service_name: 'checkout-api', alert_name: 'HighErrorRate', severity: 'critical', started_at: '2026-11-08T10:00:00Z' };
@@ -160,7 +167,7 @@ async function main() {
     setScenario({ loki });
     const o = first(await post('it-logs', ctx));
     check('02 loki=' + loki + ' -> ' + status, o.status === status && o.source === 'logs', o);
-    if (loki === 'errors') check('02 secrets in log lines are redacted', !JSON.stringify(o).includes('abcd1234secret'), o.evidence);
+    if (loki === 'errors') check('02 secrets in log lines are redacted', !jsonText(o).includes('abcd1234secret'), o.evidence);
   }
   check('02 invalid input -> invalid_input', first(await post('it-logs', { ...ctx, service_name: 'bad name"}' })).status === 'invalid_input');
 
@@ -169,7 +176,7 @@ async function main() {
     setScenario({ prom });
     const o = first(await post('it-metrics', ctx));
     check('03 prom=' + prom + ' -> ' + status, o.status === status, o);
-    if (prom === 'abnormal') check('03 error_rate and cpu flagged abnormal', JSON.stringify(o.findings).includes('error_rate is abnormal') && JSON.stringify(o.findings).includes('cpu is abnormal'), o.findings);
+    if (prom === 'abnormal') check('03 error_rate and cpu flagged abnormal', jsonText(o.findings).includes('error_rate is abnormal') && jsonText(o.findings).includes('cpu is abnormal'), o.findings);
   }
 
   console.log('\n04 Deployment Correlation');
@@ -213,23 +220,23 @@ async function main() {
   r = await post('alertmanager', alert, {});
   check('01 missing token -> 401/403', r.status === 401 || r.status === 403, r);
   r = await post('alertmanager', alert, auth);
-  check('01 valid alert -> 202, 1 new', r.status === 202 && r.json.new_alerts === 1, r);
+  check('01 valid alert -> 202, 1 new', r.status === 202 && jsonField(r, 'new_alerts') === 1, r);
   // n8n saves static data when an execution ENDS, so the repeat is sent after
   // the first execution finished (Alertmanager repeats after repeat_interval).
   await sleep(4000);
   r = await post('alertmanager', alert, auth);
-  check('01 repeated alert -> duplicate, 0 new', r.status === 202 && r.json.new_alerts === 0 && r.json.duplicate_alerts === 1, r);
+  check('01 repeated alert -> duplicate, 0 new', r.status === 202 && jsonField(r, 'new_alerts') === 0 && jsonField(r, 'duplicate_alerts') === 1, r);
   r = await post('alertmanager', { alerts: [] }, auth);
   check('01 invalid payload -> 400', r.status === 400, r);
   r = await post('alertmanager', JSON.parse(alert.replace('"status": "firing",\n      "labels"', '"status": "resolved",\n      "labels"').replace('a1b2c3d4e5f60718', 'ffff000011112222')), auth);
-  check('01 resolved alert -> 202, no incident', r.status === 202 && r.json.resolved_alerts === 1 && r.json.new_alerts === 0, r);
+  check('01 resolved alert -> 202, no incident', r.status === 202 && jsonField(r, 'resolved_alerts') === 1 && jsonField(r, 'new_alerts') === 0, r);
 
   console.log('\n06 Remediation');
   const RUN = '11111111-1111-4111-8111-111111111111', INC = '22222222-2222-4222-8222-222222222222';
   setScenario({}); takeCalls();
   let s = signed({ playbook_run_id: RUN, incident_id: INC, action_type: 'restart', request_payload: { service_name: 'checkout-api' } });
   r = await post('remediation', s.raw, s.headers);
-  check('06 approved run -> 202 accepted', r.status === 202 && r.json.accepted === true, r);
+  check('06 approved run -> 202 accepted', r.status === 202 && jsonField(r, 'accepted') === true, r);
   // Sent while the first execution is still running: n8n's nonce store (static
   // data) is not saved yet, so the backend's state check is what stops it.
   const replay = await post('remediation', s.raw, s.headers);
@@ -238,16 +245,16 @@ async function main() {
   let calls = takeCalls();
   const backendCalls = calls.filter((c) => c.port === 'backend');
   check('06 backend start called (signed)', backendCalls.some((c) => c.path.endsWith('/start') && c.auth === 'ok'), backendCalls);
-  check('06 backend complete called with status success + simulated result', backendCalls.some((c) => c.path.endsWith('/complete') && c.body && c.body.status === 'success' && c.body.result.simulated === true), backendCalls);
+  check('06 backend complete called with status success + simulated result', backendCalls.some((c) => c.path.endsWith('/complete') && c.body && c.body.status === 'success' && c.body.result && c.body.result.simulated === true), backendCalls);
   check('06 replay did not execute the run twice (one complete call)', backendCalls.filter((c) => c.path.endsWith('/complete')).length === 1, backendCalls.map((c) => c.path));
   s = signed({ playbook_run_id: RUN, incident_id: INC, action_type: 'restart', request_payload: { service_name: 'checkout-api' } }, { nonce: s.headers['X-DC-Nonce'] });
   r = await post('remediation', s.raw, s.headers);
-  check('06 nonce reused after the first execution ended -> 409 from n8n (backend not called)', r.status === 409 && /Replayed/.test(r.json.message) && !takeCalls().some((c) => c.port === 'backend'), r);
+  check('06 nonce reused after the first execution ended -> 409 from n8n (backend not called)', r.status === 409 && /Replayed/.test(messageOf(r)) && !takeCalls().some((c) => c.port === 'backend'), r);
   check('07 recovery checked Prometheus and tried to store (BD-3 route)', calls.some((c) => c.path.includes('/prom/')) && backendCalls.some((c) => c.path === '/api/machine/recovery-checks' && c.auth === 'ok'), calls.map((c) => c.path));
   check('08 postmortem generated after recovery (Groq called)', calls.some((c) => c.path.includes('/groq/')), calls.map((c) => c.path));
   s = signed({ playbook_run_id: '33333333-3333-4333-8333-333333333333', incident_id: INC, action_type: 'rollback' });
   r = await post('remediation', s.raw, s.headers);
-  check('06 run not approved -> 409 refused, nothing executed', r.status === 409 && /not approved/.test(r.json.message), r);
+  check('06 run not approved -> 409 refused, nothing executed', r.status === 409 && /not approved/.test(messageOf(r)), r);
   s = signed({ playbook_run_id: RUN, incident_id: INC, action_type: 'restart' }, { secret: 'wrong-secret-wrong-secret-wrong-secret!!' });
   r = await post('remediation', s.raw, s.headers);
   check('06 invalid HMAC -> 401', r.status === 401, r);
@@ -265,7 +272,7 @@ async function main() {
   r = await post('remediation', s.raw, s.headers);
   await sleep(3000);
   calls = takeCalls().filter((c) => c.port === 'backend');
-  check('06 action differs from approved playbook -> 409 and run completed as failed', r.status === 409 && calls.some((c) => c.path.endsWith('/complete') && c.body.status === 'failed'), { r, calls });
+  check('06 action differs from approved playbook -> 409 and run completed as failed', r.status === 409 && calls.some((c) => c.path.endsWith('/complete') && c.body && c.body.status === 'failed'), { r, calls });
 
   console.log('\n07 Recovery Check');
   const rc = { incident_id: INC, playbook_run_id: RUN, service_name: 'checkout-api', action_type: 'restart', simulated: true };
