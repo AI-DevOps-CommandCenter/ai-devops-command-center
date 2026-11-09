@@ -7,9 +7,11 @@ const response = $input.first().json;
 const c = classifyHttp(response);
 const { request, ...ctx } = d;
 const completed = c.kind === 'ok';
-const serviceName = ctx.result && ctx.result.service_name
-  ? ctx.result.service_name
-  : (ctx.request_payload && typeof ctx.request_payload.service_name === 'string' ? ctx.request_payload.service_name : null);
+// ctx.request_payload is the DATABASE copy (set by "Check start result"); the
+// webhook body is never used here. An invalid or missing value stays null, so
+// 07 answers unable_to_verify instead of checking a guessed service.
+const p = ctx.request_payload;
+const serviceName = p && typeof p.service_name === 'string' && /^[A-Za-z0-9_.:-]{1,100}$/.test(p.service_name) ? p.service_name : null;
 return [{
   json: {
     incident_id: ctx.incident_id,
