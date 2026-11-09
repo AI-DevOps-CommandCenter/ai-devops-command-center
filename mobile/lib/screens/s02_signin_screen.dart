@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../controllers/auth_controller.dart';
 import 's03_overview_dashboard_screen.dart';
 
 class S02SignInScreen extends StatefulWidget {
@@ -15,7 +16,25 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
   bool _obscurePassword = true;
   String? _errorMessage;
 
-  void _handleSignIn() {
+  @override
+  void initState() {
+    super.initState();
+    AuthController.instance.addListener(_onAuthStateChanged);
+  }
+
+  @override
+  void dispose() {
+    AuthController.instance.removeListener(_onAuthStateChanged);
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  void _onAuthStateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _handleSignIn() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
@@ -37,26 +56,42 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
       _errorMessage = null;
     });
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const S03OverviewDashboardScreen(),
-      ),
+    // Authenticate via Himasha's AuthController & Vinuka's Backend /api/me
+    final success = await AuthController.instance.signIn(
+      email: email,
+      password: password,
     );
+
+    if (success && mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const S03OverviewDashboardScreen(),
+        ),
+      );
+    } else if (mounted) {
+      setState(() {
+        _errorMessage = AuthController.instance.errorMessage ?? 'Authentication failed.';
+      });
+    }
   }
 
-  void _enterDemo() {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const S03OverviewDashboardScreen(),
-      ),
-    );
+  Future<void> _enterDemo() async {
+    await AuthController.instance.enterDemoMode();
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const S03OverviewDashboardScreen(),
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final isLoading = AuthController.instance.isLoading;
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -161,7 +196,7 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
                 ],
               ),
 
-              // Error Message box (if validation fails)
+              // Error Message box (if validation or auth fails)
               if (_errorMessage != null) ...[
                 const SizedBox(height: 10),
                 Container(
@@ -184,12 +219,12 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
 
               const SizedBox(height: 18),
 
-              // Primary Button: Sign In (btn p)
+              // Primary Button: Sign In (with real loading indicator)
               SizedBox(
                 width: double.infinity,
                 height: 48,
                 child: ElevatedButton(
-                  onPressed: _handleSignIn,
+                  onPressed: isLoading ? null : _handleSignIn,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: colors.teal,
                     foregroundColor: colors.isDark ? const Color(0xFF06202A) : Colors.white,
@@ -198,20 +233,26 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: const Text(
-                    'Sign In',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                  ),
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text(
+                          'Sign In',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                        ),
                 ),
               ),
               const SizedBox(height: 10),
 
-              // Secondary Button: Enter Demo as Alex Morgan (btn)
+              // Secondary Button: Enter Demo as Alex Morgan
               SizedBox(
                 width: double.infinity,
                 height: 48,
                 child: OutlinedButton(
-                  onPressed: _enterDemo,
+                  onPressed: isLoading ? null : _enterDemo,
                   style: OutlinedButton.styleFrom(
                     backgroundColor: colors.cardAccent,
                     foregroundColor: colors.text,
