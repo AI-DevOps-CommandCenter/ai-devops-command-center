@@ -166,5 +166,5 @@ All workflows use **09 – Error Handler** as their error workflow.
 |---|---|---|
 | Summarize error | Code | Workflow, execution id and URL, failed node, a message of at most 300 characters with tokens, keys, JWTs and webhook URLs redacted. Retryable = timeouts, connection errors, 429, 502/503/504; never 401/403 or validation errors. No stack, no input data. |
 | Notification configured? | IF | `ERROR_NOTIFY_WEBHOOK_URL` must be https |
-| Send notification | HTTP Request | Slack (`text`) or Discord (`content`) webhook |
+| Send notification | HTTP Request | Slack (`text`) or Discord (`content`) webhook. The URL is a secret, so this node reads it directly with `={{ $env.ERROR_NOTIFY_WEBHOOK_URL }}`; it is never written to an item, so it stays out of the execution history (S1). |
 | Logged only | No Op | |

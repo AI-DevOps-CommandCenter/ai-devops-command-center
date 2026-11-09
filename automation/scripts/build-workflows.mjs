@@ -426,7 +426,9 @@ function wf09() {
   w.errorTrigger('On workflow error', 0, 0);
   w.code('Summarize error', '09-error-handler/summarize-error.js', 1, 0, 'Redacts tokens, keys, JWTs and webhook URLs.');
   w.isTrue('Notification configured?', 2, 0, '={{ $json.notify }}');
-  w.http('Send notification', 3, -1, { method: 'POST', body: { raw: '={{ $json.body }}' }, retries: 1, notes: 'POST ERROR_NOTIFY_WEBHOOK_URL (secret URL: keep it only in the environment).' });
+  // The secret webhook URL is read from the environment by this node only, so it
+  // never appears in an item (n8n stores node output in the execution history).
+  w.http('Send notification', 3, -1, { method: 'POST', url: '={{ $env.ERROR_NOTIFY_WEBHOOK_URL }}', body: { raw: '={{ $json.body }}' }, retries: 1, notes: 'POST ERROR_NOTIFY_WEBHOOK_URL. The URL is a secret: it is read from the environment here and never written to an item.' });
   w.noop('Logged only', 3, 1, 'The summary stays in the n8n execution log.');
   w.chain('On workflow error', 'Summarize error', 'Notification configured?');
   w.link('Notification configured?', 'Send notification', 0);
