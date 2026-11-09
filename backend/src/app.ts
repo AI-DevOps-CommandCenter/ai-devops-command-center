@@ -25,11 +25,24 @@ import {
   loadMachineEnv,
   createAutomationClientProvider
 } from "./config/machine.js";
+import { createGitHubRouter } from "./routes/github.routes.js";
+import { loadGitHubConfig } from "./integrations/github/github.config.js";
+import { GitHubService } from "./integrations/github/github.service.js";
 
 export interface AppOptions {
   // Machine endpoint dependencies. undefined = read from the environment;
   // null = disabled (the endpoints answer 503).
   machine?: MachineDeps | null;
+  // Read-only GitHub integration. undefined = read from the environment;
+  // null = disabled (the endpoints answer 503).
+  github?: GitHubService | null;
+}
+
+// GitHub endpoints are enabled only when GITHUB_TOKEN and
+// GITHUB_REPOSITORIES are set.
+function gitHubServiceFromEnv(): GitHubService | null {
+  const config = loadGitHubConfig();
+  return config ? new GitHubService(config) : null;
 }
 
 // n8n machine endpoints are enabled only when MACHINE_SIGNING_SECRET,
@@ -93,6 +106,12 @@ export function createApp(
   app.use("/api/admin/playbooks", adminPlaybookRoutes);
   app.use("/api/admin/integrations", adminIntegrationRoutes);
   app.use("/api/remediation-executions", remediationExecutionRoutes);
+  app.use(
+    "/api/github",
+    createGitHubRouter(
+      options.github === undefined ? gitHubServiceFromEnv() : options.github
+    )
+  );
 
   app.get("/", (_req, res) => {
     res.json({
