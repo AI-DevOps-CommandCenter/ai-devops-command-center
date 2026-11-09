@@ -1,0 +1,617 @@
+{
+  "id": "dc33wf07recovery",
+  "name": "07 - Recovery Check",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 07 – Recovery Check (owner: Tharindu)\nWait `RECOVERY_WAIT_SECONDS` → query Prometheus (`up` + error rate) → repeat up to `RECOVERY_MAX_CHECKS` → verdict **recovered / not_recovered / unable_to_verify** → store via `POST /api/machine/recovery-checks` (**contract path, not implemented: BD-3**) → 08 Postmortem when recovered.",
+        "width": 800,
+        "height": 240
+      },
+      "id": "31a88025-b9b4-44b8-adfe-fcf5b26bfd59",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -540
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "5b07f5df-0336-4ee3-acc3-0347caf2a2b6",
+      "name": "When called by 06 Remediation",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Input: { incident_id, playbook_run_id, service_name, action_type, simulated }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 07 – Recovery Check (owner: Tharindu)\n// Node: \"Plan recovery check\". Input (from workflow 06):\n// { incident_id, playbook_run_id, service_name, action_type, simulated }\n//\n// Health signals (Prometheus):\n//  - up:         min(up{<label>=\"<service>\"}) == 1   (built-in Prometheus metric)\n//  - error rate: PROM_QUERY_ERROR_RATE <= PROM_THRESHOLD_ERROR_RATE\n// With RECOVERY_REQUIRE_ERROR_RATE=true (default) both are needed to say\n// \"recovered\"; \"up\" alone is not enough evidence.\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst env = $env;\nconst j = $input.first().json;\nconst problems = [];\nif (!isUuid(j.incident_id)) problems.push('incident_id must be a UUID');\nif (!isUuid(j.playbook_run_id)) problems.push('playbook_run_id must be a UUID');\nconst base = { incident_id: j.incident_id || null, playbook_run_id: j.playbook_run_id || null, service_name: j.service_name || null, action_type: j.action_type || null, simulated: !!j.simulated };\nif (problems.length) return [{ json: { ...base, can_verify: false, verdict: 'unable_to_verify', reason: problems.join('; '), checks: [], attempt: 0 } }];\n\nconst promUrl = String(env.PROMETHEUS_URL || '').replace(/\\/+$/, '');\nlet reason = null;\nif (!/^https?:\\/\\//.test(promUrl)) reason = 'PROMETHEUS_URL is not configured.';\nelse if (!j.service_name || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) reason = 'service_name is unknown (it must be in the playbook run request_payload).';\nconst label = String(env.PROM_SERVICE_LABEL || 'job');\nconst requireErrorRate = String(env.RECOVERY_REQUIRE_ERROR_RATE || 'true') !== 'false';\nconst errTemplate = env.PROM_QUERY_ERROR_RATE;\nconst errThreshold = env.PROM_THRESHOLD_ERROR_RATE !== undefined && env.PROM_THRESHOLD_ERROR_RATE !== '' ? Number(env.PROM_THRESHOLD_ERROR_RATE) : null;\nif (!reason && requireErrorRate && (!errTemplate || errThreshold === null || !Number.isFinite(errThreshold))) {\n  reason = 'Error-rate check is required but PROM_QUERY_ERROR_RATE / PROM_THRESHOLD_ERROR_RATE are not configured.';\n}\nif (reason) return [{ json: { ...base, can_verify: false, verdict: 'unable_to_verify', reason, checks: [], attempt: 0 } }];\n\nconst queries = [{ name: 'up', query: 'min(up{' + label + '=\"' + j.service_name + '\"})', healthy_if: 'equals_1' }];\nif (errTemplate && errThreshold !== null) {\n  queries.push({ name: 'error_rate', query: String(errTemplate).split('{{service}}').join(j.service_name), healthy_if: 'lte', threshold: errThreshold });\n}\nreturn [{\n  json: {\n    ...base,\n    can_verify: true,\n    prometheus_url: promUrl,\n    queries,\n    wait_seconds: envInt(env, 'RECOVERY_WAIT_SECONDS', 60, 5, 3600),\n    max_checks: envInt(env, 'RECOVERY_MAX_CHECKS', 3, 1, 10),\n    timeout_ms: envInt(env, 'PROMETHEUS_TIMEOUT_MS', 10000, 1000, 60000),\n    attempt: 0,\n    checks: [],\n  },\n}];\n"
+      },
+      "id": "a2b49fa7-df9a-475a-ab08-b9c8662963da",
+      "name": "Plan recovery check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0bee78f8-69c9-43df-aef2-0576696fb76d",
+              "leftValue": "={{ $json.can_verify }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "4e21f513-1b0b-43cd-a014-ffb714bebef0",
+      "name": "Can verify?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": "={{ $json.wait_seconds }}",
+        "unit": "seconds"
+      },
+      "id": "e6a7a08c-46f9-47b0-a5f9-b32eb2697a0a",
+      "name": "Wait before check",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        -180
+      ],
+      "notes": "RECOVERY_WAIT_SECONDS",
+      "webhookId": "c08b9a6d-e9f1-457f-a687-24321bab9c22"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 07 – Node: \"Build health queries\". Runs after every Wait, in a\n// loop. Input is the plan (first time) or the previous evaluation (later).\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst s = $input.first().json;\nconst attempt = (s.attempt || 0) + 1;\nconst at = new Date().toISOString();\nreturn s.queries.map((q) => ({\n  json: {\n    state: { ...s, attempt },\n    check: q,\n    url: s.prometheus_url + '/api/v1/query?' + toQuery({ query: q.query, time: at }),\n    timeout_ms: s.timeout_ms,\n  },\n}));\n"
+      },
+      "id": "a5278e87-dbbd-4c3b-a3c9-14b09f8b1ec6",
+      "name": "Build health queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": "={{ $json.timeout_ms || 15000 }}",
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "bbedce15-fdfc-405f-a714-b77472b2796c",
+      "name": "Prometheus: health query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        -360
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "GET {PROMETHEUS_URL}/api/v1/query",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "96fc7c0b-4590-425e-ac4d-95737bb4e204",
+      "name": "Pair query and answer",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1560,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 07 – Node: \"Evaluate health\". Input: request + Prometheus answer\n// combined by position (Merge node), so it also works inside the loop.\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst items = $input.all().map((i) => i.json);\nconst state = items[0].state;\nconst results = items.map((it) => {\n  const q = it.check;\n  const c = classifyHttp(it);\n  if (c.kind !== 'ok') return { name: q.name, ok: false, healthy: null, error: c.kind + (c.status ? ' ' + c.status : '') };\n  const b = it.body;\n  if (!b || b.status !== 'success' || !b.data || !Array.isArray(b.data.result)) return { name: q.name, ok: false, healthy: null, error: 'invalid_response' };\n  const vals = b.data.result.map((s) => Number(s.value && s.value[1])).filter(Number.isFinite);\n  if (!vals.length) return { name: q.name, ok: false, healthy: null, error: 'no_data' };\n  const v = q.name === 'error_rate' ? vals.reduce((a, x) => a + x, 0) : Math.min(...vals);\n  const healthy = q.healthy_if === 'equals_1' ? v === 1 : v <= q.threshold;\n  return { name: q.name, ok: true, value: v, threshold: q.threshold === undefined ? null : q.threshold, healthy };\n});\n\nconst check = { attempt: state.attempt, at: new Date().toISOString(), results };\nconst checks = [...(state.checks || []), check];\nconst allMeasured = results.every((r) => r.ok);\nconst healthy = allMeasured && results.every((r) => r.healthy);\nconst unhealthy = results.some((r) => r.ok && r.healthy === false);\nconst last = state.attempt >= state.max_checks;\n\nlet verdict = null;\nif (healthy) verdict = 'recovered';\nelse if (last) verdict = allMeasured || unhealthy ? 'not_recovered' : 'unable_to_verify';\n\nreturn [{ json: { ...state, checks, verdict, done: verdict !== null } }];\n"
+      },
+      "id": "ecfa7826-4e7a-400f-abc3-a741925b7357",
+      "name": "Evaluate health",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fcd83c22-fae8-4528-a0d9-add7c2dd5eb2",
+              "leftValue": "={{ $json.done }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "756497e8-1d1e-428f-a1b9-db0757e23b07",
+      "name": "Verdict reached?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2080,
+        -180
+      ],
+      "notes": "false → wait and check again (max RECOVERY_MAX_CHECKS)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 07 – Node: \"Sign recovery check request\".\n//   POST /api/machine/recovery-checks\n//   { incident_id, playbook_run_id, status, check_type, details }\n// (contract B.3 -> record_recovery_check). The route is NOT implemented in the\n// backend yet (BD-3): today it answers 404 and the result says \"not_implemented\".\n// Verdict -> recovery_checks.status: recovered=healthy, not_recovered=unhealthy,\n// unable_to_verify=failed (the check itself could not be completed).\n// ---- shared: HMAC signing (same scheme as backend/src/middleware/machine-auth.ts) ----\n// canonical = timestamp + \".\" + nonce + \".\" + METHOD + \".\" + path + \".\" + rawBody\n// header X-DC-Signature = \"sha256=\" + hex(HMAC-SHA256(secret, canonical))\nconst __crypto = require('crypto');\nconst HMAC_MAX_SKEW_SECONDS = 300;\nconst HMAC_MIN_SECRET_LENGTH = 32;\nconst HMAC_NONCE_PATTERN = /^[A-Za-z0-9_-]{16,200}$/;\nconst HMAC_SIGNATURE_PATTERN = /^sha256=[0-9a-f]{64}$/;\n\nfunction hmacCanonical(timestamp, nonce, method, path, body) {\n  return [String(timestamp), nonce, String(method).toUpperCase(), path, body].join('.');\n}\n\nfunction hmacSignature(secret, timestamp, nonce, method, path, body) {\n  return 'sha256=' + __crypto.createHmac('sha256', secret)\n    .update(hmacCanonical(timestamp, nonce, method, path, body), 'utf8').digest('hex');\n}\n\nfunction hmacSecret(value) {\n  if (typeof value !== 'string' || value.length < HMAC_MIN_SECRET_LENGTH) {\n    throw new Error('MACHINE_SIGNING_SECRET is missing or shorter than 32 characters.');\n  }\n  return value;\n}\n\nfunction hmacNonce() {\n  return __crypto.randomBytes(24).toString('base64url');\n}\n\n// Build a signed backend request. `path` must be the full request path (e.g.\n// /api/machine/playbook-runs/<id>/start) because the backend signs req.originalUrl.\nfunction signedBackendRequest(env, method, path, payload, now) {\n  const secret = hmacSecret(env.MACHINE_SIGNING_SECRET);\n  const base = String(env.BACKEND_BASE_URL || '').replace(/\\/+$/, '');\n  if (!/^https?:\\/\\//.test(base)) throw new Error('BACKEND_BASE_URL is not configured.');\n  const body = payload === undefined ? '' : JSON.stringify(payload);\n  const timestamp = Math.floor((now || Date.now()) / 1000);\n  const nonce = hmacNonce();\n  return {\n    method: method.toUpperCase(),\n    url: base + path,\n    path,\n    body,\n    headers: {\n      'X-DC-Timestamp': String(timestamp),\n      'X-DC-Nonce': nonce,\n      'X-DC-Signature': hmacSignature(secret, timestamp, nonce, method, path, body),\n    },\n  };\n}\n\n// Verify an incoming signed request (backend -> n8n). Returns { ok, status, reason }.\n// `seen` is a plain object used as the replay store (workflow static data).\nfunction verifySignedRequest(secret, headers, method, path, rawBody, seen, nowMs) {\n  const now = nowMs || Date.now();\n  const h = {};\n  for (const [k, v] of Object.entries(headers || {})) h[String(k).toLowerCase()] = v;\n  const ts = h['x-dc-timestamp'];\n  const nonce = h['x-dc-nonce'];\n  const sig = h['x-dc-signature'];\n  if (!ts || !nonce || !sig) return { ok: false, status: 401, reason: 'Signed request headers are required.' };\n  if (!/^\\d{1,12}$/.test(String(ts))) return { ok: false, status: 401, reason: 'Invalid request timestamp.' };\n  if (Math.abs(now / 1000 - Number(ts)) > HMAC_MAX_SKEW_SECONDS) {\n    return { ok: false, status: 401, reason: 'Signed request is outside the 5 minute window.' };\n  }\n  if (!HMAC_NONCE_PATTERN.test(nonce) || !HMAC_SIGNATURE_PATTERN.test(sig)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  const expected = Buffer.from(hmacSignature(hmacSecret(secret), Number(ts), nonce, method, path, rawBody), 'utf8');\n  const given = Buffer.from(sig, 'utf8');\n  if (given.length !== expected.length || !__crypto.timingSafeEqual(given, expected)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  // Replay protection: each nonce once within 15 minutes (3x the skew window).\n  const cutoff = now - 15 * 60 * 1000;\n  for (const [k, at] of Object.entries(seen)) if (at < cutoff) delete seen[k];\n  if (seen[nonce]) return { ok: false, status: 409, reason: 'Replayed request.' };\n  seen[nonce] = now;\n  return { ok: true, status: 200, reason: null };\n}\n// ---- end shared: HMAC ----\nconst d = $input.first().json;\nconst STATUS = { recovered: 'healthy', not_recovered: 'unhealthy', unable_to_verify: 'failed' };\nconst result = {\n  incident_id: d.incident_id,\n  playbook_run_id: d.playbook_run_id,\n  service_name: d.service_name || null,\n  action_type: d.action_type || null,\n  status: d.verdict,\n  db_status: STATUS[d.verdict] || 'failed',\n  checks_performed: (d.checks || []).length,\n  evidence: (d.checks || []).slice(-3),\n  reason: d.reason || null,\n  simulated_remediation: !!d.simulated,\n  ok: d.verdict === 'recovered',\n};\n\nif (!d.incident_id || !d.playbook_run_id) {\n  return [{ json: { result, skip_store: true, request: null } }];\n}\nlet request = null;\ntry {\n  request = signedBackendRequest($env, 'POST', '/api/machine/recovery-checks', {\n    incident_id: d.incident_id,\n    playbook_run_id: d.playbook_run_id,\n    status: result.db_status,\n    check_type: 'prometheus',\n    details: { verdict: d.verdict, checks: result.evidence, reason: result.reason, simulated_remediation: result.simulated_remediation },\n  });\n} catch (e) {\n  return [{ json: { result, skip_store: true, request: null, store_error: { kind: 'not_configured', message: e.message } } }];\n}\nreturn [{ json: { result, skip_store: false, request } }];\n"
+      },
+      "id": "4e21cf65-64f2-4771-a090-cb780b631593",
+      "name": "Sign recovery check request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        0
+      ],
+      "notes": "Verdict → recovery_checks.status: healthy / unhealthy / failed"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "513e5c3f-e3e9-4d6d-ab27-7c711e4e8d87",
+              "leftValue": "={{ !$json.skip_store }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "30664eda-3ecd-46b3-a01a-e187230eea39",
+      "name": "Store?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.request.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-DC-Timestamp",
+              "value": "={{ $json.request.headers[\"X-DC-Timestamp\"] }}"
+            },
+            {
+              "name": "X-DC-Nonce",
+              "value": "={{ $json.request.headers[\"X-DC-Nonce\"] }}"
+            },
+            {
+              "name": "X-DC-Signature",
+              "value": "={{ $json.request.headers[\"X-DC-Signature\"] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.request.body }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "44893daf-5b03-4662-aeac-6b5934681468",
+      "name": "Backend: store recovery check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        -180
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "POST /api/machine/recovery-checks (BD-3: 404 until implemented)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 07 – Node: \"Recovery result\". Output contract:\n// { incident_id, playbook_run_id, status, db_status, checks_performed, evidence, ok, stored, store_error }\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst signed = $('Sign recovery check request').first().json;\nlet stored = false;\nlet storeError = signed.store_error || null;\nif (!signed.skip_store) {\n  const c = classifyHttp($input.first().json, { notFoundMeansNotImplemented: true, serviceUnavailableMeansNotConfigured: true });\n  stored = c.kind === 'ok';\n  storeError = stored ? null : { kind: c.kind, http_status: c.status, retryable: c.retryable, message: c.message };\n} else if (!storeError) {\n  storeError = { kind: 'invalid_input', message: 'incident_id/playbook_run_id missing.' };\n}\nreturn [{ json: { ...signed.result, stored, store_error: storeError } }];\n"
+      },
+      "id": "6be84919-53c1-4917-a406-73cd84b8d492",
+      "name": "Recovery result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f7860cb3-b7e7-42d9-acbe-ba1466e04f31",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "recovered",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d3c0387a-e63d-4806-abf7-96869699b1db",
+      "name": "Recovered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "dc33wf08postmort",
+          "mode": "list",
+          "cachedResultName": "08 - Postmortem"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "d2653f0d-a453-43b2-ac76-8bcdaf5c441d",
+      "name": "Run 08 Postmortem",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3640,
+        -180
+      ],
+      "notes": "Draft postmortem (Tharindu).",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "db3b5594-aaed-452a-a596-ef2313b68c38",
+      "name": "Done (not recovered)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3640,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 07 – Node: \"Return recovery result\". 07 always returns its own\n// recovery result (contract), with a short summary of the postmortem run.\nconst recovery = $('Recovery result').first().json;\nconst pm = $input.first().json || {};\nreturn [{\n  json: {\n    ...recovery,\n    postmortem: { status: pm.status || (pm.error ? 'workflow_failed' : 'unknown'), stored: pm.stored === true, title: pm.postmortem ? pm.postmortem.title : null },\n  },\n}];\n"
+      },
+      "id": "e03db804-ee64-43dc-a6cc-1f88d90853f7",
+      "name": "Return recovery result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3900,
+        -180
+      ],
+      "notes": "Always returns the recovery result (plus the postmortem status)."
+    }
+  ],
+  "connections": {
+    "When called by 06 Remediation": {
+      "main": [
+        [
+          {
+            "node": "Plan recovery check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan recovery check": {
+      "main": [
+        [
+          {
+            "node": "Can verify?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can verify?": {
+      "main": [
+        [
+          {
+            "node": "Wait before check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sign recovery check request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait before check": {
+      "main": [
+        [
+          {
+            "node": "Build health queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build health queries": {
+      "main": [
+        [
+          {
+            "node": "Prometheus: health query",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Pair query and answer",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Prometheus: health query": {
+      "main": [
+        [
+          {
+            "node": "Pair query and answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pair query and answer": {
+      "main": [
+        [
+          {
+            "node": "Evaluate health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate health": {
+      "main": [
+        [
+          {
+            "node": "Verdict reached?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verdict reached?": {
+      "main": [
+        [
+          {
+            "node": "Sign recovery check request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait before check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign recovery check request": {
+      "main": [
+        [
+          {
+            "node": "Store?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store?": {
+      "main": [
+        [
+          {
+            "node": "Backend: store recovery check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Recovery result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backend: store recovery check": {
+      "main": [
+        [
+          {
+            "node": "Recovery result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recovery result": {
+      "main": [
+        [
+          {
+            "node": "Recovered?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recovered?": {
+      "main": [
+        [
+          {
+            "node": "Run 08 Postmortem",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Done (not recovered)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run 08 Postmortem": {
+      "main": [
+        [
+          {
+            "node": "Return recovery result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "dc33wf09errorhnd"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
