@@ -26,6 +26,24 @@ class ApiEndpoints {
   static String get incidents => '$baseUrl/api/incidents';
   static String incidentById(String id) => '$baseUrl/api/incidents/$id';
 
+  // GitHub & CI/CD Pipelines (Thilina's routes - M7)
+  static String get githubRepositories => '$baseUrl/api/github/repositories';
+  static String githubRepo(String owner, String repo) =>
+      '$baseUrl/api/github/repositories/$owner/$repo';
+  static String githubCommits(String owner, String repo,
+          {String? branch, int limit = 10}) =>
+      '$baseUrl/api/github/repositories/$owner/$repo/commits?branch=${branch ?? ''}&limit=$limit';
+  static String githubPulls(String owner, String repo,
+          {String state = 'open', int limit = 10}) =>
+      '$baseUrl/api/github/repositories/$owner/$repo/pulls?state=$state&limit=$limit';
+  static String githubPullDetail(String owner, String repo, int number) =>
+      '$baseUrl/api/github/repositories/$owner/$repo/pulls/$number';
+  static String githubWorkflowRuns(String owner, String repo,
+          {String? branch, String? status, int limit = 10}) =>
+      '$baseUrl/api/github/repositories/$owner/$repo/workflow-runs?branch=${branch ?? ''}&status=${status ?? ''}&limit=$limit';
+  static String githubWorkflowRunJobs(String owner, String repo, int runId) =>
+      '$baseUrl/api/github/repositories/$owner/$repo/workflow-runs/$runId/jobs';
+
   // Notifications (Himasha's Microservice - Port 5002 or via Gateway)
   static String get notifications => 'http://localhost:5002/api/notifications';
 }

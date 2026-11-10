@@ -86,21 +86,24 @@ class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
                   final isOk = item['isOk'] as bool;
                   final isSyncing = item['syncing'] as bool;
 
-                  return Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: colors.cardBorder, width: 0.8),
-                      boxShadow: [
-                        BoxShadow(
-                          color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-                          blurRadius: 4,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
-                    ),
-                    child: Column(
+                  return InkWell(
+                    onTap: item['name'] == 'GitHub' ? () => Navigator.pushNamed(context, '/repositories') : null,
+                    borderRadius: BorderRadius.circular(14),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: colors.cardBorder, width: 0.8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
@@ -160,8 +163,9 @@ class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
                         ),
                       ],
                     ),
-                  );
-                },
+                  ),
+                );
+              },
               ),
             ),
           ],
