@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/playbook_model.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
 
@@ -88,20 +89,36 @@ class S16RemediationPlaybooksScreen extends StatelessWidget {
                   }
 
                   final p = playbooks[index - 1];
-                  final isClickable = p['action'] == 's17';
 
                   return InkWell(
                     onTap: () {
-                      if (isClickable) {
+                      if (p['action'] == 's17') {
                         Navigator.pushNamed(context, '/recommended-action');
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('${p['title']} requires root incident context.'),
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
+                        return;
                       }
+
+                      PlaybookActionType actionType = PlaybookActionType.rollback;
+                      if (p['title'] == 'Restart service') {
+                        actionType = PlaybookActionType.restart;
+                      } else if (p['title'] == 'Scale service') {
+                        actionType = PlaybookActionType.scale;
+                      } else if (p['title'] == 'Enable circuit breaker') {
+                        actionType = PlaybookActionType.circuitBreaker;
+                      }
+
+                      final approval = ApprovalModel(
+                        id: 'appr-uuid-${actionType.slug}-01',
+                        playbookRunId: 'run-uuid-${actionType.slug}-01',
+                        incidentId: 'INC-1042',
+                        playbookId: 'pb-uuid-${actionType.slug}-01',
+                        actionType: actionType,
+                        status: 'pending',
+                        requestedBy: 'Alex Morgan',
+                        serviceName: 'payments-api',
+                        environment: 'Production',
+                      );
+
+                      Navigator.pushNamed(context, '/approve-action', arguments: approval);
                     },
                     borderRadius: BorderRadius.circular(14),
                     child: Container(

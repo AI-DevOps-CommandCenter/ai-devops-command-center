@@ -46,4 +46,12 @@ class ApiEndpoints {
 
   // Notifications (Himasha's Microservice - Port 5002 or via Gateway)
   static String get notifications => 'http://localhost:5002/api/notifications';
+
+  // Playbook Runs & Approvals (Vinuka's Backend API - M5 Handoff)
+  static String get playbookRuns => '$baseUrl/api/playbook-runs';
+  static String playbookRunById(String id) => '$baseUrl/api/playbook-runs/$id';
+  static String playbookRunDecision(String id) => '$baseUrl/api/playbook-runs/$id/decision';
+  static String playbookRunCancel(String id) => '$baseUrl/api/playbook-runs/$id/cancel';
+  static String get approvals => '$baseUrl/api/approvals';
+  static String approvalDecision(String id) => '$baseUrl/api/approvals/$id/decision';
 }

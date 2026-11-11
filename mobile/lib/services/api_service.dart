@@ -4,6 +4,7 @@ import '../models/service_model.dart';
 import '../models/incident_model.dart';
 import '../models/metric_model.dart';
 import '../models/cicd_model.dart';
+import '../models/playbook_model.dart';
 import 'api_endpoints.dart';
 import 'auth_service.dart';
 
@@ -389,5 +390,252 @@ class ApiService {
         ],
       ),
     ];
+  }
+
+  // ==========================================
+  // PLAYBOOK RUNS & APPROVALS (Vinuka M5 Handoff)
+  // ==========================================
+
+  /// GET /api/approvals?status=pending
+  Future<List<ApprovalModel>> fetchPendingApprovals() async {
+    try {
+      final url = '${ApiEndpoints.approvals}?status=pending';
+      final response = await http
+          .get(Uri.parse(url), headers: _headers())
+          .timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> body = jsonDecode(response.body);
+        if (body['data'] is List) {
+          final List list = body['data'];
+          return list.map((e) => ApprovalModel.fromJson(e)).toList();
+        }
+      }
+    } catch (_) {}
+
+    // Mock pending approval matching Vinuka's exact backend schema
+    return [
+      ApprovalModel(
+        id: 'appr-uuid-1042-rb',
+        playbookRunId: 'run-uuid-1042-rb',
+        incidentId: 'INC-1042',
+        playbookId: 'pb-uuid-rollback-01',
+        actionType: PlaybookActionType.rollback,
+        status: 'pending',
+        requestedBy: 'Alex Morgan',
+        serviceName: 'payments-api',
+        environment: 'Production',
+        fromVersion: 'v2.8.1',
+        toVersion: 'v2.8.0',
+        impactDescription:
+            'Impact: brief request failures during switchover (about 30 s). Nothing runs until you confirm.',
+        requestPayload: {
+          'service': 'payments-api',
+          'environment': 'Production',
+          'from_version': 'v2.8.1',
+          'to_version': 'v2.8.0',
+        },
+        createdAt: DateTime.now().subtract(const Duration(minutes: 5)),
+      ),
+    ];
+  }
+
+  /// GET /api/playbook-runs?status=...&incident_id=...
+  Future<List<PlaybookRunModel>> fetchPlaybookRuns({
+    String? status,
+    String? incidentId,
+  }) async {
+    try {
+      final params = <String>[];
+      if (status != null) params.add('status=$status');
+      if (incidentId != null) params.add('incident_id=$incidentId');
+      final query = params.isNotEmpty ? '?${params.join('&')}' : '';
+      final url = '${ApiEndpoints.playbookRuns}$query';
+
+      final response = await http
+          .get(Uri.parse(url), headers: _headers())
+          .timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> body = jsonDecode(response.body);
+        if (body['data'] is List) {
+          final List list = body['data'];
+          return list.map((e) => PlaybookRunModel.fromJson(e)).toList();
+        }
+      }
+    } catch (_) {}
+
+    return [
+      PlaybookRunModel(
+        id: 'run-uuid-1042-rb',
+        incidentId: incidentId ?? 'INC-1042',
+        playbookId: 'pb-uuid-rollback-01',
+        approvalId: 'appr-uuid-1042-rb',
+        actionType: PlaybookActionType.rollback,
+        status: PlaybookRunStatus.pendingApproval,
+        serviceName: 'payments-api',
+        environment: 'Production',
+        fromVersion: 'v2.8.1',
+        toVersion: 'v2.8.0',
+        requestedBy: 'Alex Morgan',
+        createdAt: DateTime.now().subtract(const Duration(minutes: 5)),
+        steps: const [
+          PlaybookExecutionStep(time: '14:24', title: 'Queued', detail: 'Pending operator approval', status: 'completed'),
+          PlaybookExecutionStep(time: '14:25', title: 'Switching traffic to v2.8.0', detail: 'Ingress routing update', status: 'pending'),
+          PlaybookExecutionStep(time: '14:26', title: 'Draining v2.8.1', detail: 'Connection drain timeout 30s', status: 'pending'),
+          PlaybookExecutionStep(time: '14:27', title: 'Execution complete', detail: 'Playbook completed', status: 'pending'),
+        ],
+      ),
+    ];
+  }
+
+  /// GET /api/playbook-runs/:id
+  Future<PlaybookRunModel> fetchPlaybookRun(String runId) async {
+    try {
+      final url = ApiEndpoints.playbookRunById(runId);
+      final response = await http
+          .get(Uri.parse(url), headers: _headers())
+          .timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> body = jsonDecode(response.body);
+        if (body['data'] is Map<String, dynamic>) {
+          return PlaybookRunModel.fromJson(body['data']);
+        }
+      }
+    } catch (_) {}
+
+    // Fallback model for offline/demo reliability
+    return PlaybookRunModel(
+      id: runId.isNotEmpty ? runId : 'run-uuid-1042-rb',
+      incidentId: 'INC-1042',
+      playbookId: 'pb-uuid-rollback-01',
+      approvalId: 'appr-uuid-1042-rb',
+      actionType: PlaybookActionType.rollback,
+      status: PlaybookRunStatus.running,
+      serviceName: 'payments-api',
+      environment: 'Production',
+      fromVersion: 'v2.8.1',
+      toVersion: 'v2.8.0',
+      requestedBy: 'Alex Morgan',
+      createdAt: DateTime.now().subtract(const Duration(minutes: 6)),
+      startedAt: DateTime.now().subtract(const Duration(minutes: 2)),
+      steps: const [
+        PlaybookExecutionStep(time: '14:24', title: 'Queued', detail: 'Dispatched to n8n engine', status: 'completed'),
+        PlaybookExecutionStep(time: '14:25', title: 'Switching traffic to v2.8.0', detail: 'Ingress routing updated', status: 'completed'),
+        PlaybookExecutionStep(time: '14:26', title: 'Draining v2.8.1', detail: 'Drain in progress (30s timeout)', status: 'running'),
+        PlaybookExecutionStep(time: '14:27', title: 'Execution complete', detail: 'Ready for health verification', status: 'pending'),
+      ],
+    );
+  }
+
+  /// POST /api/playbook-runs
+  Future<Map<String, dynamic>> createPlaybookRun({
+    required String incidentId,
+    required String playbookId,
+    required Map<String, dynamic> requestPayload,
+    String? idempotencyKey,
+  }) async {
+    final key = idempotencyKey ?? 'idemp-${DateTime.now().millisecondsSinceEpoch}';
+    final body = jsonEncode({
+      'incident_id': incidentId,
+      'playbook_id': playbookId,
+      'request_payload': requestPayload,
+      'idempotency_key': key,
+    });
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse(ApiEndpoints.playbookRuns),
+            headers: _headers(),
+            body: body,
+          )
+          .timeout(const Duration(seconds: 4));
+
+      final Map<String, dynamic> res = jsonDecode(response.body);
+      return res;
+    } catch (_) {
+      return {
+        'success': true,
+        'message': 'Playbook execution request created successfully (Demo Mode).',
+        'data': {
+          'id': 'run-uuid-demo-${DateTime.now().millisecondsSinceEpoch}',
+          'approval_id': 'appr-uuid-demo-${DateTime.now().millisecondsSinceEpoch}',
+        },
+      };
+    }
+  }
+
+  /// PATCH /api/playbook-runs/:id/decision
+  /// Approves or rejects a playbook run (or /api/approvals/:id/decision)
+  Future<Map<String, dynamic>> submitPlaybookDecision({
+    required String runId,
+    required bool approve,
+    String? comments,
+    String? approvalId,
+  }) async {
+    final status = approve ? 'approved' : 'rejected';
+    final payload = jsonEncode({
+      'status': status,
+      'comments': comments ?? (approve ? 'Approved after reviewing incident.' : 'Rejected upon review.'),
+    });
+
+    try {
+      // Primary route: /api/playbook-runs/:id/decision
+      final url = ApiEndpoints.playbookRunDecision(runId);
+      final response = await http
+          .patch(Uri.parse(url), headers: _headers(), body: payload)
+          .timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else if (response.statusCode == 403) {
+        // Enforce Vinuka's Authorization rule: Users cannot approve their own requests
+        final res = jsonDecode(response.body);
+        return {
+          'success': false,
+          'message': res['message'] ?? 'Users cannot approve their own requests.',
+        };
+      }
+    } catch (_) {}
+
+    // Simulated successful decision response
+    return {
+      'success': true,
+      'message': approve
+          ? 'Playbook request approved successfully.'
+          : 'Playbook request rejected.',
+      'data': {
+        'id': runId,
+        'status': status,
+      },
+    };
+  }
+
+  /// POST /api/playbook-runs/:id/cancel
+  Future<Map<String, dynamic>> cancelPlaybookRun({
+    required String runId,
+    required String reason,
+  }) async {
+    final payload = jsonEncode({
+      'reason': reason,
+    });
+
+    try {
+      final url = ApiEndpoints.playbookRunCancel(runId);
+      final response = await http
+          .post(Uri.parse(url), headers: _headers(), body: payload)
+          .timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (_) {}
+
+    return {
+      'success': true,
+      'message': 'Playbook run cancelled.',
+    };
   }
 }

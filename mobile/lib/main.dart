@@ -28,6 +28,7 @@ import 'screens/s25_notifications_screen.dart';
 import 'screens/s26_integrations_screen.dart';
 import 'screens/s27_notification_preferences_screen.dart';
 import 'screens/s28_profile_screen.dart';
+import 'models/playbook_model.dart';
 
 void main() {
   runApp(const DevOpsCommandCenterApp());
@@ -75,6 +76,24 @@ class DevOpsCommandCenterApp extends StatelessWidget {
               final ctx = settings.arguments as String?;
               return MaterialPageRoute(
                 builder: (context) => S23DeveloperAssistantScreen(initialContext: ctx),
+              );
+            }
+            if (settings.name == '/approve-action') {
+              final approval = settings.arguments as ApprovalModel?;
+              return MaterialPageRoute(
+                builder: (context) => S18ApproveActionScreen(initialApproval: approval),
+              );
+            }
+            if (settings.name == '/execution-progress') {
+              final runId = settings.arguments as String?;
+              return MaterialPageRoute(
+                builder: (context) => S19ExecutionProgressScreen(runId: runId),
+              );
+            }
+            if (settings.name == '/recovery-verification') {
+              final incidentId = (settings.arguments as String?) ?? 'INC-1042';
+              return MaterialPageRoute(
+                builder: (context) => S20RecoveryVerificationScreen(incidentId: incidentId),
               );
             }
             return null;
