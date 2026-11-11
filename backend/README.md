@@ -229,6 +229,7 @@ Approval and playbook-run writes call the secure database functions with the cal
 | `POST /api/playbook-runs/:id/complete` `{ status: success\|failed, reason, result_payload? }` | admin/operator, **manual override**, reason of 5+ characters (A3-Q3) | `complete_playbook_run` |
 | `POST /api/machine/playbook-runs/:id/start` `{ n8n_execution_id, workflow_name? }` | **n8n only** (signed request) | `start_playbook_run` as the automation identity |
 | `POST /api/machine/playbook-runs/:id/complete` `{ n8n_execution_id, status, result? }` | **n8n only** (signed request) | `complete_playbook_run` with the same execution id |
+| `POST /api/machine/recovery-checks` `{ incident_id, playbook_run_id, status: pending\|healthy\|unhealthy\|failed, check_type? (≤ 100), details? (object) }` → `201 { data: { recovery_check_id } }` | **n8n only** (signed request; workflow 07) | `record_recovery_check` as the automation identity. Unknown incident → 404; run not found or of another incident → 400 (DC422). |
 | `POST`/`PATCH /api/remediation-executions` | – | **410 Gone**: legacy and read-only. Use playbook runs. |
 
 **Error statuses:** the database's own message is returned with `403` (role, or own request), `404` (not found or not visible), `409` (already decided, duplicate active run, wrong state, duplicate execution) and `400` (invalid input). Other database errors give a generic message.
