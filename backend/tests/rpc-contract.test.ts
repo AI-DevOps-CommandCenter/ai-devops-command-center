@@ -3,8 +3,10 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 import { mapDbError } from "../src/lib/db-errors.js";
-import { loadMachineEnv } from "../src/config/machine.js";
-
+import {
+  loadAutomationEnv,
+  loadMachineEnv
+} from "../src/config/machine.js";
 // Guards for the database-function integration (decisions A2/A3/A7):
 // - no direct writes to the workflow tables or the audit log in src/;
 // - every rpc() call uses a function and parameter names that exist in the
@@ -165,6 +167,49 @@ describe("loadMachineEnv()", () => {
       })
     ).toEqual({
       signingSecret: SECRET,
+      automationEmail: "automation@example.test",
+      automationPassword: "synthetic"
+    });
+  });
+});
+describe("loadAutomationEnv()", () => {
+  it("is disabled when neither credential is configured", () => {
+    expect(loadAutomationEnv({})).toBeNull();
+  });
+
+  it("requires both automation credentials", () => {
+    expect(() =>
+      loadAutomationEnv({
+        AUTOMATION_EMAIL: "automation@example.test"
+      })
+    ).toThrow(/missing AUTOMATION_PASSWORD/);
+
+    expect(() =>
+      loadAutomationEnv({
+        AUTOMATION_PASSWORD: "synthetic"
+      })
+    ).toThrow(/missing AUTOMATION_EMAIL/);
+  });
+
+  it("does not reveal credential values in errors", () => {
+    const password = "test-only-secret-password";
+
+    try {
+      loadAutomationEnv({
+        AUTOMATION_PASSWORD: password
+      });
+    } catch (error) {
+      expect((error as Error).message).not.toContain(password);
+    }
+  });
+
+  it("accepts both automation credentials without a machine signing secret", () => {
+    expect(
+      loadAutomationEnv({
+        AUTOMATION_EMAIL: "automation@example.test",
+        AUTOMATION_PASSWORD: "synthetic"
+      })
+    ).toEqual({
       automationEmail: "automation@example.test",
       automationPassword: "synthetic"
     });
