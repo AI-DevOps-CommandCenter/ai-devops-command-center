@@ -5,7 +5,15 @@ services:
     container_name: n8n
     restart: unless-stopped
     ports:
-      - "${N8N_PORT:-5678}:5678"
+      # N-5: published on 127.0.0.1 by default, so only this computer can open
+      # n8n (local development). The container still reaches the backend, Loki and
+      # Prometheus through host.docker.internal (outgoing, unchanged).
+      # Remote access (staging/production, or another machine such as Alertmanager):
+      # keep this on 127.0.0.1 and put an HTTPS reverse proxy with appropriate access
+      # controls (for example an IP allow-list, and authentication for the editor) in
+      # front of n8n. Contract B.3 requires HTTPS. Never publish n8n directly on
+      # 0.0.0.0: that exposes the editor and the webhooks over plain HTTP.
+      - "${N8N_BIND_ADDRESS:-127.0.0.1}:${N8N_PORT:-5678}:5678"
     extra_hosts:
       # Lets the container reach the backend/Loki/Prometheus on the host (also on Linux).
       - "host.docker.internal:host-gateway"
