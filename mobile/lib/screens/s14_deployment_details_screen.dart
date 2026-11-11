@@ -1,13 +1,51 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../services/api_service.dart';
+import '../models/cicd_model.dart';
 
-class S14DeploymentDetailsScreen extends StatelessWidget {
+class S14DeploymentDetailsScreen extends StatefulWidget {
   const S14DeploymentDetailsScreen({super.key});
+
+  @override
+  State<S14DeploymentDetailsScreen> createState() => _S14DeploymentDetailsScreenState();
+}
+
+class _S14DeploymentDetailsScreenState extends State<S14DeploymentDetailsScreen> {
+  final ApiService _apiService = ApiService();
+  bool _isLoading = true;
+  WorkflowRunModel? _deploymentRun;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDeployment();
+  }
+
+  Future<void> _loadDeployment() async {
+    setState(() => _isLoading = true);
+    try {
+      final runs = await _apiService.fetchWorkflowRuns(branch: 'main');
+      if (mounted) {
+        setState(() {
+          _deploymentRun = runs.firstWhere(
+            (r) => r.name.toLowerCase().contains('deploy') || r.branch == 'main',
+            orElse: () => runs.first,
+          );
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final run = _deploymentRun;
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -34,7 +72,7 @@ class S14DeploymentDetailsScreen extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Deployment v2.8.1',
+                      run != null && run.name.contains('Deploy') ? run.name : 'Deployment v2.8.1',
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
@@ -42,6 +80,12 @@ class S14DeploymentDetailsScreen extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (_isLoading)
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: colors.teal),
+                    ),
                 ],
               ),
             ),
@@ -60,11 +104,11 @@ class S14DeploymentDetailsScreen extends StatelessWidget {
                         children: [
                           _buildRow(colors, 'Environment', 'Production'),
                           Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
-                          _buildRow(colors, 'Commit', 'a91f3c2'),
+                          _buildRow(colors, 'Commit', run?.headSha.isNotEmpty == true ? (run!.headSha.length >= 7 ? run.headSha.substring(0, 7) : run.headSha) : 'a91f3c2'),
                           Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
                           _buildRow(colors, 'Deployed', '14:05 UTC'),
                           Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
-                          _buildRow(colors, 'Pipeline', '#318 passed'),
+                          _buildRow(colors, 'Pipeline', '#${run?.runNumber ?? 318} ${run?.displayStatus.toLowerCase() ?? "passed"}'),
                           Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
                           _buildRow(colors, 'Previous', 'v2.8.0'),
                         ],

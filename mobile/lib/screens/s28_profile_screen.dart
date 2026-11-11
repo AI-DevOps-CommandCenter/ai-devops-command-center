@@ -174,6 +174,36 @@ class S28ProfileScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
 
+                    // Repositories & CI/CD (Task 02)
+                    InkWell(
+                      onTap: () {
+                        Navigator.pushNamed(context, '/repositories');
+                      },
+                      borderRadius: BorderRadius.circular(14),
+                      child: _buildCard(
+                        colors: colors,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Repositories & CI/CD',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: colors.text,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'GitHub · Pipelines, PRs & Deployments',
+                              style: TextStyle(fontSize: 12, color: colors.muted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
                     // Preferences
                     InkWell(
                       onTap: () {
