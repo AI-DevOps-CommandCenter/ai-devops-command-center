@@ -195,7 +195,57 @@ class S28ProfileScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'GitHub · Pipelines, PRs & Deployments',
+                              'GitHub · Pipelines, PRs & Deployments (Task 02)',
+                              style: TextStyle(fontSize: 12, color: colors.muted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Remediation Playbooks & Approvals (Task 03)
+                    InkWell(
+                      onTap: () {
+                        Navigator.pushNamed(context, '/playbooks');
+                      },
+                      borderRadius: BorderRadius.circular(14),
+                      child: _buildCard(
+                        colors: colors,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Remediation Playbooks & Approvals',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: colors.text,
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: colors.badgeGreenBg,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Task 03',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: colors.green,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'S18 Approve Action, S19 Execution, S20 Verification',
                               style: TextStyle(fontSize: 12, color: colors.muted),
                             ),
                           ],
