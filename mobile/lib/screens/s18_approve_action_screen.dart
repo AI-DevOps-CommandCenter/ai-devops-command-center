@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../widgets/app_back_button.dart';
+import 's19_execution_progress_screen.dart';
 
 class S18ApproveActionScreen extends StatefulWidget {
   const S18ApproveActionScreen({super.key});
@@ -9,7 +11,25 @@ class S18ApproveActionScreen extends StatefulWidget {
 }
 
 class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
-  bool _isCancelled = false;
+  double _dragPosition = 0.0;
+  bool _isApproved = false;
+
+  void _triggerApproval() {
+    if (_isApproved) return;
+    setState(() {
+      _isApproved = true;
+    });
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const S19ExecutionProgressScreen(),
+          ),
+        );
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,242 +40,169 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Header
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
               child: Row(
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
+                  const AppBackButton(),
                   const SizedBox(width: 12),
-                  Text(
-                    'Approve Action',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: colors.text,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Approve Rollback',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: -0.2,
+                            color: colors.text,
+                          ),
+                        ),
+                        Text(
+                          'INC-1042 · Final confirmation',
+                          style: TextStyle(fontSize: 12, color: colors.muted),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
-
-            // Content
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-                child: _isCancelled ? _buildCancelledView(colors) : _buildApprovalView(colors),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 18,
+                                backgroundColor: colors.accent,
+                                child: Text('AM', style: TextStyle(color: colors.onAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                              ),
+                              const SizedBox(width: 10),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Alex Morgan', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: colors.text)),
+                                  Text('Tech Lead · Approver role', style: TextStyle(fontSize: 12, color: colors.muted)),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Divider(color: colors.border, height: 1),
+                          const SizedBox(height: 14),
+                          Text('TARGET SERVICE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.muted)),
+                          const SizedBox(height: 2),
+                          Text('payments-api (production)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: colors.text)),
+                          const SizedBox(height: 10),
+                          Text('ACTION TYPE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.muted)),
+                          const SizedBox(height: 2),
+                          Text('Roll back to v2.8.0', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: colors.text)),
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+
+                    // Slide to Confirm Widget
+                    Container(
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: colors.surface2,
+                        borderRadius: BorderRadius.circular(28),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final maxDrag = constraints.maxWidth - 56;
+                          return Stack(
+                            children: [
+                              Center(
+                                child: Text(
+                                  _isApproved ? 'Approved!' : 'Slide to approve rollback →',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: _isApproved ? colors.success : colors.muted,
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                left: _dragPosition,
+                                top: 2,
+                                bottom: 2,
+                                child: GestureDetector(
+                                  onHorizontalDragUpdate: (details) {
+                                    if (_isApproved) return;
+                                    setState(() {
+                                      _dragPosition = (_dragPosition + details.delta.dx)
+                                          .clamp(0.0, maxDrag);
+                                    });
+                                  },
+                                  onHorizontalDragEnd: (details) {
+                                    if (_dragPosition >= maxDrag * 0.75) {
+                                      setState(() => _dragPosition = maxDrag);
+                                      _triggerApproval();
+                                    } else {
+                                      setState(() => _dragPosition = 0.0);
+                                    }
+                                  },
+                                  child: Container(
+                                    width: 52,
+                                    height: 52,
+                                    decoration: BoxDecoration(
+                                      color: _isApproved ? colors.success : colors.accent,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.15),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: Icon(
+                                      _isApproved ? Icons.check : Icons.arrow_forward,
+                                      color: colors.onAccent,
+                                      size: 20,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Center(
+                      child: Text(
+                        'Audit record will be permanently logged',
+                        style: TextStyle(fontSize: 12, color: colors.muted),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
               ),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildApprovalView(AppColorScheme colors) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Approval Details Card
-        _buildCard(
-          colors: colors,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Roll back payments-api',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: colors.text,
-                ),
-              ),
-              const SizedBox(height: 10),
-              _buildRow(colors, 'Environment', 'Production'),
-              Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
-              _buildRow(colors, 'From → To', 'v2.8.1 → v2.8.0'),
-              Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
-              _buildRow(colors, 'Approver', 'Alex Morgan'),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-
-        // Warning Note
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: colors.warnBg,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(
-            'Impact: brief request failures during switchover (about 30 s). Nothing runs until you confirm.',
-            style: TextStyle(
-              fontSize: 12,
-              color: colors.warnText,
-              height: 1.4,
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
-
-        // Destructive Primary Button: Approve and Execute
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: ElevatedButton(
-            onPressed: () {
-              Navigator.pushNamed(context, '/execution-progress');
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: colors.red,
-              foregroundColor: colors.isDark ? const Color(0xFF0B1226) : Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text(
-              'Approve and Execute',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-
-        // Cancel Button
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: OutlinedButton(
-            onPressed: () {
-              setState(() {
-                _isCancelled = true;
-              });
-            },
-            style: OutlinedButton.styleFrom(
-              backgroundColor: colors.cardAccent,
-              foregroundColor: colors.text,
-              side: BorderSide(color: colors.border),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: Text(
-              'Cancel',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text),
-            ),
-          ),
-        ),
-        const SizedBox(height: 20),
-      ],
-    );
-  }
-
-  Widget _buildCancelledView(AppColorScheme colors) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildCard(
-          colors: colors,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Approval cancelled',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: colors.text,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Nothing was executed. Incident remains open.',
-                style: TextStyle(fontSize: 13, color: colors.muted),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: OutlinedButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            style: OutlinedButton.styleFrom(
-              backgroundColor: colors.cardAccent,
-              foregroundColor: colors.text,
-              side: BorderSide(color: colors.border),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: Text(
-              'Back to recommendation',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCard({required AppColorScheme colors, required Widget child}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: child,
-    );
-  }
-
-  Widget _buildRow(AppColorScheme colors, String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            color: colors.muted,
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-            color: colors.text,
-          ),
-        ),
-      ],
     );
   }
 }
