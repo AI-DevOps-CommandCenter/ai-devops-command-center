@@ -78,7 +78,7 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       enableGPUValidationMode = "1"
-      allowLocationSimulation = "YES">
+      allowLocationtion = "YES">
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference
