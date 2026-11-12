@@ -162,25 +162,8 @@ async function main() {
   }
 
   // ---- start the server
-  const server = spawn(process.execPath, [N8N_JS, 'start'], { env: ENV, stdio: ['ignore', 'pipe', 'pipe'] });
-  let log = '';
-  server.stdout.on('data', (d) => (log += d));
-  server.stderr.on('data', (d) => (log += d));
-  let up = false;
-  for (let i = 0; i < 90 && !up; i++) { await sleep(2000); try { up = (await fetch(`http://127.0.0.1:${PORT}/healthz`)).ok; } catch {} }
-  // Published webhooks are registered some seconds after /healthz is up.
-  // Ready = the harness webhook answers 2xx. 404 (not registered yet) and 503
-  // ("Database is not ready") are NOT ready.
-  let ready = false;
-  let lastProbe = null;
-  for (let i = 0; i < 60 && up && !ready; i++) {
-    const res = await fetch(`http://127.0.0.1:${PORT}/webhook/it-logs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => null);
-    lastProbe = res ? { status: res.status, json: parseBody(await res.text().catch(() => '')) } : null;
-    if (lastProbe) lastProbe.message = messageOf(lastProbe);
-    ready = isWebhookReady(lastProbe);
-    if (!ready) await sleep(2000);
-  }
-  check('n8n server started and webhooks registered', up && ready, 'last probe: ' + describeProbe(lastProbe) + '\n' + log.slice(-1500));
+  const { server, up, ready, lastProbe, log } = await startServer(ENV);
+  check('n8n server started and webhooks registered', up && ready, 'last probe: ' + describeProbe(lastProbe) + '\n' + log().slice(-1500));
   if (!up || !ready) return finish(server, mocks);
 
   const ctx = { incident_id: null, service_name: 'checkout-api', alert_name: 'HighErrorRate', severity: 'critical', started_at: '2026-11-08T10:00:00Z' };
@@ -326,7 +309,71 @@ async function main() {
 
   await retryAndNotificationChecks({ mocks, setScenario, takeCalls, INC, alert, auth });
 
-  finish(server, mocks);
+  // REMEDIATION_EXECUTION_MODE is read from the environment when n8n starts, so
+  // the BD-5 disabled scenario needs a second start of the same throwaway n8n
+  // (same work dir: the workflows are already imported and published).
+  await stopServer(server);
+  const disabled = await startServer({ ...ENV, REMEDIATION_EXECUTION_MODE: 'disabled' });
+  check('n8n restarted with REMEDIATION_EXECUTION_MODE=disabled and webhooks registered', disabled.up && disabled.ready, 'last probe: ' + describeProbe(disabled.lastProbe) + '\n' + disabled.log().slice(-1500));
+  if (disabled.up && disabled.ready) await disabledModeChecks({ mocks, setScenario, takeCalls, INC });
+
+  finish(disabled.server, mocks);
+}
+
+// Starts `n8n start` with the given environment and waits until the published
+// webhooks answer. Returns the process and the readiness result.
+async function startServer(env) {
+  const server = spawn(process.execPath, [N8N_JS, 'start'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let log = '';
+  server.stdout.on('data', (d) => (log += d));
+  server.stderr.on('data', (d) => (log += d));
+  let up = false;
+  for (let i = 0; i < 90 && !up; i++) { await sleep(2000); try { up = (await fetch(`http://127.0.0.1:${PORT}/healthz`)).ok; } catch {} }
+  // Published webhooks are registered some seconds after /healthz is up.
+  // Ready = the harness webhook answers 2xx. 404 (not registered yet) and 503
+  // ("Database is not ready") are NOT ready.
+  let ready = false;
+  let lastProbe = null;
+  for (let i = 0; i < 60 && up && !ready; i++) {
+    const res = await fetch(`http://127.0.0.1:${PORT}/webhook/it-logs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => null);
+    lastProbe = res ? { status: res.status, json: parseBody(await res.text().catch(() => '')) } : null;
+    if (lastProbe) lastProbe.message = messageOf(lastProbe);
+    ready = isWebhookReady(lastProbe);
+    if (!ready) await sleep(2000);
+  }
+  return { server, up, ready, lastProbe, log: () => log };
+}
+
+// Stops the n8n process and waits until its port no longer answers.
+async function stopServer(server) {
+  const exited = new Promise((r) => (server.exitCode !== null ? r() : server.once('exit', r)));
+  server.kill();
+  await Promise.race([exited, sleep(20000)]);
+  for (let i = 0; i < 30; i++) {
+    try { await fetch(`http://127.0.0.1:${PORT}/healthz`); } catch { return; }
+    await sleep(1000);
+  }
+}
+
+// ---- BD-5: REMEDIATION_EXECUTION_MODE=disabled (the default) -> 503, run not started
+async function disabledModeChecks({ mocks, setScenario, takeCalls, INC }) {
+  console.log('\nBD-5 Disabled execution mode (06)');
+  const run = randomUUID();
+  mocks.runs[run] = { status: 'approved', action_type: 'restart', incident_id: INC };
+  setScenario({}); takeCalls();
+  // A fully valid, signed request: only the execution mode may refuse it.
+  const s = signed({ playbook_run_id: run, incident_id: INC, action_type: 'restart', request_payload: { service_name: 'checkout-api' } });
+  const r = await post('remediation', s.raw, s.headers);
+  const msg = messageOf(r) || jsonField(r, 'message') || '';
+  check('BD-5 disabled: valid signed request -> HTTP 503', r.status === 503, r);
+  check('BD-5 disabled: response says execution is not available and the run was not started', jsonField(r, 'accepted') === false && /execution integration is not available/i.test(msg) && /not started/i.test(msg), r);
+  await sleep(3000); // nothing may happen after the response
+  const backendCalls = takeCalls().filter((c) => c.port === 'backend');
+  const startCalls = backendCalls.filter((c) => c.path === '/api/machine/playbook-runs/' + run + '/start');
+  check('BD-5 disabled: backend /start NOT called (0 backend calls)', startCalls.length === 0 && backendCalls.length === 0, backendCalls);
+  const state = mocks.runs[run];
+  check('BD-5 disabled: run stays approved (not running, not failed, never completed)', state.status === 'approved' && !state.exec && !state.completions, state);
+  return { status: r.status, backendCalls: backendCalls.length, startCalls: startCalls.length, runStatus: state.status };
 }
 
 // ---- N-1 (retry-safe completion), N-2 (soft-failure notifications), BD-3 (recovery checks)
