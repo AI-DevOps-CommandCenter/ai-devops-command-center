@@ -25,6 +25,8 @@ import {
   loadMachineEnv,
   createAutomationClientProvider
 } from "./config/machine.js";
+import notificationRoutes from "./routes/notification.routes.js";
+import deviceTokenRoutes from "./routes/device-token.routes.js";
 
 export interface AppOptions {
   // Machine endpoint dependencies. undefined = read from the environment;
@@ -93,6 +95,8 @@ export function createApp(
   app.use("/api/admin/playbooks", adminPlaybookRoutes);
   app.use("/api/admin/integrations", adminIntegrationRoutes);
   app.use("/api/remediation-executions", remediationExecutionRoutes);
+  app.use("/api/notifications", notificationRoutes);
+  app.use("/api/device-tokens", deviceTokenRoutes);
 
   app.get("/", (_req, res) => {
     res.json({

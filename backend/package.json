@@ -10,7 +10,9 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "worker:notifications": "node dist/workers/notification-worker.js",
+    "worker:notifications:dev": "tsx src/workers/notification-worker.ts"
   },
   "keywords": [],
   "author": "",

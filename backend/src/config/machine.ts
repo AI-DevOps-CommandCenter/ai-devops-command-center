@@ -21,6 +21,36 @@ export interface MachineEnv {
   automationEmail: string;
   automationPassword: string;
 }
+// Configuration shared by background workers that use the
+// dedicated automation identity, independently of n8n machine endpoints.
+export interface AutomationEnv {
+  automationEmail: string;
+  automationPassword: string;
+}
+
+export function loadAutomationEnv(
+  env: NodeJS.ProcessEnv = process.env
+): AutomationEnv | null {
+  const automationEmail = env.AUTOMATION_EMAIL?.trim() ?? "";
+  const automationPassword = env.AUTOMATION_PASSWORD ?? "";
+
+  if (!automationEmail && !automationPassword) {
+    return null;
+  }
+
+  const missing = [
+    !automationEmail && "AUTOMATION_EMAIL",
+    !automationPassword && "AUTOMATION_PASSWORD"
+  ].filter(Boolean);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Invalid automation configuration: missing ${missing.join(", ")}`
+    );
+  }
+
+  return { automationEmail, automationPassword };
+}
 
 export function loadMachineEnv(
   env: NodeJS.ProcessEnv = process.env
