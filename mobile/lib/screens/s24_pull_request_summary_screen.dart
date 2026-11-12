@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
+import 's23_developer_assistant_screen.dart';
 
 class S24PullRequestSummaryScreen extends StatelessWidget {
   const S24PullRequestSummaryScreen({super.key});
@@ -14,43 +15,66 @@ class S24PullRequestSummaryScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            // Header
+            // Header: PR #214 · Tune DB pool settings · Merged
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
+                  InkWell(
+                    onTap: () => Navigator.pop(context),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: colors.border),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(Icons.chevron_left, size: 20, color: colors.text),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'PR #214',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: colors.text,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'PR #214',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                            color: colors.text,
+                          ),
                         ),
-                      ),
-                      Text(
-                        'Tune DB pool settings',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: colors.muted,
+                        const SizedBox(height: 1),
+                        Text(
+                          'Tune DB pool settings',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colors.muted,
+                          ),
                         ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: colors.accent.withOpacity(0.16),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      'Merged',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: colors.accent,
+                        height: 1.5,
                       ),
-                    ],
+                    ),
                   ),
                 ],
               ),
@@ -58,194 +82,358 @@ class S24PullRequestSummaryScreen extends StatelessWidget {
 
             // Content
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Branch & Pipeline Card
-                    InkWell(
-                      onTap: () {
-                        Navigator.pushNamed(context, '/pipeline-job');
-                      },
-                      borderRadius: BorderRadius.circular(14),
-                      child: _buildCard(
-                        colors: colors,
-                        child: Column(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                children: [
+                  // Metadata Card
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            _buildRow(colors, 'Branch', 'tune-db-pool → main'),
-                            Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
-                            _buildRow(colors, 'Pipeline', '#318 job failed'),
+                            Text('Branch',
+                                style: TextStyle(
+                                    fontSize: 14, color: colors.muted)),
+                            RichText(
+                              text: TextSpan(
+                                style: TextStyle(
+                                  fontFamily: 'JetBrains Mono',
+                                  fontSize: 12.5,
+                                  color: colors.text,
+                                ),
+                                children: const [
+                                  TextSpan(text: 'tune-db-pool'),
+                                  TextSpan(text: ' → '),
+                                  TextSpan(text: 'main'),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
-                      ),
+                        const SizedBox(height: 10),
+                        _buildMetaRow('Author', 'Alex Morgan', colors),
+                        const SizedBox(height: 10),
+                        _buildMetaRow(
+                            'Reviewers', 'Priya Silva · approved', colors),
+                        const SizedBox(height: 10),
+                        _buildMetaRow('Checks', 'Pipeline #318 · passed', colors),
+                        const SizedBox(height: 10),
+                        _buildMetaRow('Deployed as', 'v2.8.1', colors,
+                            isMono: true),
+                      ],
                     ),
-                    const SizedBox(height: 12),
+                  ),
 
-                    // Changed Files Card
-                    _buildCard(
-                      colors: colors,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Changed files (3)',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: colors.text,
+                  const SizedBox(height: 14),
+
+                  // AI Summary Card
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.auto_awesome,
+                                size: 18, color: colors.accent),
+                            const SizedBox(width: 8),
+                            Text(
+                              'AI summary',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: colors.text,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        _buildBullet(
+                            'Lowers DB pool timeout from 1000 ms to 500 ms.',
+                            colors),
+                        const SizedBox(height: 4),
+                        _buildBullet('Adds 3 connection retries.', colors),
+                        const SizedBox(height: 4),
+                        _buildBullet('Changes the log format.', colors),
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: colors.warning.withOpacity(0.14),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: RichText(
+                            text: TextSpan(
+                              style: TextStyle(
+                                  fontSize: 14, color: colors.text),
+                              children: const [
+                                TextSpan(
+                                  text: 'Risk: medium. ',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                TextSpan(
+                                  text:
+                                      'Timeout lowered without a load test. Linked to INC-1042.',
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'db/pool.ts · config/prod.yaml · logger.ts',
-                            style: TextStyle(fontSize: 12, color: colors.muted),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Summary Card
-                    _buildCard(
-                      colors: colors,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Summary',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: colors.text,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Lowers pool timeout, adds retries, tweaks logging.',
-                            style: TextStyle(fontSize: 13, color: colors.text, height: 1.4),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Possible Concerns Card (Amber warning border-left)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border(
-                          left: BorderSide(color: colors.amber, width: 4),
-                          top: BorderSide(color: colors.cardBorder, width: 0.8),
-                          right: BorderSide(color: colors.cardBorder, width: 0.8),
-                          bottom: BorderSide(color: colors.cardBorder, width: 0.8),
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Possible concerns',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: colors.text,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Timeout set to 500 ms; no load test attached.',
-                            style: TextStyle(fontSize: 13, color: colors.text),
-                          ),
-                        ],
-                      ),
+                      ],
                     ),
-                    const SizedBox(height: 20),
+                  ),
 
-                    // Ask assistant Button
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.pushNamed(context, '/assistant', arguments: 'pr');
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: colors.teal,
-                          foregroundColor: colors.isDark ? const Color(0xFF0B1226) : Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                  const SizedBox(height: 20),
+
+                  // Changed files · 3 Header
+                  Text(
+                    'CHANGED FILES · 3',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.52,
+                      color: colors.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Changed Files Card
+                  Container(
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        _buildFileRow(
+                          name: 'db/pool.ts',
+                          additions: '+8',
+                          deletions: '-2',
+                          colors: colors,
+                        ),
+                        Divider(
+                            height: 1,
+                            thickness: 1,
+                            indent: 42,
+                            color: colors.border),
+                        _buildFileRow(
+                          name: 'config/prod.yaml',
+                          additions: '+3',
+                          deletions: '-1',
+                          colors: colors,
+                        ),
+                        Divider(
+                            height: 1,
+                            thickness: 1,
+                            indent: 42,
+                            color: colors.border),
+                        _buildFileRow(
+                          name: 'logger.ts',
+                          additions: '+14',
+                          deletions: '-9',
+                          colors: colors,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Diff Snippet Box
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: colors.codeBg,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'db/pool.ts',
+                          style: TextStyle(
+                            fontFamily: 'JetBrains Mono',
+                            fontSize: 12.5,
+                            color: colors.text,
                           ),
                         ),
-                        child: const Text(
-                          'Ask assistant',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        Text(
+                          '- timeout: 1000,',
+                          style: TextStyle(
+                            fontFamily: 'JetBrains Mono',
+                            fontSize: 12.5,
+                            height: 1.7,
+                            color: colors.critical,
+                          ),
+                        ),
+                        Text(
+                          '+ timeout: 500,',
+                          style: TextStyle(
+                            fontFamily: 'JetBrains Mono',
+                            fontSize: 12.5,
+                            height: 1.7,
+                            color: colors.ok,
+                          ),
+                        ),
+                        Text(
+                          '+ retries: 3,',
+                          style: TextStyle(
+                            fontFamily: 'JetBrains Mono',
+                            fontSize: 12.5,
+                            height: 1.7,
+                            color: colors.ok,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Ask the assistant Button
+                  SizedBox(
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                const S23DeveloperAssistantScreen(),
+                          ),
+                        );
+                      },
+                      icon: Icon(Icons.auto_awesome,
+                          size: 18, color: colors.text),
+                      label: Text(
+                        'Ask the assistant',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: colors.text,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: colors.card,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: colors.border),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
+
+            // Bottom Nav
+            const AppBottomNav(currentIndex: 3),
           ],
         ),
       ),
-      bottomNavigationBar: const AppBottomNav(currentRoute: 's28'),
     );
   }
 
-  Widget _buildCard({required AppColorScheme colors, required Widget child}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: child,
-    );
-  }
-
-  Widget _buildRow(AppColorScheme colors, String label, String value) {
+  Widget _buildMetaRow(String label, String value, dynamic colors,
+      {bool isMono = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           label,
-          style: TextStyle(
-            fontSize: 13,
-            color: colors.muted,
-          ),
+          style: TextStyle(fontSize: 14, color: colors.muted),
         ),
         Text(
           value,
           style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
+            fontFamily: isMono ? 'JetBrains Mono' : null,
+            fontSize: isMono ? 12.5 : 14,
+            fontWeight: FontWeight.w500,
             color: colors.text,
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildBullet(String text, dynamic colors) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('• ',
+            style: TextStyle(
+                fontSize: 14, color: colors.muted, height: 1.45)),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+                fontSize: 14, color: colors.text, height: 1.45),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFileRow({
+    required String name,
+    required String additions,
+    required String deletions,
+    required dynamic colors,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Icon(Icons.insert_drive_file_outlined,
+              size: 18, color: colors.muted),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              name,
+              style: TextStyle(
+                fontFamily: 'JetBrains Mono',
+                fontSize: 13,
+                color: colors.text,
+              ),
+            ),
+          ),
+          RichText(
+            text: TextSpan(
+              style: const TextStyle(
+                fontFamily: 'JetBrains Mono',
+                fontSize: 12.5,
+              ),
+              children: [
+                TextSpan(
+                    text: additions,
+                    style: TextStyle(color: colors.ok)),
+                const TextSpan(text: ' '),
+                TextSpan(
+                    text: deletions,
+                    style: TextStyle(color: colors.critical)),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
