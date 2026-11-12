@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
+import '../services/notification_service.dart';
 
 /// Centralized Auth State Manager (ChangeNotifier)
 /// Matches Gayathri's ThemeController.instance design pattern
@@ -37,6 +38,7 @@ class AuthController extends ChangeNotifier {
       _currentUser = user;
       _isLoading = false;
       notifyListeners();
+      NotificationService().registerTokenOnLogin();
       return true;
     } catch (e) {
       _isLoading = false;
@@ -56,11 +58,13 @@ class AuthController extends ChangeNotifier {
     _currentUser = user;
     _isLoading = false;
     notifyListeners();
+    NotificationService().registerTokenOnLogin();
     return true;
   }
 
   /// Sign out
   void signOut() {
+    NotificationService().unregisterTokenOnLogout();
     _authService.signOut();
     _currentUser = null;
     _errorMessage = null;

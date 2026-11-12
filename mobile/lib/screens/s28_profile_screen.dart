@@ -174,7 +174,7 @@ class S28ProfileScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
 
-                    // Repositories & CI/CD (Task 02)
+                    // Repositories & CI/CD
                     InkWell(
                       onTap: () {
                         Navigator.pushNamed(context, '/repositories');
@@ -195,7 +195,7 @@ class S28ProfileScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'GitHub · Pipelines, PRs & Deployments (Task 02)',
+                              'GitHub · Pipelines, PRs & Deployments',
                               style: TextStyle(fontSize: 12, color: colors.muted),
                             ),
                           ],
@@ -204,7 +204,7 @@ class S28ProfileScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
 
-                    // Remediation Playbooks & Approvals (Task 03)
+                    // Remediation Playbooks & Approvals
                     InkWell(
                       onTap: () {
                         Navigator.pushNamed(context, '/playbooks');
@@ -215,37 +215,17 @@ class S28ProfileScreen extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'Remediation Playbooks & Approvals',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: colors.text,
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: colors.badgeGreenBg,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    'Task 03',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      color: colors.green,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                            Text(
+                              'Remediation Playbooks & Approvals',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: colors.text,
+                              ),
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'S18 Approve Action, S19 Execution, S20 Verification',
+                              'Automated remediation, approvals & verification',
                               style: TextStyle(fontSize: 12, color: colors.muted),
                             ),
                           ],

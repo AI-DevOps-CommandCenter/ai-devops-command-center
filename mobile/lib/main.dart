@@ -29,8 +29,11 @@ import 'screens/s26_integrations_screen.dart';
 import 'screens/s27_notification_preferences_screen.dart';
 import 'screens/s28_profile_screen.dart';
 import 'models/playbook_model.dart';
+import 'services/notification_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  NotificationService().initialize();
   runApp(const DevOpsCommandCenterApp());
 }
 

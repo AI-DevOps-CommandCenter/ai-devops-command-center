@@ -44,8 +44,11 @@ class ApiEndpoints {
   static String githubWorkflowRunJobs(String owner, String repo, int runId) =>
       '$baseUrl/api/github/repositories/$owner/$repo/workflow-runs/$runId/jobs';
 
-  // Notifications (Himasha's Microservice - Port 5002 or via Gateway)
-  static String get notifications => 'http://localhost:5002/api/notifications';
+  // Notifications & Device Tokens (Vinuka's Backend API - M5 Handoff)
+  static String get notifications => '$baseUrl/api/notifications';
+  static String notificationRead(String id) => '$baseUrl/api/notifications/$id/read';
+  static String get deviceTokens => '$baseUrl/api/device-tokens';
+  static String get notificationPreferences => '$baseUrl/api/notifications/preferences';
 
   // Playbook Runs & Approvals (Vinuka's Backend API - M5 Handoff)
   static String get playbookRuns => '$baseUrl/api/playbook-runs';

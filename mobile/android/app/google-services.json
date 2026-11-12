@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1014327278289",
+    "project_id": "ai-devops-command-center",
+    "storage_bucket": "ai-devops-command-center.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1014327278289:android:5febadb90951ab938723f0",
+        "android_client_info": {
+          "package_name": "com.example.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB2v3Z6l9dJ9bLWrzk1D8DiVISBN2fck3k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
