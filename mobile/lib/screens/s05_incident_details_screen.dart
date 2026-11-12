@@ -1,17 +1,13 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
-import '../widgets/app_bottom_nav.dart';
+import '../widgets/app_back_button.dart';
 import 's06_ai_investigation_progress_screen.dart';
+import 's09_logs_explorer_screen.dart';
+import 's10_metrics_screen.dart';
+import 's14_deployment_details_screen.dart';
 
 class S05IncidentDetailsScreen extends StatelessWidget {
-  final String incidentId;
-  final String incidentTitle;
-
-  const S05IncidentDetailsScreen({
-    super.key,
-    this.incidentId = 'INC-1042',
-    this.incidentTitle = 'Elevated errors after deployment',
-  });
+  const S05IncidentDetailsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -22,44 +18,35 @@ class S05IncidentDetailsScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            // Header
+            // Header: padding: 14px 16px 10px, gap: 10px
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
+                  const AppBackButton(),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          incidentId,
+                          'INC-1042',
                           style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
                             color: colors.text,
                           ),
                         ),
+                        const SizedBox(height: 1),
                         Text(
-                          incidentTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          'Elevated errors after deployment',
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: 13,
                             color: colors.muted,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
@@ -68,92 +55,448 @@ class S05IncidentDetailsScreen extends StatelessWidget {
               ),
             ),
 
-            // Main Body
+            // Content: padding: 4px 16px 24px, gap: 14px
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Context Card with Red Left Border (.card.cr)
-                    _buildCard(
-                      colors: colors,
-                      borderLeftColor: colors.red,
+                    // Badges row: gap 8px
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: colors.badgeRedBg,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.warning_amber_rounded, size: 13, color: colors.critical),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Critical',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.5,
+                                  color: colors.critical,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: colors.accentSoft,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            'Investigating',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              height: 1.5,
+                              color: colors.accent,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: colors.surface2,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            'Production',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              height: 1.5,
+                              color: colors.muted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    // 6-Stage Stepper: Detect (done), Investigate (active), Cause, Approve, Recover, Report
+                    _buildStepper(context, activeStage: 1),
+                    const SizedBox(height: 14),
+
+                    // Metadata Card: Service, Detected, Owner, Suspected change
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Column(
+                        children: [
+                          _buildMetaRow(
+                            label: 'Service',
+                            valueWidget: Text(
+                              'payments-api',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontFamily: 'JetBrains Mono',
+                                fontWeight: FontWeight.w500,
+                                color: colors.text,
+                              ),
+                            ),
+                            colors: colors,
+                          ),
+                          const SizedBox(height: 10),
+                          _buildMetaRow(
+                            label: 'Detected',
+                            valueWidget: Text(
+                              '14:12 · by Prometheus alert',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: colors.text,
+                              ),
+                            ),
+                            colors: colors,
+                          ),
+                          const SizedBox(height: 10),
+                          _buildMetaRow(
+                            label: 'Owner',
+                            valueWidget: Text(
+                              'Alex Morgan (on call)',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: colors.text,
+                              ),
+                            ),
+                            colors: colors,
+                          ),
+                          const SizedBox(height: 10),
+                          _buildMetaRow(
+                            label: 'Suspected change',
+                            valueWidget: RichText(
+                              text: TextSpan(
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: colors.text,
+                                ),
+                                children: [
+                                  TextSpan(
+                                    text: 'v2.8.1',
+                                    style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 13),
+                                  ),
+                                  const TextSpan(text: ' · PR #214'),
+                                ],
+                              ),
+                            ),
+                            colors: colors,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Metrics grid: Error rate (0.3% -> 12.4%) & P95 latency (180 ms -> 2.4 s)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: colors.badgeRedBg,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Error rate',
+                                  style: TextStyle(fontSize: 13, color: colors.muted),
+                                ),
+                                const SizedBox(height: 2),
+                                RichText(
+                                  text: TextSpan(
+                                    style: const TextStyle(fontSize: 15),
+                                    children: [
+                                      TextSpan(
+                                        text: '0.3%',
+                                        style: TextStyle(color: colors.muted),
+                                      ),
+                                      TextSpan(
+                                        text: ' → ',
+                                        style: TextStyle(color: colors.muted),
+                                      ),
+                                      TextSpan(
+                                        text: '12.4%',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                          color: colors.critical,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: colors.badgeRedBg,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'P95 latency',
+                                  style: TextStyle(fontSize: 13, color: colors.muted),
+                                ),
+                                const SizedBox(height: 2),
+                                RichText(
+                                  text: TextSpan(
+                                    style: const TextStyle(fontSize: 15),
+                                    children: [
+                                      TextSpan(
+                                        text: '180 ms',
+                                        style: TextStyle(color: colors.muted),
+                                      ),
+                                      TextSpan(
+                                        text: ' → ',
+                                        style: TextStyle(color: colors.muted),
+                                      ),
+                                      TextSpan(
+                                        text: '2.4 s',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                          color: colors.critical,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Timeline Header
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'TIMELINE',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.52,
+                            color: colors.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Timeline Card
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: colors.border),
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              _buildBadge('Critical', colors.badgeRedBg, colors.red),
-                              _buildBadge('Investigating', colors.badgeAmberBg, colors.amber),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          _buildRow(colors, 'Service', 'payments-api'),
-                          Divider(color: colors.cardBorder, height: 16),
-                          _buildRow(colors, 'Environment', 'Production'),
-                          Divider(color: colors.cardBorder, height: 16),
-                          _buildRow(colors, 'Detected', '14:12 UTC'),
-                          Divider(color: colors.cardBorder, height: 16),
-                          _buildRow(colors, 'Impact', 'Error rate 0.3% → 12.4%; P95 180 ms → 2.4 s'),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Timeline Heading
-                    Text(
-                      'Timeline',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: colors.text,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Timeline items
-                    Padding(
-                      padding: const EdgeInsets.only(left: 6.0),
-                      child: Column(
-                        children: [
-                          _buildTimelineItem(
-                            colors: colors,
+                          _buildTimelineRow(
                             time: '14:05',
                             title: 'v2.8.1 deployed',
-                            subtitle: 'Pipeline #318 passed',
-                            isCompleted: true,
-                          ),
-                          _buildTimelineItem(
+                            subtitle: 'Pipeline #318 passed · GitHub Actions',
+                            dotColor: colors.info,
+                            hasLineAfter: true,
                             colors: colors,
+                          ),
+                          _buildTimelineRow(
                             time: '14:07',
-                            title: 'DB connection timeouts begin',
-                            isCompleted: true,
-                          ),
-                          _buildTimelineItem(
+                            title: 'First DB connection timeouts',
+                            subtitle: 'Loki · payments-api pods',
+                            dotColor: colors.warning,
+                            hasLineAfter: true,
                             colors: colors,
+                          ),
+                          _buildTimelineRow(
                             time: '14:12',
-                            title: 'Alert fired: error rate above 5%',
-                            isCompleted: true,
-                          ),
-                          _buildTimelineItem(
+                            title: 'Alert: error rate above 5%',
+                            subtitle: 'Prometheus · notified Alex Morgan',
+                            dotColor: colors.critical,
+                            hasLineAfter: true,
                             colors: colors,
-                            time: 'Next',
-                            title: 'AI investigation',
-                            isPending: true,
-                            isLast: true,
+                          ),
+                          _buildTimelineRow(
+                            time: '14:13',
+                            title: 'AI investigation started',
+                            subtitle: 'n8n workflow · logs, metrics, deployments',
+                            dotColor: colors.accent,
+                            hasLineAfter: false,
+                            colors: colors,
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 14),
 
-                    // Start AI Investigation Button
+                    // Explore Header
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'EXPLORE',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.52,
+                            color: colors.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    // 3 Explore Buttons: Logs, Metrics, Deploy
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const S09LogsExplorerScreen(),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(14),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+                              decoration: BoxDecoration(
+                                color: colors.card,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: colors.border),
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(Icons.terminal, size: 20, color: colors.text),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Logs',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const S10MetricsScreen(),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(14),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+                              decoration: BoxDecoration(
+                                color: colors.card,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: colors.border),
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(Icons.show_chart, size: 20, color: colors.text),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Metrics',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const S14DeploymentDetailsScreen(),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(14),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+                              decoration: BoxDecoration(
+                                color: colors.card,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: colors.border),
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(Icons.account_tree_outlined, size: 20, color: colors.text),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Deploy',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Primary Button: View AI investigation
                     SizedBox(
-                      width: double.infinity,
                       height: 48,
-                      child: ElevatedButton(
+                      child: ElevatedButton.icon(
                         onPressed: () {
                           Navigator.push(
                             context,
@@ -162,92 +505,115 @@ class S05IncidentDetailsScreen extends StatelessWidget {
                             ),
                           );
                         },
+                        icon: const Icon(Icons.auto_awesome, size: 18),
+                        label: const Text(
+                          'View AI investigation',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: colors.teal,
-                          foregroundColor: colors.isDark ? const Color(0xFF06202A) : Colors.white,
+                          backgroundColor: colors.accent,
+                          foregroundColor: colors.onAccent,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        child: const Text(
-                          'Start AI Investigation',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                        ),
                       ),
                     ),
-                    const SizedBox(height: 16),
                   ],
                 ),
               ),
             ),
-
-            // Persistent Bottom Navigation Bar
-            const AppBottomNav(currentRoute: 's04'),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCard({
+  Widget _buildMetaRow({
+    required String label,
+    required Widget valueWidget,
     required AppColorScheme colors,
-    required Widget child,
-    Color? borderLeftColor,
   }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: borderLeftColor != null
-          ? IntrinsicHeight(
-              child: Row(
-                children: [
-                  Container(
-                    width: 4,
-                    decoration: BoxDecoration(
-                      color: borderLeftColor,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: child),
-                ],
-              ),
-            )
-          : child,
-    );
-  }
-
-  Widget _buildRow(AppColorScheme colors, String label, String value) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           label,
-          style: TextStyle(fontSize: 13, color: colors.muted),
+          style: TextStyle(fontSize: 14, color: colors.muted),
         ),
-        const SizedBox(width: 10),
-        Flexible(
-          child: Text(
-            value,
-            textAlign: TextAlign.right,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: colors.text,
+        valueWidget,
+      ],
+    );
+  }
+
+  Widget _buildTimelineRow({
+    required String time,
+    required String title,
+    required String subtitle,
+    required Color dotColor,
+    required bool hasLineAfter,
+    required AppColorScheme colors,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Column(
+          children: [
+            Container(
+              width: 12,
+              height: 12,
+              margin: const EdgeInsets.only(top: 4),
+              decoration: BoxDecoration(
+                color: dotColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+            if (hasLineAfter)
+              Container(
+                width: 2,
+                height: 38,
+                color: colors.border,
+                margin: const EdgeInsets.symmetric(vertical: 4),
+              ),
+          ],
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: hasLineAfter ? 14.0 : 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                RichText(
+                  text: TextSpan(
+                    style: TextStyle(fontSize: 14, color: colors.text),
+                    children: [
+                      TextSpan(
+                        text: time,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontFamily: 'JetBrains Mono',
+                          color: colors.muted,
+                        ),
+                      ),
+                      const TextSpan(text: '  '),
+                      TextSpan(
+                        text: title,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 13, color: colors.muted),
+                ),
+              ],
             ),
           ),
         ),
@@ -255,101 +621,102 @@ class S05IncidentDetailsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildTimelineItem({
-    required AppColorScheme colors,
-    required String time,
-    required String title,
-    String? subtitle,
-    bool isCompleted = false,
-    bool isPending = false,
-    bool isLast = false,
-  }) {
-    return IntrinsicHeight(
+  Widget _buildStepper(BuildContext context, {required int activeStage}) {
+    final colors = context.colors;
+    final stages = ['Detect', 'Investigate', 'Cause', 'Approve', 'Recover', 'Report'];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+      decoration: BoxDecoration(
+        color: colors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Timeline indicator line & circle
-          SizedBox(
-            width: 24,
-            child: Column(
+        children: List.generate(stages.length, (index) {
+          final isCompleted = index < activeStage;
+          final isActive = index == activeStage;
+          final title = stages[index];
+
+          Color textColor = colors.muted;
+          FontWeight fontWeight = FontWeight.w500;
+          if (isActive) {
+            textColor = colors.accent;
+            fontWeight = FontWeight.w600;
+          } else if (isCompleted) {
+            textColor = colors.text;
+          }
+
+          return Expanded(
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
               children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: isPending ? colors.border : colors.teal,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                if (!isLast)
-                  Expanded(
+                // Connecting bar
+                if (index > 0)
+                  Positioned(
+                    top: 10,
+                    right: 0,
+                    left: -50,
                     child: Container(
-                      width: 2,
-                      color: colors.border,
+                      height: 2,
+                      color: isCompleted || isActive ? colors.success : colors.border,
                     ),
                   ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 18.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  RichText(
-                    text: TextSpan(
-                      children: [
-                        TextSpan(
-                          text: '$time ',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            color: colors.text,
-                          ),
+
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: isCompleted
+                            ? colors.success
+                            : isActive
+                                ? colors.accentSoft
+                                : colors.card,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isCompleted
+                              ? colors.success
+                              : isActive
+                                  ? colors.accent
+                                  : colors.border,
+                          width: 2,
                         ),
-                        TextSpan(
-                          text: title,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isPending ? colors.muted : colors.text,
-                            fontWeight: isPending ? FontWeight.w500 : FontWeight.normal,
-                          ),
-                        ),
-                      ],
+                      ),
+                      alignment: Alignment.center,
+                      child: isCompleted
+                          ? Icon(Icons.check, size: 13, color: colors.card)
+                          : isActive
+                              ? Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: colors.accent,
+                                    shape: BoxShape.circle,
+                                  ),
+                                )
+                              : null,
                     ),
-                  ),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 6),
                     Text(
-                      subtitle,
-                      style: TextStyle(fontSize: 11, color: colors.muted),
+                      title,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: fontWeight,
+                        color: textColor,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
-                ],
-              ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBadge(String label, Color bg, Color text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: text,
-        ),
+          );
+        }),
       ),
     );
   }
