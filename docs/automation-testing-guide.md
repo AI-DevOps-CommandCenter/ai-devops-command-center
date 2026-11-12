@@ -6,17 +6,22 @@ There are three automated test levels. None of them touches real Groq, Loki, Pro
 |---|---|---|---|
 | Unit | `npm test` | Code node logic: validation, HMAC verify, replay, RCA/postmortem schema, de-duplication, recovery verdicts, redaction. Generated JSON: valid links, known node types/versions, error workflow set, no secrets, up to date, no AI → execution path. | Node 20+ |
 | HMAC interop | `npm run test:hmac` | The n8n signing code and the **real** backend middleware (`backend/src/middleware/machine-auth.ts`) accept each other's signatures, in both directions | `backend/node_modules` (tsx) |
-| n8n integration | `npm run test:n8n` | All 10 workflows import into **n8n 2.40.5** and run end to end against mock services (`tests/integration/mock-services.mjs`) | n8n CLI 2.40.5 (`npm i -g n8n@2.40.5`), free ports 4598, 4599, 5690, 5691 |
+| Backend route interop | `npm run test:interop` | HMAC interop, plus: workflow 07's real request is accepted by the **real** `POST /api/machine/recovery-checks` route (only the database is faked), and 07 handles 201/400/401/404/409/500 correctly | `backend/node_modules` (tsx) |
+| n8n integration | `npm run test:n8n` | All 10 workflows import into **n8n 2.40.5** and run end to end against mock services (`tests/integration/mock-services.mjs`), including completion retries and error notifications | n8n CLI 2.40.5 (`npm i -g n8n@2.40.5`), free ports 4597, 4598, 4599, 5690, 5691, `openssl` for the notification checks (otherwise SKIP) |
 
 The integration test uses its own temporary n8n folder (never `~/.n8n`). It imports test credentials with fake values, publishes the workflows, starts n8n and calls the webhooks.
 
-## Results (8 Nov 2026, Windows 11, Node 24.12, n8n 2.40.5)
+## Results (10 Nov 2026, Windows 11, Node 24.12, n8n 2.40.5)
 
 | Suite | Result |
 |---|---|
-| Unit (`npm test`) | **18 / 18 passed** |
+| Unit (`npm test`) | **84 / 84 passed** (7 files) |
 | HMAC interop with the real backend middleware | **PASS** in both directions |
-| n8n integration (`npm run test:n8n`) | **61 / 61 checks passed** |
+| Recovery-check interop with the real backend route | **PASS** |
+| n8n integration (`npm run test:n8n`) | **86 / 86 checks passed**, 0 skipped |
+| Backend (`cd backend && npx vitest run`) | **153 / 153 passed**; `npx tsc --noEmit` clean |
+
+(8 Nov 2026: unit 18/18, integration 61/61, before N-1, N-2, N-3 and BD-3.)
 
 Integration checks per workflow. All ran **against mocks**, so they are simulated, not tests against real services:
 
@@ -30,8 +35,10 @@ Integration checks per workflow. All ran **against mocks**, so they are simulate
 | 04 Deploys | recent deploy found 15 min before; none → `no_evidence`; bad token → `unavailable` with `auth` |
 | 05 RCA | all evidence → `analysis_ready`; no incident → not stored (BD-1); store call signed and accepted, route missing → `not_implemented` (BD-2); partial → `partial_evidence`; no evidence → Groq **not** called; all down → `sources_unavailable`; bad JSON / unsafe action → `invalid_ai_response` |
 | 06 Remediation | approved → 202, start + complete (simulated); replay while running → 409 and run executed once; reused nonce later → 409 from n8n; not approved → 409; bad HMAC / stale time → 401; unknown action / extra fields → 400; action mismatch → 409 and run completed as failed |
-| 07 Recovery | recovered → `healthy`, store `not_implemented` (BD-3); not recovered after 2 checks; no metrics → `unable_to_verify`; unknown service → `unable_to_verify` without waiting |
+| 07 Recovery | recovered → `healthy`, **stored** via BD-3 with `recovery_check_id`, body matches the contract; not recovered after 2 checks (stored as `unhealthy`); no metrics → `unable_to_verify`; unknown service → `unable_to_verify` without waiting; unknown incident (404) → `not_found` + soft failure; backend 500 → soft failure |
 | 08 Postmortem | complete context → `draft_ready`, not stored (BD-4); no context → no Groq call; Groq 429 → `ai_unavailable` |
+| N-1 completion retry (06) | 503, 503, 200 → 3 attempts, completed once, recovery checked; every attempt a new nonce and valid signature, same body; timeout ×3 → exactly 3 attempts, run not reported complete, no recovery check; connection dropped → retried; 500 → retried; 400 / 401 → 1 attempt; response lost after the database completed → retry gets 409, run counted as completed, no false alert |
+| N-2 notifications (01, 06 → 09) | successful and expected-refusal runs → no notification; completion failure, HTTP 400 / 401 completion, start timeout, recovery check not stored, AI unavailable → one redacted notification each (no secret, token, signature or webhook URL in the body) |
 
 **Bugs the tests found and that are now fixed:**
 - `URLSearchParams` does not exist in the n8n 2.x Code-node sandbox. Workflows 02, 03, 04 and 07 used it; a unit test now prevents it.

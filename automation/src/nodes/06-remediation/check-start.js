@@ -12,7 +12,19 @@ if (c.kind !== 'ok') {
   // 409 = not approved / already started / playbook disabled (DC409);
   // 404 = run not found; 401 = signature rejected; 503 = backend machine config missing.
   const http = c.status === 409 || c.status === 404 || c.status === 400 ? c.status : 502;
-  return [{ json: { ...ctx, request_payload: {}, started: false, http_status: http, response: { accepted: false, message: 'Backend refused to start the run: ' + (c.message || c.kind) } } }];
+  // N-2: 409/404/400 are expected refusals (nothing to do). Anything else means
+  // the start is unconfirmed or n8n/backend are misconfigured: an operator must
+  // look. After a timeout/connection error/5xx the backend MAY have started the
+  // run, which then stays "running" (start is never retried: a second start of
+  // the same run is refused by the database anyway).
+  const unconfirmed = ['timeout', 'unavailable', 'server_error'].includes(c.kind);
+  const softFailure = http === 502 ? {
+    kind: unconfirmed ? 'start_unconfirmed' : 'start_failed',
+    node: 'Backend: start run',
+    message: 'Starting playbook run ' + ctx.playbook_run_id + ' failed: ' + c.kind + (c.status ? ' HTTP ' + c.status : '') + (c.message ? ' - ' + String(c.message).replace(/\.+$/, '') : '') + '.'
+      + (unconfirmed ? ' The backend may have started the run: if it is "running", complete or cancel it manually.' : ' Check the n8n and backend machine configuration.'),
+  } : null;
+  return [{ json: { ...ctx, request_payload: {}, started: false, http_status: http, soft_failure: softFailure, response: { accepted: false, message: 'Backend refused to start the run: ' + (c.message || c.kind) } } }];
 }
 
 const data = (response.body && response.body.data) || {};

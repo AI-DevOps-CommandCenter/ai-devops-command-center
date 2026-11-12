@@ -1,8 +1,8 @@
 // Workflow 07 – Node: "Sign recovery check request".
 //   POST /api/machine/recovery-checks
 //   { incident_id, playbook_run_id, status, check_type, details }
-// (contract B.3 -> record_recovery_check). The route is NOT implemented in the
-// backend yet (BD-3): today it answers 404 and the result says "not_implemented".
+// (contract B.3 -> record_recovery_check). Implemented in the backend (BD-3,
+// backend/src/routes/machine.routes.ts): 201 { data: { recovery_check_id } }.
 // Verdict -> recovery_checks.status: recovered=healthy, not_recovered=unhealthy,
 // unable_to_verify=failed (the check itself could not be completed).
 //#include lib/hmac.js

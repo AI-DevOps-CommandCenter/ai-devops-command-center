@@ -4,9 +4,9 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## 09 – Error Handler (shared)\nSet as \"Error workflow\" of 00–08. Builds a short, redacted summary (no stack, no data) and posts it to `ERROR_NOTIFY_WEBHOOK_URL` (Slack or Discord incoming webhook) when configured.",
+        "content": "## 09 – Error Handler (shared)\nSet as \"Error workflow\" of 00–08. Builds a short, redacted summary (no stack, no data) and posts it to `ERROR_NOTIFY_WEBHOOK_URL` (Slack or Discord incoming webhook) when configured.\nAlso called by 01 and 06 for **soft failures** (N-2): failed completion, unconfirmed start, AI unavailable, result not stored.",
         "width": 700,
-        "height": 200
+        "height": 220
       },
       "id": "94ab1894-1365-4f42-a6df-9cc18ad25769",
       "name": "Note 1",
@@ -27,6 +27,20 @@
         0,
         0
       ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "502a9963-fcb6-4668-ad89-fde95e2c9fec",
+      "name": "When called with a soft failure",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        270
+      ],
+      "notes": "N-2: called by 01 and 06 (\"Notify error handler (09)\") with the same shape as the Error Trigger output."
     },
     {
       "parameters": {
@@ -123,6 +137,17 @@
     }
   ],
   "connections": {
+    "When called with a soft failure": {
+      "main": [
+        [
+          {
+            "node": "Summarize error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "On workflow error": {
       "main": [
         [

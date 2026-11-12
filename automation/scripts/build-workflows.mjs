@@ -116,12 +116,14 @@ function makeWorkflow(meta) {
       if (body && body.raw) { p.sendBody = true; p.contentType = 'raw'; p.rawContentType = 'application/json'; p.body = body.raw; }
       if (body && body.json) { p.sendBody = true; p.specifyBody = 'json'; p.jsonBody = body.json; }
       p.options = {
-        timeout: signed ? 15000 : '={{ $json.timeout_ms || 15000 }}',
+        // Signed requests: BACKEND_TIMEOUT_MS, set by signedBackendRequest() (lib/hmac.js).
+        timeout: signed ? '={{ $json.request.timeout_ms || 15000 }}' : '={{ $json.timeout_ms || 15000 }}',
         response: { response: { fullResponse: true, neverError: true } },
       };
       const extra = { onError: 'continueRegularOutput', notes };
-      // Signed requests are never retried automatically: a retry would reuse the
-      // nonce (the backend answers 409 "Replayed request").
+      // Signed requests are never retried by the HTTP node: a retry would reuse the
+      // nonce (the backend answers 409 "Replayed request"). Workflow 06 retries the
+      // completion call itself, signing every attempt again (N-1).
       if (!signed && retries > 0) Object.assign(extra, { retryOnFail: true, maxTries: retries + 1, waitBetweenTries: 2000 });
       if (credential) extra.credentials = { httpHeaderAuth: credential };
       return add(name, 'n8n-nodes-base.httpRequest', 4.2, col, row, p, extra);
@@ -231,12 +233,15 @@ function wf01() {
   w.set('Accepted response', 4, -1, [['http_status', '={{ 202 }}', 'number']], 'Adds the HTTP status for the response.');
   w.respond('Respond 202', 5, -1, 'Answers Alertmanager before the long investigation starts.');
   w.code('Create incident (backend) – BLOCKED', '01-alert-intake/create-incident.js', 6, -1, 'BLOCKED (BD-1): no backend endpoint creates incidents from alerts. No URL is invented.');
+  w.code('Confirm alert processing', '01-alert-intake/confirm-processing.js', 6.5, -2, 'N-3: created/blocked → confirmed; failed → released (the next delivery is processed again).');
   w.execute('Run 05 Root Cause', 7, -1, WF.rca, 'One sub-workflow run per new alert.', 'each');
   w.code('Intake result', '01-alert-intake/intake-result.js', 8, -1);
   w.chain('Alertmanager webhook', 'Parse and validate alerts', 'Valid payload?');
   w.link('Valid payload?', 'Detect duplicate alerts', 0);
   w.link('Valid payload?', 'Respond 400', 1);
-  w.chain('Detect duplicate alerts', 'Accepted response', 'Respond 202', 'Create incident (backend) – BLOCKED', 'Run 05 Root Cause', 'Intake result');
+  w.chain('Detect duplicate alerts', 'Accepted response', 'Respond 202', 'Create incident (backend) – BLOCKED', 'Confirm alert processing', 'Run 05 Root Cause', 'Intake result');
+  // AI unavailable / analysis not stored (returned by 05).
+  softFailureNotify(w, 9, -1, [['Intake result']]);
   return w;
 }
 
@@ -334,12 +339,14 @@ function wf06() {
   w.link('Action type', 'Unsupported or rejected action', 4);
   w.respond('Respond refused', 8, 0, 'Backend refused (not approved / not found) or mismatch.');
   w.isTrue('Started but mismatched?', 9, 0, '={{ $json.started_but_rejected === true }}', 'A started run must be completed (as failed).');
-  w.code('Sign complete request', '06-remediation/sign-complete.js', 11, -1);
+  w.code('Sign complete request', '06-remediation/sign-complete.js', 11, -1, 'Signs every attempt again: a new nonce per attempt (N-1).');
   w.http('Backend: complete run', 12, -1, { method: 'POST', signed: true, notes: 'POST /api/machine/playbook-runs/:id/complete (same n8n_execution_id).' });
-  w.code('Check completion', '06-remediation/check-complete.js', 13, -1);
-  w.isTrue('Check recovery?', 14, -1, '={{ $json.check_recovery }}', 'Only after a reported success.');
-  w.execute('Run 07 Recovery Check', 15, -2, WF.recovery, 'Recovery verification (Tharindu).');
-  w.noop('Done (no recovery check)', 15, 0);
+  w.code('Check completion', '06-remediation/check-complete.js', 13, -1, 'Retry on timeout / connection error / 5xx (max 3 attempts); never on 4xx.');
+  w.isTrue('Retry completion?', 14, -1, '={{ $json.retry_complete === true }}', 'true → wait (2 s, 4 s) and sign a new request.');
+  w.wait('Wait before completion retry', 14, -2.5, 'COMPLETE_RETRY_BASE_SECONDS x 2^(attempt-1)');
+  w.isTrue('Check recovery?', 15, -1, '={{ $json.check_recovery }}', 'Only after a reported success.');
+  w.execute('Run 07 Recovery Check', 16, -2, WF.recovery, 'Recovery verification (Tharindu).');
+  w.noop('Done (no recovery check)', 16, 0);
   w.chain('Remediation webhook', 'Verify signature and payload', 'Request valid?');
   w.link('Request valid?', 'Execution available?', 0);
   w.link('Request valid?', 'Respond rejected', 1);
@@ -353,16 +360,21 @@ function wf06() {
   w.link('Respond refused', 'Started but mismatched?');
   w.link('Started but mismatched?', 'Unsupported or rejected action', 0);
   w.link('Unsupported or rejected action', 'Sign complete request');
-  w.chain('Sign complete request', 'Backend: complete run', 'Check completion', 'Check recovery?');
+  w.chain('Sign complete request', 'Backend: complete run', 'Check completion', 'Retry completion?');
+  w.link('Retry completion?', 'Wait before completion retry', 0);
+  w.link('Wait before completion retry', 'Sign complete request');
+  w.link('Retry completion?', 'Check recovery?', 1);
   w.link('Check recovery?', 'Run 07 Recovery Check', 0);
   w.link('Check recovery?', 'Done (no recovery check)', 1);
+  // Start refused/unconfirmed, completion failed, recovery check not stored.
+  softFailureNotify(w, 17, 1.5, [['Started but mismatched?', 1], ['Done (no recovery check)'], ['Run 07 Recovery Check']]);
   return w;
 }
 
 // ---------- 07 Recovery Check (Tharindu) ----------
 function wf07() {
   const w = makeWorkflow(WF.recovery);
-  w.sticky('## 07 – Recovery Check (owner: Tharindu)\nWait `RECOVERY_WAIT_SECONDS` → query Prometheus (`up` + error rate) → repeat up to `RECOVERY_MAX_CHECKS` → verdict **recovered / not_recovered / unable_to_verify** → store via `POST /api/machine/recovery-checks` (**contract path, not implemented: BD-3**) → 08 Postmortem when recovered.', 0, -3, 800, 240);
+  w.sticky('## 07 – Recovery Check (owner: Tharindu)\nWait `RECOVERY_WAIT_SECONDS` → query Prometheus (`up` + error rate) → repeat up to `RECOVERY_MAX_CHECKS` → verdict **recovered / not_recovered / unable_to_verify** → store via `POST /api/machine/recovery-checks` (**BD-3, implemented**; a failed store is returned as `soft_failure` and reported by 06) → 08 Postmortem when recovered.', 0, -3, 800, 240);
   w.subTrigger('When called by 06 Remediation', 0, 0, 'Input: { incident_id, playbook_run_id, service_name, action_type, simulated }');
   w.code('Plan recovery check', '07-recovery-check/plan.js', 1, 0);
   w.isTrue('Can verify?', 2, 0, '={{ $json.can_verify }}');
@@ -374,7 +386,7 @@ function wf07() {
   w.isTrue('Verdict reached?', 8, -1, '={{ $json.done }}', 'false → wait and check again (max RECOVERY_MAX_CHECKS).');
   w.code('Sign recovery check request', '07-recovery-check/sign-store.js', 9, 0, 'Verdict → recovery_checks.status: healthy / unhealthy / failed');
   w.isTrue('Store?', 10, 0, '={{ !$json.skip_store }}');
-  w.http('Backend: store recovery check', 11, -1, { method: 'POST', signed: true, notes: 'POST /api/machine/recovery-checks (BD-3: 404 until implemented).' });
+  w.http('Backend: store recovery check', 11, -1, { method: 'POST', signed: true, notes: 'POST /api/machine/recovery-checks (BD-3) → record_recovery_check; 201 { recovery_check_id }.' });
   w.code('Recovery result', '07-recovery-check/result.js', 12, 0);
   w.equals('Recovered?', 13, 0, '={{ $json.status }}', 'recovered');
   w.execute('Run 08 Postmortem', 14, -1, WF.postmortem, 'Draft postmortem (Tharindu).');
@@ -419,12 +431,26 @@ function wf08() {
   return w;
 }
 
+// N-2: soft failures (no crash, but an operator must act) -> workflow 09.
+// Only top-level workflows (01, 06) notify: a sub-workflow returns the output of
+// its LAST node, so 05 and 07 return soft_failure in their result instead.
+function softFailureNotify(w, col, row, sources) {
+  w.isTrue('Soft failure?', col, row, '={{ !!$json.soft_failure }}', 'Set by the nodes before: completion failed after retries, start unconfirmed, AI unavailable, result not stored.');
+  w.code('Report soft failure', '09-error-handler/report-soft-failure.js', col + 1, row - 1, 'One redacted notification per kind of failure (no request data).');
+  w.execute('Notify error handler (09)', col + 2, row - 1, WF.errors, 'Runs 09 ("When called with a soft failure"): Slack/Discord when ERROR_NOTIFY_WEBHOOK_URL is set.', 'each');
+  for (const s of sources) w.link(s[0], 'Soft failure?', s[1] || 0);
+  w.link('Soft failure?', 'Report soft failure', 0);
+  w.link('Report soft failure', 'Notify error handler (09)');
+}
+
 // ---------- 09 Error Handler (shared) ----------
 function wf09() {
   const w = makeWorkflow(WF.errors);
-  w.sticky('## 09 – Error Handler (shared)\nSet as "Error workflow" of 00–08. Builds a short, redacted summary (no stack, no data) and posts it to `ERROR_NOTIFY_WEBHOOK_URL` (Slack or Discord incoming webhook) when configured.', 0, -2, 700, 200);
+  w.sticky('## 09 – Error Handler (shared)\nSet as "Error workflow" of 00–08. Builds a short, redacted summary (no stack, no data) and posts it to `ERROR_NOTIFY_WEBHOOK_URL` (Slack or Discord incoming webhook) when configured.\nAlso called by 01 and 06 for **soft failures** (N-2): failed completion, unconfirmed start, AI unavailable, result not stored.', 0, -2, 700, 220);
   w.errorTrigger('On workflow error', 0, 0);
+  w.subTrigger('When called with a soft failure', 0, 1.5, 'N-2: called by 01 and 06 ("Notify error handler (09)") with the same shape as the Error Trigger output.');
   w.code('Summarize error', '09-error-handler/summarize-error.js', 1, 0, 'Redacts tokens, keys, JWTs and webhook URLs.');
+  w.link('When called with a soft failure', 'Summarize error');
   w.isTrue('Notification configured?', 2, 0, '={{ $json.notify }}');
   // The secret webhook URL is read from the environment by this node only, so it
   // never appears in an item (n8n stores node output in the execution history).

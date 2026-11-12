@@ -4,7 +4,8 @@
 //   port B (backend):  /api/machine/*  (HMAC verified like backend/src/middleware/machine-auth.ts)
 // The scenario (which answer each service gives) is set by the test runner.
 import http from 'node:http';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import https from 'node:https';
+import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,19 +16,47 @@ const metrics = JSON.parse(readFileSync(join(DATA, 'sample-metrics.json'), 'utf8
 const deploys = JSON.parse(readFileSync(join(DATA, 'sample-deployment.json'), 'utf8'));
 const INCIDENT_AT = Date.parse(metrics.incident_at);
 
-export function startMocks({ servicesPort, backendPort, secret }) {
-  const scenario = { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent' };
+// HTTPS receiver for the error notifications of workflow 09 (stands in for a
+// Slack/Discord incoming webhook). Records every POST body.
+export function startNotificationReceiver({ port, key, cert }) {
+  const received = [];
+  const server = https.createServer({ key, cert }, (req, res) => {
+    let b = '';
+    req.on('data', (c) => (b += c));
+    req.on('end', () => {
+      let body; try { body = JSON.parse(b); } catch { body = b; }
+      received.push({ path: req.url, body, raw: b });
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('ok');
+    });
+  });
+  server.listen(port, '127.0.0.1');
+  return { received, close: () => server.close() };
+}
+
+export function startMocks({ servicesPort, backendPort, secret, backendTimeoutMs = 1500 }) {
+  // complete: queue of answers for the next /complete calls ('ok' when empty):
+  //   'ok' | <HTTP status> | 'timeout' (no answer in time, nothing changed) |
+  //   'timeout_commit' (the run IS completed, the answer comes too late) | 'reset' (connection dropped)
+  // start: 'ok' | 'timeout'.  recovery_store: 'ok' | 'not_found' | <HTTP status>.
+  const scenario = { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent', complete: [], start: 'ok', recovery_store: 'ok' };
+  const late = backendTimeoutMs * 2;
   const calls = [];
   const nonces = new Set();
+  const recoveryChecks = [];
   const runs = {
     '11111111-1111-4111-8111-111111111111': { status: 'approved', action_type: 'restart', incident_id: '22222222-2222-4222-8222-222222222222' },
     '33333333-3333-4333-8333-333333333333': { status: 'pending', action_type: 'rollback', incident_id: '22222222-2222-4222-8222-222222222222' },
     '55555555-5555-4555-8555-555555555555': { status: 'approved', action_type: 'restart', incident_id: '22222222-2222-4222-8222-222222222222' },
   };
 
+  // A late answer (timeout scenarios) may arrive after the client gave up.
   const send = (res, status, body, delay = 0) => setTimeout(() => {
-    res.writeHead(status, { 'content-type': 'application/json' });
-    res.end(typeof body === 'string' ? body : JSON.stringify(body));
+    if (res.destroyed || res.writableEnded) return;
+    try {
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(typeof body === 'string' ? body : JSON.stringify(body));
+    } catch { /* client already disconnected */ }
   }, delay);
   const readBody = (req) => new Promise((r) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => r(b)); });
   const vector = (v) => ({ status: 'success', data: { resultType: 'vector', result: v === null ? [] : [{ metric: {}, value: [Date.now() / 1000, String(v)] }] } });
@@ -101,6 +130,7 @@ export function startMocks({ servicesPort, backendPort, secret }) {
     const given = String(h['x-dc-signature'] || '');
     if (given.length !== expected.length || !timingSafeEqual(Buffer.from(given), Buffer.from(expected))) { call.auth = 'bad-signature'; return send(res, 401, { success: false, message: 'Invalid request signature.' }); }
     if (Math.abs(Date.now() / 1000 - ts) > 300) return send(res, 401, { success: false, message: 'Signed request is outside the 5 minute window.' });
+    call.nonce = h['x-dc-nonce'];
     if (nonces.has(h['x-dc-nonce'])) return send(res, 409, { success: false, message: 'Replayed request.' });
     nonces.add(h['x-dc-nonce']);
     call.auth = 'ok';
@@ -111,19 +141,47 @@ export function startMocks({ servicesPort, backendPort, secret }) {
       const run = runs[m[1]];
       if (!run) return send(res, 404, { success: false, message: 'Playbook run not found.' });
       if (m[2] === 'start') {
+        if (scenario.start === 'timeout') { call.answer = 'timeout'; return send(res, 500, { success: false, message: 'too late' }, late); }
         if (run.status !== 'approved') return send(res, 409, { success: false, message: 'The run is ' + run.status + ', not approved.' });
         run.status = 'running';
         run.exec = call.body.n8n_execution_id;
         return send(res, 200, { success: true, data: { run_id: m[1], status: 'running', automation_run_id: '44444444-4444-4444-8444-444444444444', incident_id: run.incident_id, action_type: run.action_type, request_payload: { service_name: 'checkout-api' } } });
       }
-      if (run.status !== 'running') return send(res, 409, { success: false, message: 'The run is not running.' });
-      if (run.exec !== call.body.n8n_execution_id) return send(res, 403, { success: false, message: 'Execution id mismatch.' });
+      // complete_playbook_run: same checks and messages as the database function.
+      const step = Array.isArray(scenario.complete) && scenario.complete.length ? scenario.complete.shift() : 'ok';
+      call.answer = step;
+      if (step === 'reset') { req.socket.destroy(); return; }
+      if (step === 'timeout') return send(res, 503, { success: false, message: 'too late' }, late);
+      if (typeof step === 'number') return send(res, step, { success: false, message: step >= 500 ? 'Failed to complete playbook run.' : 'Rejected (HTTP ' + step + ').' });
+      if (run.status !== 'running') return send(res, 409, { success: false, message: 'The run is ' + run.status + ', not running.' });
+      if (run.exec !== call.body.n8n_execution_id) return send(res, 403, { success: false, message: 'The execution id does not match this run.' });
       run.status = call.body.status;
-      return send(res, 200, { success: true, data: { run_id: m[1], status: call.body.status } });
+      run.completions = (run.completions || 0) + 1;
+      return send(res, 200, { success: true, data: { run_id: m[1], status: call.body.status, manual: false } }, step === 'timeout_commit' ? late : 0);
     }
-    // The other contract routes (analysis, recovery-checks, incident-events) are
-    // not implemented in the real backend yet: answer like Express does.
-    return send(res, 404, { success: false, message: 'Route not found' });
+
+    // BD-3: POST /api/machine/recovery-checks (validation like backend/src/routes/machine.routes.ts).
+    if (req.url === '/api/machine/recovery-checks') {
+      const b = call.body;
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const obj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+      if (!obj(b) || !uuid.test(b.incident_id) || !uuid.test(b.playbook_run_id) || !['pending', 'healthy', 'unhealthy', 'failed'].includes(b.status)
+        || (b.check_type !== undefined && b.check_type !== null && (typeof b.check_type !== 'string' || !b.check_type || b.check_type.length > 100))
+        || (b.details !== undefined && !obj(b.details))) {
+        call.answer = 400;
+        return send(res, 400, { success: false, message: 'Invalid recovery check.' });
+      }
+      const mode = scenario.recovery_store;
+      call.answer = mode;
+      if (mode === 'not_found') return send(res, 404, { success: false, message: 'Incident not found.' });
+      if (typeof mode === 'number') return send(res, mode, { success: false, message: 'Failed to record recovery check.' });
+      const id = randomUUID();
+      recoveryChecks.push({ id, ...b });
+      return send(res, 201, { success: true, message: 'Recovery check recorded.', data: { recovery_check_id: id } });
+    }
+    // The other contract routes (analysis, incident-events) are not implemented
+    // in the real backend yet: answer like Express does.
+    return send(res, 404, { success: false, message: 'Route not found.' });
   });
 
   services.listen(servicesPort, '127.0.0.1');
@@ -132,6 +190,7 @@ export function startMocks({ servicesPort, backendPort, secret }) {
     scenario,
     runs,
     calls,
+    recoveryChecks,
     close: () => { services.close(); backend.close(); },
   };
 }

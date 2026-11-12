@@ -111,7 +111,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Workflow 01 – Node: \"Detect duplicate alerts\".\n// Alertmanager re-sends the same firing alert every repeat_interval. An alert\n// occurrence is identified by fingerprint + startsAt; it is processed once per\n// DEDUP_WINDOW_MINUTES (default 360). The store is the workflow's static data,\n// which n8n saves only for production (active) executions, not manual tests.\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst env = $env;\nconst data = $input.first().json;\nconst store = $getWorkflowStaticData('global');\nstore.seenAlerts = store.seenAlerts || {};\nconst seen = store.seenAlerts;\nconst now = Date.now();\nconst windowMs = envInt(env, 'DEDUP_WINDOW_MINUTES', 360, 1, 10080) * 60000;\n\nfor (const [k, at] of Object.entries(seen)) if (now - at > windowMs) delete seen[k];\n\nconst fresh = [];\nconst duplicates = [];\nfor (const a of data.alerts) {\n  const key = (a.fingerprint || (a.alert_name + '|' + a.service_name)) + '|' + a.started_at;\n  if (seen[key]) { duplicates.push({ alert_name: a.alert_name, service_name: a.service_name, key }); continue; }\n  seen[key] = now;\n  fresh.push({ ...a, dedup_key: key });\n}\n\nreturn [{\n  json: {\n    ...data,\n    alerts: fresh,\n    duplicates,\n    response: {\n      accepted: true,\n      new_alerts: fresh.length,\n      duplicate_alerts: duplicates.length,\n      resolved_alerts: data.resolved,\n      rejected_alerts: data.rejected.length,\n      rejected: data.rejected,\n    },\n  },\n}];\n"
+        "jsCode": "// Workflow 01 – Node: \"Detect duplicate alerts\".\n// Alertmanager re-sends the same firing alert every repeat_interval. An alert\n// occurrence is identified by fingerprint + startsAt; it is processed once per\n// DEDUP_WINDOW_MINUTES (default 360). The store is the workflow's static data,\n// which n8n saves only for production (active) executions, not manual tests.\n//\n// N-3 (pending/confirmed): a new occurrence is first marked \"pending\". Only\n// \"Confirm alert processing\" (after the incident step) marks it \"confirmed\"\n// (incident created, or creation not available yet: BD-1) or RELEASES it\n// (creation failed), so the next delivery is processed again instead of being\n// dropped for 6 hours. A \"pending\" entry left by an execution that never\n// finished (crash) expires after DEDUP_PENDING_MINUTES (default 15).\n//\n// LIMITATION (documented, not solved here): n8n loads static data when an\n// execution starts and saves it when the execution ends. Two deliveries of the\n// same alert that are processed AT THE SAME TIME do not see each other, so both\n// are processed. Real protection needs BD-1 to be idempotent on the alert\n// fingerprint in the database (needs a schema change: incidents has no\n// fingerprint column today).\n//\n// Entries: { state: 'pending' | 'confirmed', at: <ms> }. A plain number (written\n// by the previous version of this node) is read as \"confirmed at <ms>\".\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst env = $env;\nconst data = $input.first().json;\nconst store = $getWorkflowStaticData('global');\nstore.seenAlerts = store.seenAlerts || {};\nconst seen = store.seenAlerts;\nconst now = Date.now();\nconst windowMs = envInt(env, 'DEDUP_WINDOW_MINUTES', 360, 1, 10080) * 60000;\nconst pendingMs = Math.min(windowMs, envInt(env, 'DEDUP_PENDING_MINUTES', 15, 1, 1440) * 60000);\n\nconst entryOf = (v) => {\n  if (typeof v === 'number' && Number.isFinite(v)) return { state: 'confirmed', at: v };\n  if (v && typeof v === 'object' && (v.state === 'pending' || v.state === 'confirmed') && Number.isFinite(v.at)) return v;\n  return null;\n};\n\nfor (const [k, v] of Object.entries(seen)) {\n  const e = entryOf(v);\n  if (!e || now - e.at > (e.state === 'pending' ? pendingMs : windowMs)) delete seen[k];\n}\n\nconst fresh = [];\nconst duplicates = [];\nfor (const a of data.alerts) {\n  const key = (a.fingerprint || (a.alert_name + '|' + a.service_name)) + '|' + a.started_at;\n  const e = entryOf(seen[key]);\n  if (e) {\n    duplicates.push({ alert_name: a.alert_name, service_name: a.service_name, key, state: e.state === 'pending' ? 'in_progress' : 'processed' });\n    continue;\n  }\n  seen[key] = { state: 'pending', at: now };\n  fresh.push({ ...a, dedup_key: key });\n}\n\nreturn [{\n  json: {\n    ...data,\n    alerts: fresh,\n    duplicates,\n    response: {\n      accepted: true,\n      new_alerts: fresh.length,\n      duplicate_alerts: duplicates.length,\n      resolved_alerts: data.resolved,\n      rejected_alerts: data.rejected.length,\n      rejected: data.rejected,\n    },\n  },\n}];\n"
       },
       "id": "a5a7c5c7-ccc4-440b-a9f4-cb0631ead3da",
       "name": "Detect duplicate alerts",
@@ -169,7 +169,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Workflow 01 – Node: \"Create incident (backend) – BLOCKED\".\n// One item per new alert.\n//\n// BLOCKED: the backend has no machine endpoint that creates an incident from an\n// alert. The approved contract (database/API_AND_INTEGRATION_CONTRACTS.md, B.3)\n// lists only start/complete, investigations/:id/analysis, recovery-checks and\n// incident-events, and none of them creates incidents. Until the backend adds\n// one, this node does NOT invent a URL: it passes the alert on with\n// incident_id = null and records why, so the investigation can still run and\n// be tested. When the endpoint exists, replace this node with\n// \"Sign request\" + \"HTTP Request\" (see workflow 07 for the pattern).\n\nreturn $input.first().json.alerts.map((a) => ({\n  json: {\n    incident_id: null,\n    investigation_id: null,\n    incident_created: false,\n    incident_blocker: 'Backend endpoint for creating an incident from an alert does not exist yet (backend dependency BD-1).',\n    alert_name: a.alert_name,\n    service_name: a.service_name,\n    severity: a.severity,\n    started_at: a.started_at,\n    summary: a.summary,\n    dedup_key: a.dedup_key,\n  },\n}));\n"
+        "jsCode": "// Workflow 01 – Node: \"Create incident (backend) – BLOCKED\".\n// One item per new alert.\n//\n// BLOCKED: the backend has no machine endpoint that creates an incident from an\n// alert. The approved contract (database/API_AND_INTEGRATION_CONTRACTS.md, B.3)\n// lists only start/complete, investigations/:id/analysis, recovery-checks and\n// incident-events, and none of them creates incidents. Until the backend adds\n// one, this node does NOT invent a URL: it passes the alert on with\n// incident_id = null and records why, so the investigation can still run and\n// be tested. When the endpoint exists, replace this node with\n// \"Sign request\" + \"HTTP Request\" (see workflow 07 for the pattern), and set\n// incident_status to \"created\" or \"failed\" (\"Confirm alert processing\", N-3,\n// releases failed alerts so a later delivery is processed again).\n\nreturn $input.first().json.alerts.map((a) => ({\n  json: {\n    incident_id: null,\n    investigation_id: null,\n    incident_created: false,\n    incident_status: 'blocked',\n    incident_blocker: 'Backend endpoint for creating an incident from an alert does not exist yet (backend dependency BD-1).',\n    alert_name: a.alert_name,\n    service_name: a.service_name,\n    severity: a.severity,\n    started_at: a.started_at,\n    summary: a.summary,\n    dedup_key: a.dedup_key,\n  },\n}));\n"
       },
       "id": "55bcf8b5-4865-46bf-ac3c-80771a471f6d",
       "name": "Create incident (backend) – BLOCKED",
@@ -180,6 +180,20 @@
         -180
       ],
       "notes": "BLOCKED (BD-1): no backend endpoint creates incidents from alerts. No URL is invented."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 01 – Node: \"Confirm alert processing\" (N-3). Runs after the incident\n// step, once per new alert (one item per alert, dedup_key set by \"Detect\n// duplicate alerts\"):\n//   incident_status \"created\" -> confirmed (duplicates are skipped for DEDUP_WINDOW_MINUTES)\n//   incident_status \"blocked\" -> confirmed: BD-1 does not exist, nothing was\n//                                attempted and the investigation still runs, so\n//                                the occurrence is processed once (behaviour\n//                                before N-3, unchanged)\n//   anything else (\"failed\", missing) -> released: the key is removed, so the\n//                                next delivery of this alert (Alertmanager repeat)\n//                                is processed again.\n// Items are passed on unchanged (plus dedup_state).\n\nconst store = $getWorkflowStaticData('global');\nstore.seenAlerts = store.seenAlerts || {};\nconst seen = store.seenAlerts;\nconst now = Date.now();\nreturn $input.all().map((item) => {\n  const j = item.json || {};\n  let dedupState = 'none';\n  if (typeof j.dedup_key === 'string' && j.dedup_key) {\n    if (j.incident_status === 'created' || j.incident_status === 'blocked') {\n      seen[j.dedup_key] = { state: 'confirmed', at: now };\n      dedupState = 'confirmed';\n    } else {\n      delete seen[j.dedup_key];\n      dedupState = 'released';\n    }\n  }\n  return { json: { ...j, dedup_state: dedupState } };\n});\n"
+      },
+      "id": "172220b6-9ab7-4c99-ae17-e5ed055a034e",
+      "name": "Confirm alert processing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1690,
+        -360
+      ],
+      "notes": "N-3: created/blocked → confirmed; failed → released (the next delivery is processed again)."
     },
     {
       "parameters": {
@@ -216,7 +230,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Workflow 01 – Node: \"Intake result\". Summarizes what happened to each alert\n// (visible in the n8n execution log).\nconst alerts = $('Create incident (backend) – BLOCKED').all().map((i) => i.json);\nreturn $input.all().map((item, idx) => {\n  const rca = item.json || {};\n  const a = alerts[idx] || {};\n  return {\n    json: {\n      alert_name: a.alert_name,\n      service_name: a.service_name,\n      incident_id: a.incident_id,\n      incident_created: a.incident_created,\n      rca_status: rca.status || (rca.error ? 'workflow_error' : 'unknown'),\n      rca_stored: rca.stored === true,\n      error: rca.error || null,\n    },\n  };\n});\n"
+        "jsCode": "// Workflow 01 – Node: \"Intake result\". Summarizes what happened to each alert\n// (visible in the n8n execution log). soft_failure (N-2) is the one returned by\n// workflow 05 (AI unavailable, analysis not stored); \"Soft failure?\" sends it to 09.\nconst alerts = $('Create incident (backend) – BLOCKED').all().map((i) => i.json);\nreturn $input.all().map((item, idx) => {\n  const rca = item.json || {};\n  const a = alerts[idx] || {};\n  return {\n    json: {\n      alert_name: a.alert_name,\n      service_name: a.service_name,\n      incident_id: a.incident_id,\n      incident_created: a.incident_created,\n      rca_status: rca.status || (rca.error ? 'workflow_error' : 'unknown'),\n      rca_stored: rca.stored === true,\n      error: rca.error || null,\n      soft_failure: rca.soft_failure && typeof rca.soft_failure === 'object' ? rca.soft_failure : null,\n    },\n  };\n});\n"
       },
       "id": "56609745-fdcf-4604-a153-48915a3ca2da",
       "name": "Intake result",
@@ -226,6 +240,89 @@
         2080,
         -180
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ef0b393d-bdf3-4895-a4b8-52cdc1166755",
+              "leftValue": "={{ !!$json.soft_failure }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "8579a920-2742-4c25-ab20-5c183c1a31bd",
+      "name": "Soft failure?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2340,
+        -180
+      ],
+      "notes": "Set by the nodes before: completion failed after retries, start unconfirmed, AI unavailable, result not stored."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Shared Code node \"Report soft failure\" (N-2), used in the top-level workflows\n// 01 and 06. A soft failure is a problem that does not crash the workflow (the\n// workflow answers normally) but needs an operator: a completion that failed\n// after all retries, an unconfirmed start, an AI that is unavailable, a result\n// that could not be stored. Crashes still reach workflow 09 via \"Error workflow\".\n//\n// Input: items with { soft_failure: { kind, node, message } } (other items are ignored).\n// Output: one item per distinct kind (so 3 alerts with the AI down = ONE\n// notification), shaped like the Error Trigger output that workflow 09 reads:\n// { execution: { id, mode, lastNodeExecuted, error: { message, node } }, workflow: { id, name } }\n// Only the short, redacted message leaves this node: no request, headers,\n// signature, payload or URL.\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst groups = new Map();\nfor (const item of $input.all()) {\n  const f = item.json && item.json.soft_failure;\n  if (!f || typeof f !== 'object') continue;\n  const kind = /^[a-z0-9_]{1,60}$/.test(String(f.kind)) ? String(f.kind) : 'soft_failure';\n  const g = groups.get(kind) || { kind, node: typeof f.node === 'string' ? truncate(f.node, 100) : null, messages: [], count: 0 };\n  g.count += 1;\n  const m = redact(truncate(f.message || kind, 250));\n  if (g.messages.length < 3 && !g.messages.includes(m)) g.messages.push(m);\n  groups.set(kind, g);\n}\n\nconst wf = typeof $workflow === 'object' && $workflow ? $workflow : {};\nreturn [...groups.values()].map((g) => ({\n  json: {\n    execution: {\n      id: String($execution.id),\n      mode: 'soft_failure',\n      lastNodeExecuted: g.node,\n      error: {\n        message: truncate('soft failure ' + g.kind + (g.count > 1 ? ' (' + g.count + ' items)' : '') + ': ' + g.messages.join(' | '), 300),\n        node: g.node ? { name: g.node } : null,\n      },\n    },\n    workflow: { id: wf.id || null, name: wf.name || 'unknown' },\n    soft_failure: { kind: g.kind, count: g.count },\n  },\n}));\n"
+      },
+      "id": "68dbc56a-c1cc-43f8-a3d0-7f49b7be5d18",
+      "name": "Report soft failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        -360
+      ],
+      "notes": "One redacted notification per kind of failure (no request data)."
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "dc33wf09errorhnd",
+          "mode": "list",
+          "cachedResultName": "09 - Error Handler"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "e1fbf626-ccec-4fcd-a4b6-60373dea5797",
+      "name": "Notify error handler (09)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2860,
+        -360
+      ],
+      "notes": "Runs 09 (\"When called with a soft failure\"): Slack/Discord when ERROR_NOTIFY_WEBHOOK_URL is set.",
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -306,6 +403,17 @@
       "main": [
         [
           {
+            "node": "Confirm alert processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm alert processing": {
+      "main": [
+        [
+          {
             "node": "Run 05 Root Cause",
             "type": "main",
             "index": 0
@@ -318,6 +426,39 @@
         [
           {
             "node": "Intake result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intake result": {
+      "main": [
+        [
+          {
+            "node": "Soft failure?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Soft failure?": {
+      "main": [
+        [
+          {
+            "node": "Report soft failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report soft failure": {
+      "main": [
+        [
+          {
+            "node": "Notify error handler (09)",
             "type": "main",
             "index": 0
           }

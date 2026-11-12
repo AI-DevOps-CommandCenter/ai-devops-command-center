@@ -9,19 +9,34 @@
 // The work dir (default: a new temp folder) holds the test n8n database; your
 // own ~/.n8n is never used.
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { buildAll, WF, CRED } from '../../scripts/build-workflows.mjs';
-import { startMocks } from './mock-services.mjs';
+import { startMocks, startNotificationReceiver } from './mock-services.mjs';
 import { parseBody, isWebhookReady, jsonField, messageOf, jsonText, describeProbe } from './http-response.mjs';
 
 const WORK = process.argv[2] || mkdtempSync(join(tmpdir(), 'dc33-n8n-it-'));
 // The n8n CLI is started with `node <n8n>/bin/n8n` (no shell), so it can be stopped reliably.
 const N8N_JS = process.env.N8N_JS || join(spawnSync('npm', ['root', '-g'], { encoding: 'utf8', shell: process.platform === 'win32' }).stdout.trim(), 'n8n', 'bin', 'n8n');
-const PORT = 5690, SVC = 4599, BACKEND = 4598;
+const PORT = 5690, SVC = 4599, BACKEND = 4598, NOTIFY = 4597;
 const SECRET = 'integration-test-only-secret-0123456789abcdef';
+const BACKEND_TIMEOUT_MS = 1500;
+
+// N-2: workflow 09 only posts to an https:// webhook. The test receiver uses a
+// throwaway self-signed certificate (in the temp work dir, never in git) that only
+// the test n8n process trusts (NODE_EXTRA_CA_CERTS). Without openssl the
+// notification checks are reported as SKIP (not as PASS).
+function makeTestCertificate(dir) {
+  const key = join(dir, 'notify-test-key.pem');
+  const cert = join(dir, 'notify-test-cert.pem');
+  const r = spawnSync(process.env.OPENSSL_BIN || 'openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1'], { encoding: 'utf8' });
+  if (r.status !== 0) return null;
+  return { key: readFileSync(key), cert: readFileSync(cert), certPath: cert };
+}
+const TLS = makeTestCertificate(WORK);
+const NOTIFY_URL = `https://127.0.0.1:${NOTIFY}/hook/it-test-only-token`;
 const ENV = {
   ...process.env,
   N8N_USER_FOLDER: WORK,
@@ -51,6 +66,12 @@ const ENV = {
   RECOVERY_WAIT_SECONDS: '5',
   RECOVERY_MAX_CHECKS: '2',
   REMEDIATION_EXECUTION_MODE: 'simulate',
+  // N-1: short timeouts and backoff (1 s, 2 s) so the retry scenarios are quick.
+  BACKEND_TIMEOUT_MS: String(BACKEND_TIMEOUT_MS),
+  COMPLETE_RETRY_BASE_SECONDS: '1',
+  // Never a real webhook from the developer's shell: the test receiver or nothing.
+  ERROR_NOTIFY_WEBHOOK_URL: TLS ? NOTIFY_URL : '',
+  ...(TLS ? { NODE_EXTRA_CA_CERTS: TLS.certPath } : {}),
 };
 
 const results = [];
@@ -103,8 +124,10 @@ async function main() {
   console.log('n8n integration test, work dir: ' + WORK);
   const version = (await cli(['--version'])).stdout.trim().split(String.fromCharCode(10)).pop().trim();
   console.log('n8n version: ' + version);
-  const mocks = startMocks({ servicesPort: SVC, backendPort: BACKEND, secret: SECRET });
-  const setScenario = (s) => Object.assign(mocks.scenario, { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent' }, s);
+  const mocks = startMocks({ servicesPort: SVC, backendPort: BACKEND, secret: SECRET, backendTimeoutMs: BACKEND_TIMEOUT_MS });
+  mocks.notifier = TLS ? startNotificationReceiver({ port: NOTIFY, key: TLS.key, cert: TLS.cert }) : null;
+  console.log(TLS ? 'error notifications: test HTTPS receiver on ' + NOTIFY : 'error notifications: openssl not found, notification checks will be SKIPPED');
+  const setScenario = (s) => Object.assign(mocks.scenario, { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent', complete: [], start: 'ok', recovery_store: 'ok' }, s);
   const takeCalls = () => mocks.calls.splice(0);
 
   // ---- import
@@ -279,7 +302,9 @@ async function main() {
   setScenario({ recovery: 'recovered' });
   o = first(await post('it-recovery', rc));
   check('07 recovered -> status recovered (db healthy)', o.status === 'recovered' && o.db_status === 'healthy' && o.checks_performed === 1, o);
-  check('07 store route missing -> not_implemented (BD-3)', o.stored === false && o.store_error && o.store_error.kind === 'not_implemented', o.store_error);
+  const storedCheck = mocks.recoveryChecks.at(-1) || {};
+  check('07 BD-3: recovery check stored (201), recovery_check_id returned, no soft failure', o.stored === true && typeof o.recovery_check_id === 'string' && o.recovery_check_id === storedCheck.id && o.soft_failure === null, o);
+  check('07 BD-3: stored body matches the backend contract', storedCheck.incident_id === INC && storedCheck.playbook_run_id === RUN && storedCheck.status === 'healthy' && storedCheck.check_type === 'prometheus' && storedCheck.details && storedCheck.details.verdict === 'recovered', storedCheck);
   setScenario({ recovery: 'not' });
   o = first(await post('it-recovery', rc));
   check('07 not recovered after max checks -> not_recovered (2 checks)', o.status === 'not_recovered' && o.checks_performed === 2, o);
@@ -299,12 +324,121 @@ async function main() {
   o = first(await post('it-postmortem', { incident_id: INC, status: 'recovered' }));
   check('08 Groq failure -> ai_unavailable', o.status === 'ai_unavailable' && o.error.kind === 'rate_limited', o);
 
+  await retryAndNotificationChecks({ mocks, setScenario, takeCalls, INC, alert, auth });
+
   finish(server, mocks);
 }
 
+// ---- N-1 (retry-safe completion), N-2 (soft-failure notifications), BD-3 (recovery checks)
+async function retryAndNotificationChecks({ mocks, setScenario, takeCalls, INC, alert, auth }) {
+  const notes = () => (mocks.notifier ? mocks.notifier.received : []);
+  const takeNotes = () => notes().splice(0);
+  const noteCheck = (name, cond, detail) => (mocks.notifier ? check(name, cond, detail) : (skipped.push(name), console.log('  SKIP ' + name + ' (no openssl: no HTTPS test receiver)')));
+  const waitFor = async (fn, ms = 45000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = fn(); if (v) return v; await sleep(300); } return fn(); };
+  let seen = [];
+  const pull = () => (seen = seen.concat(takeCalls()));
+  const completes = (run) => seen.filter((c) => c.port === 'backend' && c.path === '/api/machine/playbook-runs/' + run + '/complete');
+  const stores = (run) => seen.filter((c) => c.port === 'backend' && c.path === '/api/machine/recovery-checks' && c.body && c.body.playbook_run_id === run);
+  const noteFor = (pattern) => notes().find((n) => n.body && pattern.test(String(n.body.text)));
+  // Checks only what 09 SENT (n.raw); n.path is the receiver's own URL (the destination).
+  const noLeak = (n) => { const t = String(n.raw); return !t.includes(SECRET) && !t.includes('it-test-only-token') && !/X-DC-|sha256=|test-groq-key|test-alert-token|Bearer /.test(t); };
+
+  // Everything before this point ended normally or with an EXPECTED refusal
+  // (run not approved, BD-2 not implemented, analysis blocked by BD-1, ...).
+  await sleep(3000);
+  const before = takeNotes();
+  noteCheck('N-2 successful and expected-refusal executions sent no notification', before.length === 0, before.map((n) => n.body && n.body.text));
+
+  async function remediate(setup, wait) {
+    const run = randomUUID();
+    mocks.runs[run] = { status: 'approved', action_type: 'restart', incident_id: INC };
+    setScenario(setup); takeCalls(); seen = []; takeNotes();
+    const s = signed({ playbook_run_id: run, incident_id: INC, action_type: 'restart', request_payload: { service_name: 'checkout-api' } });
+    const r = await post('remediation', s.raw, s.headers);
+    await waitFor(() => { pull(); return wait(run); });
+    await sleep(2500); // let the execution finish (07 -> 08 -> soft-failure check)
+    pull();
+    return { run, r };
+  }
+  const distinctNonces = (list) => new Set(list.map((c) => c.nonce)).size === list.length;
+
+  console.log('\nN-1 Retry-safe completion (06)');
+  let x = await remediate({ complete: [503, 503, 'ok'] }, (run) => stores(run).length > 0);
+  let c = completes(x.run);
+  check('N-1 503, 503, 200 -> 3 attempts, completed once, recovery checked', x.r.status === 202 && c.length === 3 && mocks.runs[x.run].status === 'success' && mocks.runs[x.run].completions === 1 && stores(x.run).length === 1, { status: x.r.status, attempts: c.map((a) => a.answer), run: mocks.runs[x.run] });
+  check('N-1 every attempt has a new nonce and a valid signature', distinctNonces(c) && c.every((a) => a.auth === 'ok'), c.map((a) => [a.nonce, a.auth]));
+  check('N-1 every attempt sends the same body (same execution id and status)', c.every((a) => JSON.stringify(a.body) === JSON.stringify(c[0].body)) && c[0].body.status === 'success', c.map((a) => a.body));
+  noteCheck('N-2 a run completed after retries sends no notification', notes().length === 0, notes());
+
+  x = await remediate({ complete: ['timeout', 'timeout', 'timeout'] }, (run) => noteFor(/completion_failed/) || (!mocks.notifier && completes(run).length >= 3));
+  c = completes(x.run);
+  check('N-1 timeout on every attempt -> exactly 3 attempts, then stop', c.length === 3 && distinctNonces(c), c.map((a) => a.answer));
+  check('N-1 final failure: the run is NOT reported complete and recovery is NOT checked', mocks.runs[x.run].status === 'running' && stores(x.run).length === 0, mocks.runs[x.run]);
+  let n = noteFor(/completion_failed/);
+  noteCheck('N-2 completion failure -> one redacted notification from 06', n && notes().length === 1 && /^\[n8n\] 06 - Remediation failed at "Backend: complete run": soft failure completion_failed: Completing playbook run [0-9a-f-]{36} \(status success\) failed after 3 attempt\(s\): timeout/.test(n.body.text) && n.body.text.includes(x.run) && noLeak(n), notes());
+
+  x = await remediate({ complete: ['reset', 'ok'] }, (run) => stores(run).length > 0);
+  c = completes(x.run);
+  check('N-1 connection dropped -> retried, completed on attempt 2', c.length === 2 && c[0].answer === 'reset' && mocks.runs[x.run].status === 'success' && distinctNonces(c), c.map((a) => a.answer));
+
+  x = await remediate({ complete: [500, 'ok'] }, (run) => stores(run).length > 0);
+  c = completes(x.run);
+  check('N-1 HTTP 500 -> retried, completed on attempt 2', c.length === 2 && mocks.runs[x.run].status === 'success', c.map((a) => a.answer));
+
+  for (const status of [400, 401]) {
+    x = await remediate({ complete: [status] }, (run) => noteFor(/completion_failed/) || (!mocks.notifier && completes(run).length >= 1));
+    await sleep(3500); // a retry would come after 1 s
+    pull();
+    c = completes(x.run);
+    check('N-1 HTTP ' + status + ' -> not retried (1 attempt)', c.length === 1 && stores(x.run).length === 0, c.map((a) => a.answer));
+    n = noteFor(/completion_failed/);
+    noteCheck('N-2 HTTP ' + status + ' completion failure -> notification', n && new RegExp('failed after 1 attempt\\(s\\): (client_error|auth) HTTP ' + status).test(n.body.text) && noLeak(n), notes());
+  }
+
+  x = await remediate({ complete: ['timeout_commit'] }, (run) => stores(run).length > 0);
+  c = completes(x.run);
+  check('N-1 response lost after the database completed the run -> retry gets 409, run counted as completed (not failed)', c.length === 2 && mocks.runs[x.run].status === 'success' && mocks.runs[x.run].completions === 1 && stores(x.run).length === 1, { attempts: c.map((a) => a.answer), run: mocks.runs[x.run] });
+  noteCheck('N-2 ... and no false failure notification', notes().length === 0, notes());
+
+  console.log('\nN-2 Soft-failure notifications (06 start, 07 store, 01 AI)');
+  x = await remediate({ start: 'timeout' }, () => noteFor(/start_unconfirmed/) || (!mocks.notifier && seen.some((k) => k.path.endsWith('/start'))));
+  check('N-2 start timeout -> 502 to the caller, nothing executed', x.r.status === 502 && completes(x.run).length === 0, x.r);
+  n = noteFor(/start_unconfirmed/);
+  noteCheck('N-2 start timeout -> start_unconfirmed notification', n && n.body.text.includes(x.run) && /may have started the run/.test(n.body.text) && noLeak(n), notes());
+
+  x = await remediate({ recovery_store: 500 }, (run) => noteFor(/recovery_store_failed/) || (!mocks.notifier && stores(run).length > 0));
+  n = noteFor(/recovery_store_failed/);
+  noteCheck('N-2 recovery check not stored (HTTP 500) -> recovery_store_failed notification from 06', n && /06 - Remediation/.test(n.body.text) && /HTTP 500/.test(n.body.text) && noLeak(n), notes());
+
+  setScenario({ groq: 'rate_limited' }); takeNotes();
+  const fresh = JSON.parse(alert); fresh.alerts[0].fingerprint = 'aaaa0000bbbb1111'; fresh.alerts[0].labels.alertname = 'HighLatency';
+  const r = await post('alertmanager', fresh, auth);
+  await waitFor(() => noteFor(/ai_unavailable/), mocks.notifier ? 45000 : 15000);
+  await sleep(2000);
+  n = noteFor(/ai_unavailable/);
+  check('N-2 01 alert accepted while the AI is down (202)', r.status === 202 && jsonField(r, 'new_alerts') === 1, r);
+  noteCheck('N-2 AI unavailable -> exactly one ai_unavailable notification from 01', n && notes().length === 1 && /^\[n8n\] 01 - Alert Intake failed at "Groq: RCA": soft failure ai_unavailable/.test(n.body.text) && /rate_limited HTTP 429/.test(n.body.text) && noLeak(n), notes());
+
+  console.log('\nBD-3 Recovery check storage (07)');
+  const rc = { incident_id: INC, playbook_run_id: '11111111-1111-4111-8111-111111111111', service_name: 'checkout-api', action_type: 'restart', simulated: true };
+  setScenario({ recovery_store: 'not_found' });
+  let o = first(await post('it-recovery', rc));
+  check('BD-3 unknown incident (404) is a real failure now: not_found + soft_failure (not "not_implemented")', o.stored === false && o.store_error && o.store_error.kind === 'not_found' && o.soft_failure && o.soft_failure.kind === 'recovery_store_failed', o);
+  setScenario({ recovery_store: 500 });
+  o = first(await post('it-recovery', rc));
+  check('BD-3 backend error (500) -> server_error + soft_failure', o.stored === false && o.store_error.kind === 'server_error' && o.soft_failure && o.soft_failure.kind === 'recovery_store_failed', o);
+  setScenario({ recovery: 'not' });
+  o = first(await post('it-recovery', rc));
+  const last = mocks.recoveryChecks.at(-1) || {};
+  check('BD-3 not recovered -> stored as unhealthy', o.stored === true && last.status === 'unhealthy' && last.details.verdict === 'not_recovered', { o, last });
+}
+
+const skipped = [];
 function finish(server, mocks) {
   if (server) server.kill();
   mocks.close();
+  if (mocks.notifier) mocks.notifier.close();
+  if (skipped.length) console.log('\nSKIPPED (not counted as passed): ' + skipped.length);
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
   if (failed.length) { console.log('FAILED:\n - ' + failed.map((f) => f.name).join('\n - ')); process.exitCode = 1; }

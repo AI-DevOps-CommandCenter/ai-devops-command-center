@@ -36,11 +36,13 @@ All workflows use **09 – Error Handler** as their error workflow.
 | Alertmanager webhook | Webhook | Rejects a missing or wrong token (403) |
 | Parse and validate alerts | Code | Needs `alerts[]` (1–50), `alertname`, a service label and `startsAt`. Keeps firing alerts, counts resolved ones, redacts secrets, maps severity. |
 | Valid payload? | IF | Invalid → **Respond 400** |
-| Detect duplicate alerts | Code | Key = `fingerprint` + `startsAt`, kept `DEDUP_WINDOW_MINUTES` in workflow static data |
+| Detect duplicate alerts | Code | Key = `fingerprint` + `startsAt`, kept `DEDUP_WINDOW_MINUTES` in workflow static data. A new occurrence is marked `pending` (N-3); a pending entry from a crashed execution expires after `DEDUP_PENDING_MINUTES`. Concurrent deliveries are **not** caught (D-N8N-5). |
 | Accepted response → Respond 202 | Set, Respond | `{ accepted, new_alerts, duplicate_alerts, resolved_alerts, rejected_alerts }`, sent before the long investigation |
-| Create incident (backend) – BLOCKED | Code | **BD-1**: passes the alert on with `incident_id: null` and the reason |
+| Create incident (backend) – BLOCKED | Code | **BD-1**: passes the alert on with `incident_id: null`, `incident_status: "blocked"` and the reason |
+| Confirm alert processing | Code | N-3: `created` / `blocked` → `confirmed`; anything else (`failed`) → released, so the next delivery is processed again |
 | Run 05 Root Cause | Execute Workflow | One run per new alert (*each* mode); errors continue |
-| Intake result | Code | Per-alert summary for the execution log |
+| Intake result | Code | Per-alert summary for the execution log, including the `soft_failure` returned by 05 |
+| Soft failure? → Report soft failure → Notify error handler (09) | IF, Code, Execute Workflow | N-2: AI unavailable / analysis not stored → one redacted notification per kind |
 
 ## 02 – Log Analysis · owner Tharindu
 - **Trigger:** called by 05.
@@ -102,15 +104,15 @@ All workflows use **09 – Error Handler** as their error workflow.
 | Groq: RCA | HTTP Request | JSON mode, temperature 0.1 |
 | Validate RCA | Code | `rca-output.schema.json`: action must be one of the 4 or null, severity one of 4, confidence 0–1, text lengths capped, `requires_human_review: true` |
 | Can store? | IF | Needs `incident_id` and `investigation_id` (BD-1, BD-2) |
-| Sign store request → Backend: store AI analysis → RCA result (store attempted) | Code, HTTP, Code | `POST /api/machine/investigations/:id/analysis` (signed). Today: `not_implemented` (404). |
-| RCA result (not stored) | Code | Invalid AI answer, or blocked storage |
+| Sign store request → Backend: store AI analysis → RCA result (store attempted) | Code, HTTP, Code | `POST /api/machine/investigations/:id/analysis` (signed). Today: `not_implemented` (404, silent). Any other failure → `soft_failure: rca_store_failed`. |
+| RCA result (not stored) | Code | Invalid AI answer, or blocked storage. AI unreachable (`ai_unavailable`) → `soft_failure: ai_unavailable`. |
 
-- **Output:** `{ incident_id, investigation_id, status, rca, sources, partial_evidence, requires_human_review, stored, analysis_id, store_error }`.
+- **Output:** `{ incident_id, investigation_id, status, rca, sources, partial_evidence, requires_human_review, stored, analysis_id, store_error, soft_failure }`. 05 does not notify itself (a sub-workflow returns its last node's output); 01 reports `soft_failure`.
 - **Never** calls workflow 06 or any execution endpoint (a unit test enforces this).
 
 ## 06 – Remediation · owner Vishwa
 - **Trigger:** `POST /webhook/remediation`, HMAC signed by the backend, *Raw Body* on.
-- **Environment:** `MACHINE_SIGNING_SECRET`, `BACKEND_BASE_URL`, `N8N_REMEDIATION_SIGNED_PATH`, `REMEDIATION_EXECUTION_MODE`.
+- **Environment:** `MACHINE_SIGNING_SECRET`, `BACKEND_BASE_URL`, `N8N_REMEDIATION_SIGNED_PATH`, `REMEDIATION_EXECUTION_MODE`, `BACKEND_TIMEOUT_MS`, `COMPLETE_RETRY_BASE_SECONDS`.
 
 | Node | Type | What it does |
 |---|---|---|
@@ -119,13 +121,15 @@ All workflows use **09 – Error Handler** as their error workflow.
 | Request valid? → Respond rejected | IF, Respond | 401 / 409 / 400 / 503 |
 | Execution available? | IF | `disabled` → **Respond 503** (the run is **not** started) |
 | Sign start request → Backend: start run | Code, HTTP | `POST /api/machine/playbook-runs/:id/start`, using `$execution.id` as `n8n_execution_id`. The database refuses runs that are not approved (409). |
-| Check start result | Code | Action, incident and status come from the **database** answer. A mismatch with the webhook → started but rejected. |
+| Check start result | Code | Action, incident and status come from the **database** answer. A mismatch with the webhook → started but rejected. Timeout / connection error / 5xx → `soft_failure: start_unconfirmed`; 401 / 503 → `start_failed`; 409 / 404 / 400 are silent. |
 | Run started? → Respond 202 / Respond refused | IF, Respond | 202 accepted, or 409/404/400/502 |
 | Action type | Switch | restart / rollback / scale / circuit_breaker / fallback `unsupported` |
 | Execute: <action> ×4 | Code | **BLOCKED** (no executor): `simulate` returns a marked simulated success; otherwise failed |
 | Started but mismatched? → Unsupported or rejected action | IF, Code | A run that started but is not trusted is completed as **failed** |
-| Sign complete request → Backend: complete run → Check completion | Code, HTTP, Code | `POST …/complete` with the same execution id |
+| Sign complete request → Backend: complete run → Check completion | Code, HTTP, Code | `POST …/complete` with the same execution id. N-1: every attempt is signed again (new nonce). Retried: timeout, connection error, 5xx (max 3 attempts); never 4xx. A 409 "The run is <status we sent>, not running." after an ambiguous attempt = completed (`completion_confirmed_by: run_state`). After the last failure → `soft_failure: completion_failed`. |
+| Retry completion? → Wait before completion retry | IF, Wait | `COMPLETE_RETRY_BASE_SECONDS × 2^(attempt−1)` (2 s, 4 s), then back to *Sign complete request* |
 | Check recovery? → Run 07 Recovery Check | IF, Execute Workflow | Only after a reported success |
+| Soft failure? → Report soft failure → Notify error handler (09) | IF, Code, Execute Workflow | N-2: from *Started but mismatched?* (false), *Done (no recovery check)* and *Run 07 Recovery Check* |
 
 ## 07 – Recovery Check · owner Tharindu
 - **Trigger:** called by 06.
@@ -142,8 +146,8 @@ All workflows use **09 – Error Handler** as their error workflow.
 | Pair query and answer | Merge (combine by position) | Keeps the request context next to the answer |
 | Evaluate health | Code | `recovered` only if **every** signal was measured and healthy. On the last attempt: `not_recovered`, or `unable_to_verify` if there was no data. |
 | Verdict reached? | IF | No → back to Wait (at most `RECOVERY_MAX_CHECKS`) |
-| Sign recovery check request → Store? → Backend: store recovery check | Code, IF, HTTP | `POST /api/machine/recovery-checks` (BD-3: `not_implemented` today). Verdict → `healthy` / `unhealthy` / `failed`. |
-| Recovery result | Code | `{ incident_id, playbook_run_id, status, db_status, checks_performed, evidence, ok, stored, store_error }` |
+| Sign recovery check request → Store? → Backend: store recovery check | Code, IF, HTTP | `POST /api/machine/recovery-checks` (**BD-3, implemented**: `201 { data: { recovery_check_id } }`). Verdict → `healthy` / `unhealthy` / `failed`. |
+| Recovery result | Code | `{ incident_id, playbook_run_id, status, db_status, checks_performed, evidence, ok, stored, recovery_check_id, store_error, soft_failure }`. Any store failure (including a 404, e.g. unknown incident) → `soft_failure: recovery_store_failed`, reported by 06. |
 | Recovered? → Run 08 Postmortem | IF, Execute Workflow | |
 
 ## 08 – Postmortem · owner Tharindu
@@ -160,10 +164,13 @@ All workflows use **09 – Error Handler** as their error workflow.
 | Store postmortem (backend) – BLOCKED | Code | **BD-4**: the draft stays in the execution output |
 
 ## 09 – Error Handler · owner Vishwa + Tharindu
-- **Trigger:** Error Trigger. It is set as the error workflow of 00–08, and runs for failed production executions.
+- **Triggers:**
+  - **Error Trigger:** set as the error workflow of 00–08; runs for failed production executions.
+  - **When called with a soft failure** (Execute Workflow Trigger, N-2): called by 01 and 06 (*Notify error handler (09)*) with the same input shape as the Error Trigger. See `docs/automation-integration-requirements.md` §2a.
 
 | Node | Type | What it does |
 |---|---|---|
+| Report soft failure (in 01 and 06) | Code | Groups items with `soft_failure` by kind (one notification per kind per execution) and builds the Error Trigger shape with a redacted message. No request, headers, signature, payload or URL. |
 | Summarize error | Code | Workflow, execution id and URL, failed node, a message of at most 300 characters with tokens, keys, JWTs and webhook URLs redacted. Retryable = timeouts, connection errors, 429, 502/503/504; never 401/403 or validation errors. No stack, no input data. |
 | Notification configured? | IF | `ERROR_NOTIFY_WEBHOOK_URL` must be https |
 | Send notification | HTTP Request | Slack (`text`) or Discord (`content`) webhook. The URL is a secret, so this node reads it directly with `={{ $env.ERROR_NOTIFY_WEBHOOK_URL }}`; it is never written to an item, so it stays out of the execution history (S1). |

@@ -27,8 +27,18 @@ function hmacNonce() {
   return __crypto.randomBytes(24).toString('base64url');
 }
 
+// Timeout of a signed backend request (BACKEND_TIMEOUT_MS, 1-60 s, default 15 s).
+function hmacTimeoutMs(env) {
+  const raw = env.BACKEND_TIMEOUT_MS;
+  const n = Number(raw);
+  if (raw === undefined || raw === '' || !Number.isFinite(n)) return 15000;
+  return Math.min(60000, Math.max(1000, Math.round(n)));
+}
+
 // Build a signed backend request. `path` must be the full request path (e.g.
 // /api/machine/playbook-runs/<id>/start) because the backend signs req.originalUrl.
+// Every call creates a NEW nonce and timestamp: a retry must call this again,
+// never re-send an old request (the backend answers 409 "Replayed request").
 function signedBackendRequest(env, method, path, payload, now) {
   const secret = hmacSecret(env.MACHINE_SIGNING_SECRET);
   const base = String(env.BACKEND_BASE_URL || '').replace(/\/+$/, '');
@@ -41,6 +51,7 @@ function signedBackendRequest(env, method, path, payload, now) {
     url: base + path,
     path,
     body,
+    timeout_ms: hmacTimeoutMs(env),
     headers: {
       'X-DC-Timestamp': String(timestamp),
       'X-DC-Nonce': nonce,
