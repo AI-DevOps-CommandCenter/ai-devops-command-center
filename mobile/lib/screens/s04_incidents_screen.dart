@@ -1,7 +1,14 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../widgets/app_icons.dart';
 import 's05_incident_details_screen.dart';
+import 's30_search_screen.dart';
+import 's32_inc_1041_screen.dart';
+import 's33_inc_1040_screen.dart';
+import 's34_pm_1037_screen.dart';
+import 's35_pm_1033_screen.dart';
+import 's36_pm_1029_screen.dart';
 
 class S04IncidentsScreen extends StatefulWidget {
   const S04IncidentsScreen({super.key});
@@ -11,58 +18,86 @@ class S04IncidentsScreen extends StatefulWidget {
 }
 
 class _S04IncidentsScreenState extends State<S04IncidentsScreen> {
-  String _selectedTab = 'Active';
-  String? _selectedChip;
-  final TextEditingController _searchController = TextEditingController();
+  String _currentTab = 'active'; // 'active' or 'history'
+  String _selectedSev = 'All'; // 'All', 'Critical', 'Warning'
 
-  final List<Map<String, String>> _activeIncidents = const [
+  final List<Map<String, dynamic>> _allIncidents = [
     {
       'id': 'INC-1042',
       'title': 'Elevated errors after deployment',
-      'service': 'payments-api · Production',
-      'severity': 'Critical',
-      'status': 'Investigating',
+      'svc': 'payments-api',
+      'sev': 'Critical',
+      'status': 'Awaiting approval',
+      'time': '19 min ago',
+      'active': true,
+      'isCritical': true,
+      'isWarning': false,
     },
     {
       'id': 'INC-1041',
       'title': 'Queue backlog growing',
-      'service': 'orders-worker · Production',
-      'severity': 'Warning',
+      'svc': 'orders-worker',
+      'sev': 'Warning',
       'status': 'Monitoring',
+      'time': '41 min ago',
+      'active': true,
+      'isCritical': false,
+      'isWarning': true,
     },
     {
       'id': 'INC-1040',
       'title': 'Slow image resizing',
-      'service': 'media-service · Production',
-      'severity': 'Warning',
+      'svc': 'media-service',
+      'sev': 'Warning',
       'status': 'Acknowledged',
+      'time': '1 h ago',
+      'active': true,
+      'isCritical': false,
+      'isWarning': true,
+    },
+    {
+      'id': 'INC-1037',
+      'title': 'Cache hit ratio dropped',
+      'svc': 'catalog-api',
+      'sev': 'Warning',
+      'status': 'Resolved',
+      'time': 'Yesterday',
+      'active': false,
+      'isCritical': false,
+      'isWarning': true,
+    },
+    {
+      'id': 'INC-1033',
+      'title': 'TLS certificate nearing expiry',
+      'svc': 'edge-gateway',
+      'sev': 'Warning',
+      'status': 'Resolved',
+      'time': '3 days ago',
+      'active': false,
+      'isCritical': false,
+      'isWarning': true,
+    },
+    {
+      'id': 'INC-1029',
+      'title': 'Deploy failed health checks',
+      'svc': 'auth-service',
+      'sev': 'Critical',
+      'status': 'Resolved',
+      'time': '6 days ago',
+      'active': false,
+      'isCritical': true,
+      'isWarning': false,
     },
   ];
-
-  final List<String> _chips = const ['Critical', 'Warning', 'payments-api', 'Investigating'];
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final query = _searchController.text.toLowerCase();
-    final filteredIncidents = _activeIncidents.where((i) {
-      final matchesQuery = query.isEmpty ||
-          i['id']!.toLowerCase().contains(query) ||
-          i['title']!.toLowerCase().contains(query) ||
-          i['service']!.toLowerCase().contains(query);
 
-      final matchesChip = _selectedChip == null ||
-          i['severity'] == _selectedChip ||
-          i['status'] == _selectedChip ||
-          i['service']!.contains(_selectedChip!);
-
-      return matchesQuery && matchesChip;
+    final filteredList = _allIncidents.where((i) {
+      final tabMatch = (i['active'] as bool) == (_currentTab == 'active');
+      final sevMatch = _selectedSev == 'All' || i['sev'] == _selectedSev;
+      return tabMatch && sevMatch;
     }).toList();
 
     return Scaffold(
@@ -72,301 +107,366 @@ class _S04IncidentsScreenState extends State<S04IncidentsScreen> {
           children: [
             // Header
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Incidents',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: colors.text,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Incidents',
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.52,
+                          color: colors.text,
+                        ),
                       ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '3 active · 1 critical',
+                        style: TextStyle(fontSize: 13, color: colors.muted),
+                      ),
+                    ],
+                  ),
+                  // Search button
+                  InkWell(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const S30SearchScreen(),
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: colors.border),
+                      ),
+                      alignment: Alignment.center,
+                      child: LucideIcon(LucideIconData.search, size: 20, color: colors.text),
                     ),
                   ),
                 ],
               ),
             ),
 
+            // Content
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Tabs: Active / History
-                    Row(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                children: [
+                  // Tablist Switcher (Active / History)
+                  Container(
+                    height: 44,
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: colors.surface2,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
                       children: [
-                        _buildTabButton(colors, 'Active'),
-                        const SizedBox(width: 8),
-                        _buildTabButton(colors, 'History'),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Search input
-                    Container(
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: colors.inputBg,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: (val) => setState(() {}),
-                        style: TextStyle(fontSize: 14, color: colors.text),
-                        decoration: InputDecoration(
-                          hintText: 'Search incidents',
-                          hintStyle: TextStyle(color: colors.muted, fontSize: 13),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Filter chips row
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: _chips.map((chip) {
-                          final isSelected = _selectedChip == chip;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 6.0),
-                            child: InkWell(
-                              onTap: () {
-                                setState(() {
-                                  _selectedChip = isSelected ? null : chip;
-                                });
-                              },
-                              borderRadius: BorderRadius.circular(99),
-                              child: Container(
-                                height: 38,
-                                padding: const EdgeInsets.symmetric(horizontal: 14),
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: isSelected ? colors.teal : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(99),
-                                  border: Border.all(
-                                    color: isSelected ? Colors.transparent : colors.border,
-                                  ),
-                                ),
-                                child: Text(
-                                  chip,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                                    color: isSelected
-                                        ? (colors.isDark ? const Color(0xFF06202A) : Colors.white)
-                                        : colors.muted,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Incident Cards List
-                    if (filteredIncidents.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(vertical: 40),
-                        alignment: Alignment.center,
-                        child: Column(
-                          children: [
-                            Text('∅', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800, color: colors.muted)),
-                            const SizedBox(height: 4),
-                            Text('No results', style: TextStyle(fontWeight: FontWeight.bold, color: colors.text)),
-                            const SizedBox(height: 2),
-                            Text('No incidents match.', style: TextStyle(color: colors.muted, fontSize: 13)),
-                          ],
-                        ),
-                      )
-                    else
-                      ...filteredIncidents.map((i) {
-                        final isCrit = i['severity'] == 'Critical';
-                        final sevBg = isCrit ? colors.badgeRedBg : colors.badgeAmberBg;
-                        final sevCol = isCrit ? colors.red : colors.amber;
-
-                        Color stBg = colors.badgeAmberBg;
-                        Color stCol = colors.amber;
-                        if (i['status'] == 'Acknowledged') {
-                          stBg = colors.badgeTealBg;
-                          stCol = colors.teal;
-                        }
-
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10.0),
+                        Expanded(
                           child: InkWell(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => S05IncidentDetailsScreen(
-                                    incidentId: i['id']!,
-                                    incidentTitle: i['title']!,
-                                  ),
+                            onTap: () => setState(() => _currentTab = 'active'),
+                            borderRadius: BorderRadius.circular(9),
+                            child: Container(
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _currentTab == 'active' ? colors.card : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: _currentTab == 'active'
+                                    ? [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.1),
+                                          blurRadius: 2,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ]
+                                    : null,
+                              ),
+                              child: Text(
+                                'Active',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: _currentTab == 'active' ? colors.text : colors.muted,
                                 ),
-                              );
-                            },
-                            borderRadius: BorderRadius.circular(14),
-                            child: _buildCard(
-                              colors: colors,
-                              borderLeftColor: sevCol,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        i['id']!,
-                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: colors.text),
-                                      ),
-                                      _buildBadge(i['severity']!, sevBg, sevCol),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    i['title']!,
-                                    style: TextStyle(fontSize: 13, color: colors.text),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        i['service']!,
-                                        style: TextStyle(fontSize: 12, color: colors.muted),
-                                      ),
-                                      _buildBadge(i['status']!, stBg, stCol),
-                                    ],
-                                  ),
-                                ],
                               ),
                             ),
                           ),
-                        );
-                      }),
-                  ],
-                ),
+                        ),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setState(() => _currentTab = 'history'),
+                            borderRadius: BorderRadius.circular(9),
+                            child: Container(
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _currentTab == 'history' ? colors.card : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: _currentTab == 'history'
+                                    ? [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.1),
+                                          blurRadius: 2,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ]
+                                    : null,
+                              ),
+                              child: Text(
+                                'History',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: _currentTab == 'history' ? colors.text : colors.muted,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Filter Chips (All, Critical, Warning)
+                  Row(
+                    children: ['All', 'Critical', 'Warning'].map((sev) {
+                      final isSelected = _selectedSev == sev;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: InkWell(
+                          onTap: () => setState(() => _selectedSev = sev),
+                          borderRadius: BorderRadius.circular(999),
+                          child: Container(
+                            height: 36,
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isSelected ? colors.accent : colors.card,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: isSelected ? colors.accent : colors.border,
+                              ),
+                            ),
+                            child: Text(
+                              sev,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: isSelected ? colors.onAccent : colors.text,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Incidents List
+                  if (filteredList.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 40.0),
+                      child: Center(
+                        child: Text(
+                          'No incidents match this filter.',
+                          style: TextStyle(fontSize: 14, color: colors.muted),
+                        ),
+                      ),
+                    )
+                  else
+                    ...filteredList.map((item) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10.0),
+                        child: _buildExactIncidentCard(context, item),
+                      );
+                    }),
+                ],
               ),
             ),
 
-            // Persistent Bottom Navigation Bar
-            const AppBottomNav(currentRoute: 's04'),
+            const AppBottomNav(currentRoute: 'incidents'),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildTabButton(AppColorScheme colors, String label) {
-    final isSelected = _selectedTab == label;
+  Widget _buildExactIncidentCard(BuildContext context, Map<String, dynamic> item) {
+    final colors = context.colors;
+    final isCritical = item['isCritical'] as bool;
+    final id = item['id'] as String;
+
+    Color barColor = isCritical ? colors.critical : colors.warning;
+    Color sevBg = isCritical ? colors.badgeRedBg : colors.badgeAmberBg;
+    Color sevFg = isCritical ? colors.critical : colors.warning;
+
+    Color stBg = colors.surface2;
+    Color stFg = colors.muted;
+
+    final status = item['status'] as String;
+    if (status == 'Awaiting approval') {
+      stBg = colors.badgeAmberBg;
+      stFg = colors.warning;
+    } else if (status == 'Monitoring' || status == 'Acknowledged') {
+      stBg = colors.info.withValues(alpha: 0.14);
+      stFg = colors.info;
+    } else if (status == 'Resolved') {
+      stBg = colors.badgeGreenBg;
+      stFg = colors.success;
+    }
+
     return InkWell(
       onTap: () {
-        if (label == 'History') {
-          Navigator.pushNamed(context, '/incident-history');
-          return;
+        if (id == 'INC-1042') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const S05IncidentDetailsScreen(),
+            ),
+          );
+        } else if (id == 'INC-1041') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const S32Inc1041Screen(),
+            ),
+          );
+        } else if (id == 'INC-1040') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const S33Inc1040Screen(),
+            ),
+          );
+        } else if (id == 'INC-1037') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const S34Pm1037Screen(),
+            ),
+          );
+        } else if (id == 'INC-1033') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const S35Pm1033Screen(),
+            ),
+          );
+        } else if (id == 'INC-1029') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const S36Pm1029Screen(),
+            ),
+          );
         }
-        setState(() {
-          _selectedTab = label;
-        });
       },
-      borderRadius: BorderRadius.circular(99),
+      borderRadius: BorderRadius.circular(16),
       child: Container(
-        height: 40,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        alignment: Alignment.center,
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: isSelected ? colors.teal : Colors.transparent,
-          borderRadius: BorderRadius.circular(99),
-          border: Border.all(
-            color: isSelected ? Colors.transparent : colors.border,
-          ),
+          color: colors.card,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: colors.border),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-            color: isSelected
-                ? (colors.isDark ? const Color(0xFF06202A) : Colors.white)
-                : colors.muted,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCard({required AppColorScheme colors, required Widget child, Color? borderLeftColor}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: borderLeftColor != null
-          ? IntrinsicHeight(
-              child: Row(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Left color bar
+            Container(
+              width: 4,
+              height: 72,
+              decoration: BoxDecoration(
+                color: barColor,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 4,
-                    decoration: BoxDecoration(
-                      color: borderLeftColor,
-                      borderRadius: BorderRadius.circular(2),
+                  Row(
+                    children: [
+                      Text(
+                        id,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          fontFamily: 'JetBrains Mono',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: sevBg,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          item['sev'] as String,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: sevFg,
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        item['time'] as String,
+                        style: TextStyle(fontSize: 12, color: colors.muted),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    item['title'] as String,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: colors.text,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(child: child),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${item['svc']} · Production',
+                        style: TextStyle(fontSize: 13, color: colors.muted),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: stBg,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          status,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: stFg,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
-            )
-          : child,
-    );
-  }
-
-  Widget _buildBadge(String label, Color bg, Color text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: text,
+            ),
+          ],
         ),
       ),
     );
