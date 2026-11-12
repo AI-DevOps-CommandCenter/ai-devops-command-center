@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../widgets/brand_logo.dart';
 import '../widgets/app_bottom_nav.dart';
-import 's04_incidents_screen.dart';
-import 's05_incident_details_screen.dart';
+import '../widgets/app_icons.dart';
 
 class S03OverviewDashboardScreen extends StatelessWidget {
   const S03OverviewDashboardScreen({super.key});
@@ -16,45 +16,103 @@ class S03OverviewDashboardScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            // Top App Bar
+            // Header: Overview + Bell (44x44) + Avatar (44x44)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Overview',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: colors.text,
-                          ),
+                        Row(
+                          children: [
+                            const BrandLogo(size: 34),
+                            const SizedBox(width: 10),
+                            Text(
+                              'Overview',
+                              style: TextStyle(
+                                fontSize: 26,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.52,
+                                color: colors.text,
+                              ),
+                            ),
+                          ],
                         ),
+                        const SizedBox(height: 2),
                         Text(
-                          'Alex Morgan · Production',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: colors.muted,
-                          ),
+                          'Production · Good afternoon, Alex',
+                          style: TextStyle(fontSize: 13, color: colors.muted),
                         ),
                       ],
                     ),
+                  ),
+                  Row(
+                    children: [
+                      // Notifications Bell button (44x44)
+                      InkWell(
+                        onTap: () {
+                          Navigator.pushNamed(context, '/notifications');
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: colors.card,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: colors.border),
+                          ),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              LucideIcon(LucideIconData.bell, size: 20, color: colors.text),
+                              Positioned(
+                                top: 9,
+                                right: 10,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: colors.critical,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: colors.card, width: 2),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+
+                      // Profile AM button (44x44)
+                      InkWell(
+                        onTap: () {
+                          Navigator.pushNamed(context, '/profile');
+                        },
+                        borderRadius: BorderRadius.circular(22),
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: colors.accent,
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            'AM',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: colors.onAccent,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -62,316 +120,633 @@ class S03OverviewDashboardScreen extends StatelessWidget {
 
             // Scrollable Content
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Overall Health Card
-                    _buildCard(
-                      colors: colors,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Overall health',
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                children: [
+                  // 1. INC-1042 Critical Hero Card
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Top badges row
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: colors.criticalSoft,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  LucideIcon(LucideIconData.alertTriangle, size: 13, color: colors.critical, strokeWidth: 2),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Critical',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.critical,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: colors.warningSoft,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                'Awaiting approval',
                                 style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                  color: colors.text,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.warning,
                                 ),
                               ),
-                              _buildBadge('Degraded', colors.badgeAmberBg, colors.amber),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '19 min',
+                              style: TextStyle(fontSize: 13, color: colors.muted),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // Title & Subtitle
+                        Text(
+                          'INC-1042 · payments-api',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontFamily: 'JetBrains Mono',
+                            color: colors.muted,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Elevated errors after deployment',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: colors.text,
+                          ),
+                        ),
+
+                        const SizedBox(height: 8),
+
+                        // Description
+                        RichText(
+                          text: TextSpan(
+                            style: TextStyle(fontSize: 14, color: colors.muted),
+                            children: [
+                              const TextSpan(text: 'AI found a probable cause and recommends '),
+                              TextSpan(
+                                text: 'rolling back to v2.8.0',
+                                style: TextStyle(fontWeight: FontWeight.w700, color: colors.text),
+                              ),
+                              const TextSpan(text: '.'),
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '1 of 6 services degraded',
-                            style: TextStyle(fontSize: 12, color: colors.muted),
+                        ),
+
+                        const SizedBox(height: 14),
+
+                        // Actions buttons row
+                        Row(
+                          children: [
+                            Expanded(
+                              child: SizedBox(
+                                height: 48,
+                                child: OutlinedButton(
+                                  onPressed: () {
+                                    Navigator.pushNamed(context, '/incident-details');
+                                  },
+                                  style: OutlinedButton.styleFrom(
+                                    backgroundColor: colors.card,
+                                    side: BorderSide(color: colors.border),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'Details',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: SizedBox(
+                                height: 48,
+                                child: ElevatedButton(
+                                  onPressed: () {
+                                    Navigator.pushNamed(context, '/recommended-action');
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: colors.accent,
+                                    foregroundColor: colors.onAccent,
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Review action',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // 2. Incidents by severity
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'INCIDENTS BY SEVERITY',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.52,
+                          color: colors.muted,
+                        ),
+                      ),
+                      InkWell(
+                        onTap: () {
+                          Navigator.pushNamed(context, '/incidents');
+                        },
+                        child: Text(
+                          'View all',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: colors.accent,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // 3-column severity cards
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildSeverityCard(
+                          context,
+                          title: 'Critical',
+                          dotColor: colors.critical,
+                          count: '1',
+                          sub: 'open',
+                          onTap: () {
+                            Navigator.pushNamed(context, '/incidents');
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildSeverityCard(
+                          context,
+                          title: 'Warning',
+                          dotColor: colors.warning,
+                          count: '2',
+                          sub: 'open',
+                          onTap: () {
+                            Navigator.pushNamed(context, '/incidents');
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildSeverityCard(
+                          context,
+                          title: 'Resolved',
+                          dotColor: colors.ok,
+                          count: '3',
+                          sub: 'last 7 days',
+                          onTap: () {
+                            Navigator.pushNamed(context, '/incidents');
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // 2. Service health
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'SERVICE HEALTH',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.52,
+                          color: colors.muted,
+                        ),
+                      ),
+                      InkWell(
+                        onTap: () {
+                          Navigator.pushNamed(context, '/services');
+                        },
+                        child: Text(
+                          '6 services',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: colors.accent,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // Service health bar card
+                  InkWell(
+                    onTap: () {
+                      Navigator.pushNamed(context, '/services');
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Column(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: SizedBox(
+                              height: 8,
+                              child: Row(
+                                children: [
+                                  Expanded(flex: 3, child: Container(color: colors.ok)),
+                                  const SizedBox(width: 2),
+                                  Expanded(flex: 2, child: Container(color: colors.warning)),
+                                  const SizedBox(width: 2),
+                                  Expanded(flex: 1, child: Container(color: colors.critical)),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '3 healthy  2 warning  1 degraded',
+                              style: TextStyle(fontSize: 13, color: colors.muted),
+                            ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 10),
+                  ),
 
-                    // Metrics Grid (2 columns x 3 rows)
-                    GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      crossAxisSpacing: 10,
-                      mainAxisSpacing: 10,
-                      childAspectRatio: 1.55,
-                      children: [
-                        _buildMetricCard(colors, 'Critical', '1', color: colors.red),
-                        _buildMetricCard(colors, 'Warning', '2', color: colors.amber),
-                        _buildMetricCard(colors, 'CPU', '71%'),
-                        _buildMetricCard(colors, 'Memory', '64%'),
-                        _buildMetricCard(colors, 'Error rate', '12.4%', color: colors.red),
-                        _buildMetricCard(colors, 'P95 latency', '2.4 s', color: colors.red),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
+                  const SizedBox(height: 14),
 
-                    // Pending Approval Card
-                    InkWell(
-                      onTap: () {
-                        Navigator.pushNamed(context, '/approve-action');
-                      },
-                      borderRadius: BorderRadius.circular(14),
-                      child: _buildCard(
-                        colors: colors,
-                        borderLeftColor: colors.amber,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '1 approval pending',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: colors.text,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Roll back payments-api to v2.8.0',
-                              style: TextStyle(fontSize: 12, color: colors.muted),
-                            ),
-                          ],
+                  // 3. PAYMENTS-API · LAST HOUR
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'PAYMENTS-API · LAST HOUR',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.52,
+                          color: colors.muted,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Recent Incidents Section Header
-                    Text(
-                      'Recent incidents',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: colors.text,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Incident 1: INC-1042 (Critical)
-                    InkWell(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const S05IncidentDetailsScreen(
-                              incidentId: 'INC-1042',
-                              incidentTitle: 'Elevated errors after deployment',
-                            ),
+                      InkWell(
+                        onTap: () {
+                          Navigator.pushNamed(context, '/metrics');
+                        },
+                        child: Text(
+                          'Metrics',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: colors.accent,
                           ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(14),
-                      child: _buildIncidentCard(
-                        colors: colors,
-                        id: 'INC-1042',
-                        title: 'Elevated errors after deployment',
-                        service: 'payments-api · Production',
-                        severity: 'Critical',
-                        severityBg: colors.badgeRedBg,
-                        severityColor: colors.red,
-                        status: 'Investigating',
-                        statusBg: colors.badgeAmberBg,
-                        statusColor: colors.amber,
-                        borderLeftColor: colors.red,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
+                    ],
+                  ),
 
-                    // Incident 2: INC-1041 (Warning)
-                    InkWell(
-                      onTap: () {
-                        Navigator.push(
+                  const SizedBox(height: 8),
+
+                  // Row 1: Error rate & P95 latency
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetricCard(
                           context,
-                          MaterialPageRoute(
-                            builder: (context) => const S05IncidentDetailsScreen(
-                              incidentId: 'INC-1041',
-                              incidentTitle: 'Queue backlog growing',
-                            ),
-                          ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(14),
-                      child: _buildIncidentCard(
-                        colors: colors,
-                        id: 'INC-1041',
-                        title: 'Queue backlog growing',
-                        service: 'orders-worker · Production',
-                        severity: 'Warning',
-                        severityBg: colors.badgeAmberBg,
-                        severityColor: colors.amber,
-                        status: 'Monitoring',
-                        statusBg: colors.badgeAmberBg,
-                        statusColor: colors.amber,
-                        borderLeftColor: colors.amber,
+                          title: 'Error rate',
+                          value: '12.4%',
+                          valueColor: colors.critical,
+                          sub: 'Target below 1%',
+                          points: const [
+                            Offset(2.0, 33.0),
+                            Offset(15.6, 33.0),
+                            Offset(29.2, 32.8),
+                            Offset(42.8, 33.0),
+                            Offset(56.4, 33.0),
+                            Offset(70.0, 26.8),
+                            Offset(83.6, 15.2),
+                            Offset(97.2, 8.2),
+                            Offset(110.8, 5.0),
+                            Offset(124.4, 5.7),
+                            Offset(138.0, 5.0),
+                          ],
+                          strokeColor: colors.critical,
+                          onTap: () {
+                            Navigator.pushNamed(context, '/metrics');
+                          },
+                        ),
                       ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildMetricCard(
+                          context,
+                          title: 'P95 latency',
+                          value: '2.4 s',
+                          valueColor: colors.critical,
+                          sub: 'Target below 300 ms',
+                          points: const [
+                            Offset(2.0, 33.0),
+                            Offset(15.6, 33.0),
+                            Offset(29.2, 33.0),
+                            Offset(42.8, 33.0),
+                            Offset(56.4, 33.0),
+                            Offset(70.0, 27.1),
+                            Offset(83.6, 15.7),
+                            Offset(97.2, 8.6),
+                            Offset(110.8, 5.0),
+                            Offset(124.4, 5.7),
+                            Offset(138.0, 5.0),
+                          ],
+                          strokeColor: colors.critical,
+                          onTap: () {
+                            Navigator.pushNamed(context, '/metrics');
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // Row 2: CPU & Memory
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetricCard(
+                          context,
+                          title: 'CPU',
+                          value: '71%',
+                          valueColor: colors.warning,
+                          sub: 'c5.xlarge · 4 vCPU',
+                          points: const [
+                            Offset(2.0, 33.0),
+                            Offset(15.6, 30.1),
+                            Offset(29.2, 31.1),
+                            Offset(42.8, 25.3),
+                            Offset(56.4, 20.4),
+                            Offset(70.0, 12.7),
+                            Offset(83.6, 7.9),
+                            Offset(97.2, 6.0),
+                            Offset(110.8, 5.0),
+                            Offset(124.4, 6.0),
+                            Offset(138.0, 5.0),
+                          ],
+                          strokeColor: colors.warning,
+                          onTap: () {
+                            Navigator.pushNamed(context, '/metrics');
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildMetricCard(
+                          context,
+                          title: 'Memory',
+                          value: '64%',
+                          valueColor: colors.info,
+                          sub: '10.2 of 16 GB',
+                          points: const [
+                            Offset(2.0, 33.0),
+                            Offset(15.6, 28.3),
+                            Offset(29.2, 23.7),
+                            Offset(42.8, 23.7),
+                            Offset(56.4, 19.0),
+                            Offset(70.0, 14.3),
+                            Offset(83.6, 9.7),
+                            Offset(97.2, 9.7),
+                            Offset(110.8, 5.0),
+                            Offset(124.4, 5.0),
+                            Offset(138.0, 5.0),
+                          ],
+                          strokeColor: colors.info,
+                          onTap: () {
+                            Navigator.pushNamed(context, '/metrics');
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Footer
+                  Text(
+                    'Group 33 ·',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colors.muted,
                     ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: 0),
+    );
+  }
 
-            // Persistent Bottom Navigation Bar
-            const AppBottomNav(currentRoute: 's03'),
+  Widget _buildSeverityCard(
+    BuildContext context, {
+    required String title,
+    required Color dotColor,
+    required String count,
+    required String sub,
+    required VoidCallback onTap,
+  }) {
+    final colors = context.colors;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: dotColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: dotColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              count,
+              style: TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.w700,
+                color: colors.text,
+              ),
+            ),
+            Text(
+              sub,
+              style: TextStyle(fontSize: 12, color: colors.muted),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCard({
-    required AppColorScheme colors,
-    required Widget child,
-    Color? borderLeftColor,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: borderLeftColor != null
-          ? IntrinsicHeight(
-              child: Row(
-                children: [
-                  Container(
-                    width: 4,
-                    decoration: BoxDecoration(
-                      color: borderLeftColor,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(child: child),
-                ],
-              ),
-            )
-          : child,
-    );
-  }
-
-  Widget _buildMetricCard(AppColorScheme colors, String label, String value, {Color? color}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.25) : const Color.fromRGBO(15, 27, 51, 0.05),
-            blurRadius: 3,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            label,
-            style: TextStyle(fontSize: 12, color: colors.muted),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              color: color ?? colors.text,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildIncidentCard({
-    required AppColorScheme colors,
-    required String id,
+  Widget _buildMetricCard(
+    BuildContext context, {
     required String title,
-    required String service,
-    required String severity,
-    required Color severityBg,
-    required Color severityColor,
-    required String status,
-    required Color statusBg,
-    required Color statusColor,
-    required Color borderLeftColor,
+    required String value,
+    required Color valueColor,
+    required String sub,
+    required List<Offset> points,
+    required Color strokeColor,
+    required VoidCallback onTap,
   }) {
-    return _buildCard(
-      colors: colors,
-      borderLeftColor: borderLeftColor,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                id,
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: colors.text),
+    final colors = context.colors;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: colors.card,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: TextStyle(fontSize: 13, color: colors.muted)),
+            const SizedBox(height: 2),
+            Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: valueColor)),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 36,
+              width: double.infinity,
+              child: CustomPaint(
+                painter: _SparklinePainter(points: points, color: strokeColor),
               ),
-              _buildBadge(severity, severityBg, severityColor),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            style: TextStyle(fontSize: 13, color: colors.text),
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                service,
-                style: TextStyle(fontSize: 12, color: colors.muted),
-              ),
-              _buildBadge(status, statusBg, statusColor),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBadge(String label, Color bg, Color text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: text,
+            ),
+            const SizedBox(height: 6),
+            Text(sub, style: TextStyle(fontSize: 12, color: colors.muted), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ],
         ),
       ),
     );
   }
+}
+
+class _SparklinePainter extends CustomPainter {
+  final List<Offset> points;
+  final Color color;
+
+  _SparklinePainter({required this.points, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.isEmpty) return;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final path = Path();
+    for (int i = 0; i < points.length; i++) {
+      final x = points[i].dx * (size.width / 140.0);
+      final y = points[i].dy * (size.height / 36.0);
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _SparklinePainter oldDelegate) => false;
 }
