@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'theme/app_colors.dart';
+import 'screens/s00_splash_screen.dart';
 import 'screens/s01_welcome_screen.dart';
 import 'screens/s02_signin_screen.dart';
 import 'screens/s03_overview_dashboard_screen.dart';
@@ -28,6 +29,23 @@ import 'screens/s25_notifications_screen.dart';
 import 'screens/s26_integrations_screen.dart';
 import 'screens/s27_notification_preferences_screen.dart';
 import 'screens/s28_profile_screen.dart';
+import 'screens/s29_forgot_password_screen.dart';
+import 'screens/s30_search_screen.dart';
+import 'screens/s31_reject_action_screen.dart';
+import 'screens/s32_inc_1041_screen.dart';
+import 'screens/s33_inc_1040_screen.dart';
+import 'screens/s34_pm_1037_screen.dart';
+import 'screens/s35_pm_1033_screen.dart';
+import 'screens/s36_pm_1029_screen.dart';
+import 'screens/s37_team_screen.dart';
+import 'screens/s38_playbook_edit_screen.dart';
+import 'screens/s39_audit_log_screen.dart';
+import 'screens/s40_loading_screen.dart';
+import 'screens/s41_all_clear_screen.dart';
+import 'screens/s42_logs_error_screen.dart';
+import 'screens/s43_offline_screen.dart';
+import 'screens/s44_rollback_failed_screen.dart';
+import 'screens/s45_brand_screen.dart';
 
 void main() {
   runApp(const DevOpsCommandCenterApp());
@@ -48,11 +66,12 @@ class DevOpsCommandCenterApp extends StatelessWidget {
           theme: ThemeData(
             brightness: Brightness.light,
             scaffoldBackgroundColor: AppColors.light.bg,
-            fontFamily: 'Segoe UI',
+            fontFamily: 'Inter',
+            fontFamilyFallback: const ['Segoe UI', '-apple-system', 'Roboto', 'sans-serif'],
             colorScheme: ColorScheme.fromSeed(
-              seedColor: AppColors.light.teal,
-              primary: AppColors.light.teal,
-              background: AppColors.light.bg,
+              seedColor: AppColors.light.accent,
+              primary: AppColors.light.accent,
+              surface: AppColors.light.card,
               brightness: Brightness.light,
             ),
             useMaterial3: false,
@@ -60,15 +79,40 @@ class DevOpsCommandCenterApp extends StatelessWidget {
           darkTheme: ThemeData(
             brightness: Brightness.dark,
             scaffoldBackgroundColor: AppColors.dark.bg,
-            fontFamily: 'Segoe UI',
+            fontFamily: 'Inter',
+            fontFamilyFallback: const ['Segoe UI', '-apple-system', 'Roboto', 'sans-serif'],
             colorScheme: ColorScheme.fromSeed(
-              seedColor: AppColors.dark.teal,
-              primary: AppColors.dark.teal,
-              background: AppColors.dark.bg,
+              seedColor: AppColors.dark.accent,
+              primary: AppColors.dark.accent,
+              surface: AppColors.dark.card,
               brightness: Brightness.dark,
             ),
             useMaterial3: false,
           ),
+          builder: (context, child) {
+            return Container(
+              color: const Color(0xFFE5E7EB),
+              alignment: Alignment.center,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 390),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: ThemeController.instance.isDark
+                        ? AppColors.dark.bg
+                        : AppColors.light.bg,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.08),
+                        blurRadius: 32,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ClipRect(child: child ?? const SizedBox.shrink()),
+                ),
+              ),
+            );
+          },
           initialRoute: '/',
           onGenerateRoute: (settings) {
             if (settings.name == '/assistant') {
@@ -80,9 +124,13 @@ class DevOpsCommandCenterApp extends StatelessWidget {
             return null;
           },
           routes: {
-            '/': (context) => const S01WelcomeScreen(),
+            '/': (context) => const S00SplashScreen(),
+            '/splash': (context) => const S00SplashScreen(),
+            '/welcome': (context) => const S01WelcomeScreen(),
             '/signin': (context) => const S02SignInScreen(),
+            '/forgot-password': (context) => const S29ForgotPasswordScreen(),
             '/dashboard': (context) => const S03OverviewDashboardScreen(),
+            '/search': (context) => const S30SearchScreen(),
             '/incidents': (context) => const S04IncidentsScreen(),
             '/incident-details': (context) => const S05IncidentDetailsScreen(),
             '/investigation-progress': (context) => const S06AiInvestigationProgressScreen(),
@@ -98,6 +146,7 @@ class DevOpsCommandCenterApp extends StatelessWidget {
             '/playbooks': (context) => const S16RemediationPlaybooksScreen(),
             '/recommended-action': (context) => const S17RecommendedActionScreen(),
             '/approve-action': (context) => const S18ApproveActionScreen(),
+            '/reject-action': (context) => const S31RejectActionScreen(),
             '/execution-progress': (context) => const S19ExecutionProgressScreen(),
             '/recovery-verification': (context) => const S20RecoveryVerificationScreen(),
             '/postmortem': (context) => const S21PostmortemReportScreen(),
@@ -107,6 +156,20 @@ class DevOpsCommandCenterApp extends StatelessWidget {
             '/integrations': (context) => const S26IntegrationsScreen(),
             '/preferences': (context) => const S27NotificationPreferencesScreen(),
             '/profile': (context) => const S28ProfileScreen(),
+            '/team': (context) => const S37TeamScreen(),
+            '/playbook-edit': (context) => const S38PlaybookEditScreen(),
+            '/audit-log': (context) => const S39AuditLogScreen(),
+            '/loading': (context) => const S40LoadingScreen(),
+            '/all-clear': (context) => const S41AllClearScreen(),
+            '/logs-error': (context) => const S42LogsErrorScreen(),
+            '/offline': (context) => const S43OfflineScreen(),
+            '/rollback-failed': (context) => const S44RollbackFailedScreen(),
+            '/brand': (context) => const S45BrandScreen(),
+            '/inc-1041': (context) => const S32Inc1041Screen(),
+            '/inc-1040': (context) => const S33Inc1040Screen(),
+            '/pm-1037': (context) => const S34Pm1037Screen(),
+            '/pm-1033': (context) => const S35Pm1033Screen(),
+            '/pm-1029': (context) => const S36Pm1029Screen(),
           },
         );
       },
