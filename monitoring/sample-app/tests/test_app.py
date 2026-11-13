@@ -157,3 +157,11 @@ def test_json_log_line_has_fields_for_loki():
     assert line["msg"] == "inventory call failed"
     assert line["route"] == ORDER_ROUTE
     assert "ValueError: boom" in line["exc"]
+
+
+def test_uvicorn_startup_lines_do_not_look_like_errors():
+    record = logging.LogRecord("uvicorn.error", logging.INFO, __file__, 1, "Application startup complete.", None, None)
+
+    line = JsonFormatter("sample-app").format(record)
+
+    assert "error" not in line.lower()

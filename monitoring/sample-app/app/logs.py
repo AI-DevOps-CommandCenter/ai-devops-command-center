@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 
 # Extra fields copied into the JSON line when a log call passes them.
 EXTRA_FIELDS = ("method", "route", "status", "duration_ms", "mode", "rate", "open")
+# uvicorn logs its normal startup lines under "uvicorn.error"; the word "error"
+# would make them match the error filter of n8n workflow 02.
+LOGGER_ALIASES = {"uvicorn.error": "uvicorn"}
 
 
 class JsonFormatter(logging.Formatter):
@@ -19,7 +22,7 @@ class JsonFormatter(logging.Formatter):
             "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(timespec="milliseconds"),
             "level": record.levelname.lower(),
             "service": self.service,
-            "logger": record.name,
+            "logger": LOGGER_ALIASES.get(record.name, record.name),
             "msg": record.getMessage(),
         }
         for field in EXTRA_FIELDS:
