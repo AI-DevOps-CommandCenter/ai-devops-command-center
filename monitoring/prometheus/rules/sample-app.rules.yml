@@ -1,0 +1,27 @@
+# Alerts sent to n8n workflow 01 (Alert Intake). Workflow 01 needs the labels
+# `alertname` and `service` (value matching ^[A-Za-z0-9_.:-]{1,100}$); `severity`
+# critical maps to incident severity critical.
+groups:
+  - name: service-health
+    rules:
+      - alert: HighErrorRate
+        # Same ratio as PROM_QUERY_ERROR_RATE in n8n, grouped by service.
+        expr: |
+          sum by (service) (rate(http_requests_total{status=~"5.."}[5m]))
+            / sum by (service) (rate(http_requests_total[5m]))
+            > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error rate above 5% on {{ $labels.service }}"
+          description: "5xx responses are {{ $value | humanizePercentage }} of requests over the last 5 minutes."
+
+      - alert: ServiceDown
+        expr: up{service!=""} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }} is down"
+          description: "Prometheus cannot scrape {{ $labels.instance }}."

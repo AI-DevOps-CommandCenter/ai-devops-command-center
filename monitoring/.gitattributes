@@ -1,0 +1,2 @@
+# Configs and scripts are read inside Linux containers: LF on every platform.
+* text=auto eol=lf
