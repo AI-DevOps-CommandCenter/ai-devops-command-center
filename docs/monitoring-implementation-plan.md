@@ -73,9 +73,9 @@ These follow the `D-N8N-x` style. Each one goes into the `PLAN.md` decision log 
 | ID | Decision | Proposal | Why | Needs |
 |---|---|---|---|---|
 | D-MON-1 | Service label name, everywhere | `service` in Prometheus, Loki and alerts. Value `sample-app` | One label name means `LOKI_SERVICE_LABEL`, `PROM_SERVICE_LABEL` and `ALERT_SERVICE_LABEL` are all `service`. It matches `ALERT_SERVICE_LABEL` and `LOKI_SERVICE_LABEL` defaults already. The scrape `job` is also set to `sample-app` so the n8n default `job` still works | Tharindu, Vishwa |
-| D-MON-2 | Sample app language | Python (FastAPI + `prometheus_client`), single worker | Dynarq rule: Python for backend services. `prometheus_client` on Linux exposes `process_cpu_seconds_total` and `process_resident_memory_bytes`, the names workflow 03 already defaults to. A single worker avoids multiprocess metric mode | Team note only |
+| D-MON-2 | Sample app language | Python (FastAPI + `prometheus_client`), single worker | Python is the team's choice for backend services. `prometheus_client` on Linux exposes `process_cpu_seconds_total` and `process_resident_memory_bytes`, the names workflow 03 already defaults to. A single worker avoids multiprocess metric mode | Team note only |
 | D-MON-3 | How n8n and the monitoring stack reach each other | **Tested 13 Nov:** `host.docker.internal` reaches ports published on `127.0.0.1` on Docker Desktop for Windows, in both directions (Alertmanager to n8n, n8n to Prometheus, Loki and the executor). No change to `automation/docker-compose.yml` needed. On a Linux host this is expected **not** to work (`host-gateway` is the bridge address, not loopback; not tested): use a shared external Docker network there | n8n is published on `127.0.0.1` only (N-5) | Vishwa (only for a Linux host) |
-| D-MON-4 | Promtail or Grafana Alloy | Use Promtail as assigned, pinned to `3.6.11`. Docker Hub shows no Promtail release after `3.6.11` (May 2026) while Loki continues (`3.7.9`, Oct 2026), consistent with the announced move to Alloy. Plan a move to Alloy before any long-lived deployment | The task names Promtail; switching shippers changes no n8n contract as long as the `service` label stays | Founder / owner |
+| D-MON-4 | Promtail or Grafana Alloy | Use Promtail as assigned, pinned to `3.6.11`. Docker Hub shows no Promtail release after `3.6.11` (May 2026) while Loki continues (`3.7.9`, Oct 2026), consistent with the announced move to Alloy. Plan a move to Alloy before any long-lived deployment | The task names Promtail; switching shippers changes no n8n contract as long as the `service` label stays | Owner |
 | D-MON-5 | Error-rate threshold and alert timing | Fire when 5xx ratio > 5% over 5m, `for: 2m`. `PROM_THRESHOLD_ERROR_RATE=0.05` | Same value as `automation/test-data/sample-alert.json` ("Error rate above 5%"), so the demo and test data agree | Tharindu |
 | D-MON-6 | Executor scope for the demo | Phase A: `restart` and `circuit_breaker` real. Phase B: `rollback` and `scale` real against the sample app only. Until Phase B is done, those 2 answer `422 unsupported` | Restart is the main demo path. Rollback and scale need extra sample-app setup (2 image tags, a replica container) | Owner |
 | D-MON-7 | Executor nonce store | In-process store guarded by a lock, plus idempotency on `playbook_run_id` | The executor is one process, so a lock makes the nonce check atomic and avoids the KI-1 problem n8n has with static data | Vishwa (for the 06 side) |
@@ -250,7 +250,7 @@ Location: `infrastructure/playbooks/executor/`, Python.
 - The allowlist (`service_name` to container name and allowed actions) is a config file in the repo, read at startup. Nothing else can be touched.
 - The Docker socket gives root-level control of the host. Mitigations: the executor is published on `127.0.0.1:9095` only (n8n reaches it through `host.docker.internal`, D-MON-3), runs as non-root uid 10001 with socket access through group 0, and only gets and restarts the allowlisted container. Optional hardening, not done: a Docker socket proxy that allows only the restart call.
 - Every request is logged: what was asked, what ran, result, duration. No signatures or secrets in logs.
-- Every network call has a timeout and a retry limit (Dynarq rule 6).
+- Every network call has a timeout and a retry limit.
 
 **n8n side** (Vishwa): replace the 4 `Execute: <action>` Code nodes in workflow 06 with a signed HTTP Request to the executor, as the node comment already describes, and switch `REMEDIATION_EXECUTION_MODE` to a real mode. Keshan supplies the URL, the secret (out of band) and a working test request.
 
@@ -338,7 +338,7 @@ Grafana dashboards, hosted or shared deployment, HTTPS reverse proxy for n8n, th
 
 ## 8. Dependencies and cost
 
-Docker images for Prometheus, Alertmanager, Loki and Promtail; Python packages `fastapi`, `uvicorn`, `prometheus_client`, `docker`, `pytest`, `httpx`. All are free and open source. No paid service, API or trial is needed. If that changes, ask the founder first (Dynarq rule 8).
+Docker images for Prometheus, Alertmanager, Loki and Promtail; Python packages `fastapi`, `uvicorn`, `prometheus_client`, `docker`, `pytest`, `httpx`. All are free and open source. No paid service, API or trial is needed. If that changes, get approval before adding it.
 
 ## 9. Readiness report to the owner (13 Nov 2026)
 
