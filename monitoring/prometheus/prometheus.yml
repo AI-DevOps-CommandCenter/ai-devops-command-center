@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+# Every target gets a `service` label. It is the label n8n uses
+# (PROM_SERVICE_LABEL=service) and it is also on `up`, which workflow 07 queries.
+# The job name is the same value, so queries on `job` work as well.
+scrape_configs:
+  - job_name: sample-app
+    static_configs:
+      - targets: ["sample-app:8000"]
+        labels:
+          service: sample-app
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          service: prometheus
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+        labels:
+          service: alertmanager
+
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+        labels:
+          service: loki

@@ -1,0 +1,59 @@
+# promtool unit tests for rules/sample-app.rules.yml:
+#   docker run --rm --entrypoint promtool -v "$PWD/prometheus:/etc/prometheus:ro" \
+#     prom/prometheus:v3.15.1 test rules /etc/prometheus/tests/rules.test.yml
+rule_files:
+  - ../rules/sample-app.rules.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: 10% errors fires HighErrorRate with the labels workflow 01 needs
+    interval: 15s
+    input_series:
+      - series: 'http_requests_total{service="sample-app",route="/api/orders",status="200"}'
+        values: "0+90x40"
+      - series: 'http_requests_total{service="sample-app",route="/api/orders",status="500"}'
+        values: "0+10x40"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HighErrorRate
+        exp_alerts: []  # still pending: `for: 2m`
+      - eval_time: 5m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels:
+              service: sample-app
+              severity: critical
+            exp_annotations:
+              summary: "Error rate above 5% on sample-app"
+              description: "5xx responses are 10% of requests over the last 5 minutes."
+
+  - name: 4% errors stays below the threshold
+    interval: 15s
+    input_series:
+      - series: 'http_requests_total{service="sample-app",route="/api/orders",status="200"}'
+        values: "0+96x40"
+      - series: 'http_requests_total{service="sample-app",route="/api/orders",status="500"}'
+        values: "0+4x40"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: HighErrorRate
+        exp_alerts: []
+
+  - name: failed scrape fires ServiceDown after 1 minute
+    interval: 15s
+    input_series:
+      - series: 'up{job="sample-app",service="sample-app",instance="sample-app:8000"}'
+        values: "1 1 0 0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels:
+              job: sample-app
+              service: sample-app
+              instance: sample-app:8000
+              severity: critical
+            exp_annotations:
+              summary: "sample-app is down"
+              description: "Prometheus cannot scrape sample-app:8000."
