@@ -316,11 +316,11 @@ async function main() {
   const disabled = await startServer({ ...ENV, REMEDIATION_EXECUTION_MODE: 'disabled' });
   check('n8n restarted with REMEDIATION_EXECUTION_MODE=disabled and webhooks registered', disabled.up && disabled.ready, 'last probe: ' + describeProbe(disabled.lastProbe) + '\n' + disabled.log().slice(-1500));
   // Readiness only probes it-logs; on a restart, /webhook/remediation can be
-  // registered a few seconds later (seen once as a 404). Wait for it: an
-  // unsigned probe is rejected by 06 (401) before anything is called.
+  // registered a few seconds later (seen once as a 404). Wait until an
+  // unsigned probe gets 06's own 401 (nothing is called before that check).
   for (let i = 0; i < 30 && disabled.up && disabled.ready; i++) {
     const res = await fetch(`http://127.0.0.1:${PORT}/webhook/remediation`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => null);
-    if (res && res.status !== 404) break;
+    if (res && res.status === 401) break; // registered: 06 rejects the unsigned probe
     await sleep(2000);
   }
   takeCalls();
