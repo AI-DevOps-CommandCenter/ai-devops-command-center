@@ -315,6 +315,15 @@ async function main() {
   await stopServer(server);
   const disabled = await startServer({ ...ENV, REMEDIATION_EXECUTION_MODE: 'disabled' });
   check('n8n restarted with REMEDIATION_EXECUTION_MODE=disabled and webhooks registered', disabled.up && disabled.ready, 'last probe: ' + describeProbe(disabled.lastProbe) + '\n' + disabled.log().slice(-1500));
+  // Readiness only probes it-logs; on a restart, /webhook/remediation can be
+  // registered a few seconds later (seen once as a 404). Wait for it: an
+  // unsigned probe is rejected by 06 (401) before anything is called.
+  for (let i = 0; i < 30 && disabled.up && disabled.ready; i++) {
+    const res = await fetch(`http://127.0.0.1:${PORT}/webhook/remediation`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => null);
+    if (res && res.status !== 404) break;
+    await sleep(2000);
+  }
+  takeCalls();
   if (disabled.up && disabled.ready) await disabledModeChecks({ mocks, setScenario, takeCalls, INC });
 
   finish(disabled.server, mocks);
@@ -366,7 +375,7 @@ async function disabledModeChecks({ mocks, setScenario, takeCalls, INC }) {
   const r = await post('remediation', s.raw, s.headers);
   const msg = messageOf(r) || jsonField(r, 'message') || '';
   check('BD-5 disabled: valid signed request -> HTTP 503', r.status === 503, r);
-  check('BD-5 disabled: response says execution is not available and the run was not started', jsonField(r, 'accepted') === false && /execution integration is not available/i.test(msg) && /not started/i.test(msg), r);
+  check('BD-5 disabled: response says execution is not available and the run was not started', jsonField(r, 'accepted') === false && /execution is not available/i.test(msg) && /not started/i.test(msg), r);
   await sleep(3000); // nothing may happen after the response
   const backendCalls = takeCalls().filter((c) => c.port === 'backend');
   const startCalls = backendCalls.filter((c) => c.path === '/api/machine/playbook-runs/' + run + '/start');

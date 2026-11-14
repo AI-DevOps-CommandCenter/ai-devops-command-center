@@ -124,7 +124,10 @@ All workflows use **09 – Error Handler** as their error workflow.
 | Check start result | Code | Action, incident and status come from the **database** answer. A mismatch with the webhook → started but rejected. Timeout / connection error / 5xx → `soft_failure: start_unconfirmed`; 401 / 503 → `start_failed`; 409 / 404 / 400 are silent. |
 | Run started? → Respond 202 / Respond refused | IF, Respond | 202 accepted, or 409/404/400/502 |
 | Action type | Switch | restart / rollback / scale / circuit_breaker / fallback `unsupported` |
-| Execute: <action> ×4 | Code | **BLOCKED** (no executor): `simulate` returns a marked simulated success; otherwise failed |
+| Execute: <action> ×4 | Code | `executor`: signs `POST /v1/execute` { action, service_name (database copy), playbook_run_id } with `EXECUTOR_SIGNING_SECRET`; no valid service_name → failed, nothing sent. `simulate`: a marked simulated success |
+| Call executor? | IF | `execute_via_executor` → call the executor; otherwise straight to completion |
+| Executor: execute | HTTP Request | `POST {EXECUTOR_URL}/v1/execute`, timeout `EXECUTOR_TIMEOUT_MS` (90 s), full response, never error, **no automatic retry** |
+| Check executor result | Code | 2xx + `executed: true` → `success`; anything else, timeout or connection error → `failed` with a reason. Request headers and signature are never copied |
 | Started but mismatched? → Unsupported or rejected action | IF, Code | A run that started but is not trusted is completed as **failed** |
 | Sign complete request → Backend: complete run → Check completion | Code, HTTP, Code | `POST …/complete` with the same execution id. N-1: every attempt is signed again (new nonce). Retried: timeout, connection error, 5xx (max 3 attempts); never 4xx. A 409 "The run is <status we sent>, not running." after an ambiguous attempt = completed (`completion_confirmed_by: run_state`). After the last failure → `soft_failure: completion_failed`. |
 | Retry completion? → Wait before completion retry | IF, Wait | `COMPLETE_RETRY_BASE_SECONDS × 2^(attempt−1)` (2 s, 4 s), then back to *Sign complete request* |

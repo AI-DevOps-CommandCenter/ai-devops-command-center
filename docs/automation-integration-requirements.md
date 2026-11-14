@@ -60,7 +60,7 @@ What the backend must send, and what workflow 06 answers. Source of truth: `auto
 | 502 | Backend `/start` timed out, connection error, 5xx, 401 or 503: start unconfirmed or misconfigured (N-2 notification) | `accepted: false` |
 | 503 | `MACHINE_SIGNING_SECRET` missing/short in n8n (`…not configured…`), **or** execution mode `disabled` | `accepted: false` + reason |
 
-**Disabled execution (default)**: with `REMEDIATION_EXECUTION_MODE` unset or `disabled`, a fully valid signed request gets **503** with `Remediation execution integration is not available (BLOCKED: no playbook executor). The run was not started.` The backend `/start` is **not** called and the run stays `approved`. Only `simulate` (tests and demo rehearsal) continues. The nonce of that request **is** consumed: a later attempt must be signed again with a new nonce.
+**Disabled execution (default)**: with `REMEDIATION_EXECUTION_MODE` unset or `disabled`, a fully valid signed request gets **503** with `Remediation execution is not available (REMEDIATION_EXECUTION_MODE is disabled or the executor is not configured). The run was not started.` The backend `/start` is **not** called and the run stays `approved`. Only `executor` (configured) and `simulate` (tests and demo rehearsal) continue. The nonce of that request **is** consumed: a later attempt must be signed again with a new nonce.
 
 **Tests (n8n side, all against mocks or fakes)**
 - `npm run test:interop:remediation`: requests signed by the backend's real `buildSignedHeaders()` checked by 06's real verifier: valid → accepted; wrong bytes/path/secret, forged signature, each missing header, expired timestamp, bad nonce → 401; extra field → 400; replay → 409; missing secret → 503; disabled → 503 and routed to "Respond 503", never to "Sign start request".
@@ -92,16 +92,19 @@ Some failures don't crash a workflow (it answers normally) but need an operator.
 
 One notification per kind per execution (three alerts with the AI down = one message). The message is short and redacted (no request, headers, signature, payload or URL). Crashes still reach 09 through each workflow's *Error workflow* setting, unchanged. Whether n8n runs the error workflow of a crashed **sub-workflow** has not been verified yet (real-service test).
 
-## 3. Execution mechanism (BLOCKED)
+## 3. Execution mechanism (executor mode, 14 Nov 2026)
 
-The project has **no playbook executor** yet (Gantt tasks 30–31, `infrastructure/playbooks/`). Workflow 06 therefore:
+The playbook executor (Keshan, `infrastructure/playbooks/executor`, branch `feature/monitoring`) exists: `POST /v1/execute` with `{ action, service_name, playbook_run_id }`, HMAC-signed with its own `EXECUTOR_SIGNING_SECRET`. Workflow 06 never executes shell commands and never takes a command from the webhook (unknown fields → 400) or from the AI. `REMEDIATION_EXECUTION_MODE`:
 
-- does not execute shell commands;
-- does not accept commands from the webhook (unknown fields → 400) or from the AI;
-- with `REMEDIATION_EXECUTION_MODE=disabled` (the default), answers **503 before starting the run**, so no run is left "running";
-- with `REMEDIATION_EXECUTION_MODE=simulate` (tests and demo rehearsal only), records a result marked `"simulated": true, "executed": false`.
+| Mode | Behaviour |
+|---|---|
+| `disabled` (default) | **503 before starting the run**, so no run is left "running" |
+| `executor` | `Execute: <action>` signs `POST {EXECUTOR_URL}/v1/execute` with the fixed action, the **database** `service_name` and the run id → `Executor: execute` (timeout `EXECUTOR_TIMEOUT_MS`, default 90 s, never retried automatically) → `Check executor result` → backend `/complete`. Only a 2xx with `executed: true` completes the run as `success` (then 07 checks recovery); any other answer, a timeout or a connection error completes it as `failed` with a short reason. If `EXECUTOR_URL` or a 32+ character `EXECUTOR_SIGNING_SECRET` is missing, executor mode behaves like `disabled`. |
+| `simulate` | Tests and demo rehearsal only: a result marked `"simulated": true, "executed": false` |
 
-**Needed (executor owner):** an HTTP executor that accepts only `{ action, service_name, playbook_run_id }` for the four fixed actions, authenticated by the same HMAC scheme. Then replace the four `Execute: <action>` Code nodes with signed HTTP Request nodes.
+The executor maps `service_name` to a container through its own `allowlist.json` (403 if not listed, 422 if the action is not granted). Tested: `tests/remediation-executor.test.mjs` (request, answers, routing) and `tests/executor-signing-interop.mjs` (the executor's real Python `signing.verify` accepts 06's request and rejects a replay, a wrong secret and a tampered body). Not tested yet against the running executor and sample-app (manual test M7 in executor mode).
+
+A timeout is **not** retried: a restart can take about 70 s, and it may have run. The run is completed as `failed` with "the action may still have run", and the recovery check is skipped. Retrying with a new nonce would be safe (the executor returns its stored result for the same `playbook_run_id`, `repeated: true`); left for later.
 
 ## 4. Monitoring requirements (to agree with the monitoring owner)
 
@@ -178,7 +181,7 @@ No run was started or completed twice. **Limits:** the backend was a mock; the p
 |---|---|---|---|
 | BD-5 trigger | Vinuka (backend approval flow) | After an approval, call `POST <n8n>/webhook/remediation` per section 2a (`buildSignedHeaders`, new nonce per attempt, n8n URL in backend config) | Done and tested (mocks) |
 | BD-6 | Backend (Vinuka) | Set `request_payload.service_name` when a run is requested (e.g. copy `incidents.service_name`) | 06 refuses to execute without it (run completed as failed) |
-| Real execution | Keshan (playbook executor) | HMAC-authenticated executor for the four fixed actions | `simulate` / `disabled` only |
+| Real execution | Keshan (playbook executor) | HMAC-authenticated executor for the four fixed actions | ✅ Connected (executor mode, 14 Nov); live test with sample-app still to do |
 | KI-1 nonce race | Backend + database team | Agree and provide an atomic shared nonce store | Documented; strict failing test kept |
 | BD-1 | Backend + database team | Contract, migration and route to create an incident from an alert (idempotent on fingerprint) | 01 node "Create incident (backend) – BLOCKED" |
 | BD-2 | Backend team (contract with Vishwa) | Finalize and implement the AI-analysis storage route (`/investigations/:id/analysis` or incident-level), plus `root_cause` (D-N8N-3) | 05 already signs and sends; 404 → `not_implemented` |

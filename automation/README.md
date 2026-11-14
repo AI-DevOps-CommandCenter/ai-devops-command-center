@@ -14,7 +14,7 @@ Owners: **Vishwa** (01, 05, 06; backend integration, about 40%) and **Tharindu**
 | `03-metrics-analysis.json` | Prometheus current vs baseline | Called by 05 | ✅ Works (metric names/queries to confirm) |
 | `04-deployment-correlation.json` | GitHub commits + Actions runs | Called by 05 | ✅ Works (needs a read-only token) |
 | `05-root-cause.json` | Combine evidence → Groq → validate → store | Called by 01 | ✅ Works; ⛔ storage blocked (BD-1/BD-2) |
-| `06-remediation.json` | Signed request → backend start → action → complete (retry-safe) → 07 → soft failures to 09 | `POST /webhook/remediation` | ✅ HMAC, approval and start/complete work; completion retried safely (N-1); ⛔ execution blocked (no executor; `simulate` for tests); ⛔ nothing calls this webhook yet (BD-5) |
+| `06-remediation.json` | Signed request → backend start → action → complete (retry-safe) → 07 → soft failures to 09 | `POST /webhook/remediation` | ✅ HMAC, approval and start/complete work; completion retried safely (N-1); ✅ real execution through the playbook executor (`REMEDIATION_EXECUTION_MODE=executor`; live test pending); ⛔ nothing calls this webhook yet (BD-5) |
 | `07-recovery-check.json` | Wait → Prometheus health → verdict → store | Called by 06 | ✅ Works; storage via `POST /api/machine/recovery-checks` (BD-3, implemented) |
 | `08-postmortem.json` | Groq postmortem draft | Called by 07 | ✅ Works; ⛔ read/store blocked (BD-4) |
 | `09-error-handler.json` | Redacted failure summary → Slack/Discord | Error Trigger + called by 01/06 for soft failures | ✅ Works (optional webhook URL) |

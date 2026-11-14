@@ -6,9 +6,10 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "build": "node scripts/build-workflows.mjs",
-    "test": "node --test tests/unit.test.mjs tests/remediation-db-payload.test.mjs tests/env-config.test.mjs tests/integration-response.test.mjs tests/remediation-complete-retry.test.mjs tests/soft-failure.test.mjs tests/alert-dedupe.test.mjs",
+    "test": "node --test tests/unit.test.mjs tests/remediation-db-payload.test.mjs tests/env-config.test.mjs tests/integration-response.test.mjs tests/remediation-complete-retry.test.mjs tests/soft-failure.test.mjs tests/alert-dedupe.test.mjs tests/remediation-executor.test.mjs",
     "test:hmac": "npx --prefix ../backend tsx tests/hmac-interop.mjs",
     "test:interop": "npx --prefix ../backend tsx tests/hmac-interop.mjs && npx --prefix ../backend tsx tests/recovery-check-interop.mjs && npx --prefix ../backend tsx tests/remediation-webhook-interop.mjs",
+    "test:interop:executor": "node --test tests/executor-signing-interop.mjs",
     "test:interop:remediation": "npx --prefix ../backend tsx tests/remediation-webhook-interop.mjs",
     "test:n8n": "node tests/integration/run-n8n-integration.mjs",
     "test:n8n:replay": "node tests/integration/run-replay-protection.mjs"

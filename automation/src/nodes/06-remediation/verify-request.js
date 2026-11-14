@@ -45,11 +45,22 @@ const extra = Object.keys(body).filter((k) => !['playbook_run_id', 'incident_id'
 if (extra.length) problems.push('unexpected fields: ' + extra.join(', '));
 if (problems.length) return reject(400, problems.join('; '));
 
-const mode = String(env.REMEDIATION_EXECUTION_MODE || 'disabled').toLowerCase();
+// Execution mode (REMEDIATION_EXECUTION_MODE):
+//   disabled (default) -> refuse with 503 before the run is started
+//   simulate           -> clearly marked simulated result (tests only)
+//   executor           -> signed POST /v1/execute to the playbook executor
+//                         (infrastructure/playbooks/executor). If EXECUTOR_URL or
+//                         EXECUTOR_SIGNING_SECRET is missing, it falls back to
+//                         disabled, so a run is never started that cannot execute.
+const requested = String(env.REMEDIATION_EXECUTION_MODE || 'disabled').toLowerCase();
+const executorReady = /^https?:\/\/[^\s]+$/.test(String(env.EXECUTOR_URL || ''))
+  && typeof env.EXECUTOR_SIGNING_SECRET === 'string' && env.EXECUTOR_SIGNING_SECRET.length >= 32;
+const mode = requested === 'simulate' ? 'simulate' : (requested === 'executor' && executorReady ? 'executor' : 'disabled');
 return [{
   json: {
     valid: true,
-    execution_mode: ['simulate'].includes(mode) ? mode : 'disabled',
+    execution_mode: mode,
+    execution_available: mode !== 'disabled',
     playbook_run_id: body.playbook_run_id,
     incident_id: body.incident_id,
     requested_action: body.action_type,
