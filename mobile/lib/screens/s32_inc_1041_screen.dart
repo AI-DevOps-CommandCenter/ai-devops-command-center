@@ -152,22 +152,27 @@ class S32Inc1041Screen extends StatelessWidget {
                             state: _StepState.done,
                             colors: colors),
                         _buildStepItem(
+                            connector: true,
                             title: 'Investigate',
                             state: _StepState.active,
                             colors: colors),
                         _buildStepItem(
+                            connector: true,
                             title: 'Cause',
                             state: _StepState.todo,
                             colors: colors),
                         _buildStepItem(
+                            connector: true,
                             title: 'Approve',
                             state: _StepState.todo,
                             colors: colors),
                         _buildStepItem(
+                            connector: true,
                             title: 'Recover',
                             state: _StepState.todo,
                             colors: colors),
                         _buildStepItem(
+                            connector: true,
                             title: 'Report',
                             state: _StepState.todo,
                             colors: colors),
@@ -383,6 +388,7 @@ class S32Inc1041Screen extends StatelessWidget {
     required String title,
     required _StepState state,
     required dynamic colors,
+    bool connector = false,
   }) {
     Color circleBg;
     Color circleBorder;
@@ -421,30 +427,68 @@ class S32Inc1041Screen extends StatelessWidget {
         break;
     }
 
+    // Line from the previous circle's centre to this circle's centre
+    final lineColor = state == _StepState.todo ? colors.border : colors.ok;
+
     return Expanded(
-      child: Column(
-        children: [
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-              color: circleBg,
-              shape: BoxShape.circle,
-              border: Border.all(color: circleBorder, width: 2),
-            ),
-            alignment: Alignment.center,
-            child: icon,
-          ),
-          const SizedBox(height: 6),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: fontWeight,
-              color: textColor,
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, box) {
+          return Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.topCenter,
+            children: [
+              if (connector)
+                Positioned(
+                  top: 10,
+                  left: -box.maxWidth / 2,
+                  width: box.maxWidth,
+                  height: 2,
+                  child: Container(color: lineColor),
+                ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Card-coloured backing so the line does not show through
+                  Container(
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: circleBg,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: circleBorder, width: 2),
+                      ),
+                      alignment: Alignment.center,
+                      child: icon,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 14,
+                    child: OverflowBox(
+                      maxWidth: double.infinity,
+                      child: Text(
+                        title,
+                        softWrap: false,
+                        maxLines: 1,
+                        overflow: TextOverflow.visible,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: fontWeight,
+                          color: textColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
