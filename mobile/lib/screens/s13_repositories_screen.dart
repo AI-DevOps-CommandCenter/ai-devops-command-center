@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../widgets/proto_icon.dart';
 import 's14_deployment_details_screen.dart';
 import 's15_failed_pipeline_job_screen.dart';
 import 's19_execution_progress_screen.dart';
@@ -200,12 +201,15 @@ class S13RepositoriesScreen extends StatelessWidget {
                         _buildRowItem(
                           context,
                           onTap: () {},
-                          icon: Icon(Icons.merge_type, size: 20, color: colors.success),
+                          icon: ProtoIcon(ProtoIcons.pullRequest, size: 20, color: colors.info),
                           title: '#215 Restore pool timeout to 1000 ms',
                           subtitle: 'Open \u00b7 checks failing',
                           badgeLabel: 'Open',
-                          badgeBg: colors.successSoft,
-                          badgeFg: colors.success,
+                          badgeBg: colors.info.withOpacity(
+                              Theme.of(context).brightness == Brightness.dark
+                                  ? 0.14
+                                  : 0.10),
+                          badgeFg: colors.info,
                         ),
                         Divider(height: 1, indent: 46, color: colors.border),
                         _buildRowItem(
@@ -218,7 +222,7 @@ class S13RepositoriesScreen extends StatelessWidget {
                               ),
                             );
                           },
-                          icon: Icon(Icons.call_merge, size: 20, color: colors.accent),
+                          icon: ProtoIcon(ProtoIcons.pullRequest, size: 20, color: colors.accent),
                           title: '#214 Tune DB pool settings',
                           subtitle: 'Merged today \u00b7 suspect change',
                           badgeLabel: 'Merged',
