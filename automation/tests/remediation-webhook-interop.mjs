@@ -167,18 +167,24 @@ test('disabled execution mode -> 503 (verifier output + workflow 06 routing)', a
     const out = await n8nVerify(backendSign(BODY), { env });
     assert.equal(out.valid, true);
     assert.equal(out.execution_mode, 'disabled');
+    assert.equal(out.execution_available, false);
+  }
+  // executor mode without EXECUTOR_URL / EXECUTOR_SIGNING_SECRET also refuses.
+  for (const extra of [{}, { EXECUTOR_URL: 'http://host.docker.internal:9095' }, { EXECUTOR_URL: 'http://x:9095', EXECUTOR_SIGNING_SECRET: 'too-short' }]) {
+    const out = await n8nVerify(backendSign(BODY), { env: { MACHINE_SIGNING_SECRET: SECRET, REMEDIATION_EXECUTION_MODE: 'executor', ...extra } });
+    assert.equal(out.execution_mode, 'disabled');
+    assert.equal(out.execution_available, false);
   }
   // 2. Routing in the generated workflow: valid -> "Execution available?" ->
-  //    (not simulate) -> "Execution blocked response" (503) -> "Respond 503".
+  //    (false) -> "Execution blocked response" (503) -> "Respond 503".
   const wf = JSON.parse(readFileSync(new URL('../workflows/06-remediation.json', import.meta.url), 'utf8'));
   const node = (name) => wf.nodes.find((n) => n.name === name);
   const next = (name, output) => (wf.connections[name].main[output] || []).map((c) => c.node);
   assert.deepEqual(next('Verify signature and payload', 0), ['Request valid?']);
   assert.deepEqual(next('Request valid?', 0), ['Execution available?']);
   const cond = node('Execution available?').parameters.conditions.conditions[0];
-  assert.equal(cond.leftValue, '={{ $json.execution_mode }}');
-  assert.equal(cond.operator.operation, 'equals');
-  assert.equal(cond.rightValue, 'simulate');
+  assert.equal(cond.leftValue, '={{ $json.execution_available }}');
+  assert.equal(cond.operator.operation, 'true');
   assert.deepEqual(next('Execution available?', 1), ['Execution blocked response']);
   const status = node('Execution blocked response').parameters.assignments.assignments.find((a) => a.name === 'http_status');
   assert.equal(status.value, '={{ 503 }}');

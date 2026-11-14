@@ -312,13 +312,13 @@ function wf05() {
 // ---------- 06 Remediation (Vishwa) ----------
 function wf06() {
   const w = makeWorkflow(WF.remediation);
-  w.sticky('## 06 – Remediation (owner: Vishwa)\nBackend → `POST /webhook/remediation` (HMAC signed) → verify signature, time window, nonce → **backend start** (`start_playbook_run` only succeeds for an APPROVED run) → fixed branch per action → **backend complete** → 07 Recovery Check.\nNever executes commands from the webhook or the AI. **Execution integration is BLOCKED** (no playbook executor yet): `REMEDIATION_EXECUTION_MODE=disabled` refuses; `simulate` records a clearly marked simulated result for tests.', 0, -4, 900, 260);
+  w.sticky('## 06 – Remediation (owner: Vishwa)\nBackend → `POST /webhook/remediation` (HMAC signed) → verify signature, time window, nonce → **backend start** (`start_playbook_run` only succeeds for an APPROVED run) → fixed branch per action → **backend complete** → 07 Recovery Check.\nNever executes commands from the webhook or the AI. `REMEDIATION_EXECUTION_MODE`: `disabled` (default) refuses before the run is started; `executor` sends a signed `POST /v1/execute` { action, service_name, playbook_run_id } to the playbook executor (Keshan, `infrastructure/playbooks/executor`); `simulate` records a clearly marked simulated result for tests.', 0, -4, 900, 260);
   w.webhook('Remediation webhook', 0, 0, 'remediation', { rawBody: true, notes: 'POST /webhook/remediation. Raw Body ON: the signature covers the exact bytes.' });
   w.code('Verify signature and payload', '06-remediation/verify-request.js', 1, 0, 'HMAC-SHA256, 300 s window, nonce once (static data), strict body.');
   w.isTrue('Request valid?', 2, 0, '={{ $json.valid }}');
   w.respond('Respond rejected', 3, 2, '401 bad signature / 409 replay / 400 bad body / 503 not configured.');
-  w.equals('Execution available?', 3, 0, '={{ $json.execution_mode }}', 'simulate', 'disabled (default) → refuse before the run is started.');
-  w.set('Execution blocked response', 4, 1, [['http_status', '={{ 503 }}', 'number'], ['response', '={{ { accepted: false, message: "Remediation execution integration is not available (BLOCKED: no playbook executor). The run was not started." } }}', 'object']]);
+  w.isTrue('Execution available?', 3, 0, '={{ $json.execution_available }}', 'executor or simulate. disabled (default, or executor not configured) → refuse before the run is started.');
+  w.set('Execution blocked response', 4, 1, [['http_status', '={{ 503 }}', 'number'], ['response', '={{ { accepted: false, message: "Remediation execution is not available (REMEDIATION_EXECUTION_MODE is disabled or the executor is not configured). The run was not started." } }}', 'object']]);
   w.respond('Respond 503', 5, 1);
   w.code('Sign start request', '06-remediation/sign-start.js', 4, -1);
   w.http('Backend: start run', 5, -1, { method: 'POST', signed: true, notes: 'POST /api/machine/playbook-runs/:id/start → start_playbook_run (approval enforced in the database).' });
@@ -329,12 +329,18 @@ function wf06() {
   const actions = ['restart', 'rollback', 'scale', 'circuit_breaker'];
   actions.forEach((a, i) => {
     const name = 'Execute: ' + a;
-    w.code(name, '06-remediation/execute-action.js', 10, -3.5 + i, 'BLOCKED: no executor. simulate mode only. No shell commands.');
+    w.code(name, '06-remediation/execute-action.js', 10, -3.5 + i, 'executor: signs POST /v1/execute { action, service_name, playbook_run_id }. simulate: marked simulated result. No shell commands.');
     const n = w.nodes.find((x) => x.name === name);
     n.parameters.jsCode = n.parameters.jsCode.replace("'__ACTION__'", JSON.stringify(a));
     w.link('Action type', name, i);
-    w.link(name, 'Sign complete request');
+    w.link(name, 'Call executor?');
   });
+  w.isTrue('Call executor?', 10.5, -5, '={{ $json.execute_via_executor === true }}', 'executor mode → call the executor; simulate / refused → complete directly.');
+  w.http('Executor: execute', 10.5, -6.5, { method: 'POST', signed: true, notes: 'POST {EXECUTOR_URL}/v1/execute (HMAC with EXECUTOR_SIGNING_SECRET). Timeout EXECUTOR_TIMEOUT_MS (90 s). Never retried automatically.' });
+  w.code('Check executor result', '06-remediation/check-executor-result.js', 11, -6.5, 'executed: true → success; anything else → failed. Request data is never copied.');
+  w.link('Call executor?', 'Executor: execute', 0);
+  w.link('Call executor?', 'Sign complete request', 1);
+  w.chain('Executor: execute', 'Check executor result', 'Sign complete request');
   w.code('Unsupported or rejected action', '06-remediation/unsupported-action.js', 10, 0.5, 'Completes the run as failed. Nothing is executed.');
   w.link('Action type', 'Unsupported or rejected action', 4);
   w.respond('Respond refused', 8, 0, 'Backend refused (not approved / not found) or mismatch.');

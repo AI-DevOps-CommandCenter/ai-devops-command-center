@@ -32,7 +32,7 @@ flowchart LR
   APP[Mobile app] -- "approve (JWT)" --> BE
   BE -- "HMAC: /webhook/remediation (BD-5)" --> W06
   W06 -- "HMAC: start / complete" --> BE
-  W06 -. "executor (BLOCKED)" .-> X[Playbook executor]
+  W06 -- "signed POST /v1/execute (executor mode)" --> X[Playbook executor]
   W06 --> W07
   W07 -- PromQL --> P
   W07 -- "HMAC: recovery check (BD-3)" --> BE
@@ -71,7 +71,7 @@ sequenceDiagram
   BE->>N6: signed webhook (BD-5)
   N6->>BE: start (database checks approval)
   N6-->>BE: 202
-  N6->>N6: fixed action branch (executor BLOCKED / simulate)
+  N6->>N6: fixed action branch (executor / simulate)
   N6->>BE: complete success/failed
   N6->>N7: recovery check
   N7->>BE: recovery result (BD-3)
@@ -149,7 +149,7 @@ Status values separate four situations:
 ## 8. Known limitations
 
 - The backend routes BD-1 to BD-5 are missing (see `automation-integration-requirements.md`), so incidents, analyses, recovery checks and postmortems are **not saved yet**.
-- There is no playbook executor: remediation is refused (`disabled`) or simulated (`simulate`).
+- Remediation runs through the playbook executor only with `REMEDIATION_EXECUTION_MODE=executor` (and `EXECUTOR_URL` + `EXECUTOR_SIGNING_SECRET`); otherwise it is refused (`disabled`) or simulated (`simulate`).
 - De-duplication and nonce stores use workflow static data. n8n saves it only for production (active) executions, only per instance, and only **when an execution ends**. So two copies of the same request that arrive **while the first is still running** are both accepted by n8n. The integration test reproduced this. It is safe today because the real guarantees are in the backend and database:
   - a second `start` for the same run is refused (409, the run is no longer `approved`);
   - a reused n8n execution id is rejected (`23505`);
