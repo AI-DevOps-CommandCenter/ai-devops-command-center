@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
+import '../widgets/proto_icon.dart';
 import 's06_ai_investigation_progress_screen.dart';
 import 's09_logs_explorer_screen.dart';
 import 's10_metrics_screen.dart';
@@ -402,7 +403,7 @@ class S05IncidentDetailsScreen extends StatelessWidget {
                               ),
                               child: Column(
                                 children: [
-                                  Icon(Icons.terminal, size: 20, color: colors.text),
+                                  ProtoIcon(ProtoIcons.logs, size: 20, color: colors.text),
                                   const SizedBox(height: 6),
                                   Text(
                                     'Logs',
@@ -438,7 +439,7 @@ class S05IncidentDetailsScreen extends StatelessWidget {
                               ),
                               child: Column(
                                 children: [
-                                  Icon(Icons.show_chart, size: 20, color: colors.text),
+                                  ProtoIcon(ProtoIcons.metrics, size: 20, color: colors.text),
                                   const SizedBox(height: 6),
                                   Text(
                                     'Metrics',
@@ -474,7 +475,7 @@ class S05IncidentDetailsScreen extends StatelessWidget {
                               ),
                               child: Column(
                                 children: [
-                                  Icon(Icons.account_tree_outlined, size: 20, color: colors.text),
+                                  ProtoIcon(ProtoIcons.deploy, size: 20, color: colors.text),
                                   const SizedBox(height: 6),
                                   Text(
                                     'Deploy',
@@ -701,15 +702,22 @@ class S05IncidentDetailsScreen extends StatelessWidget {
                               : null,
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: fontWeight,
-                        color: textColor,
+                    SizedBox(
+                      height: 14,
+                      child: OverflowBox(
+                        maxWidth: double.infinity,
+                        child: Text(
+                          title,
+                          softWrap: false,
+                          maxLines: 1,
+                          overflow: TextOverflow.visible,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: fontWeight,
+                            color: textColor,
+                          ),
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
