@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../widgets/proto_icon.dart';
 import 's38_playbook_edit_screen.dart';
 
 class S16RemediationPlaybooksScreen extends StatelessWidget {
@@ -79,7 +80,7 @@ class S16RemediationPlaybooksScreen extends StatelessWidget {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.shield_outlined,
+                        ProtoIcon(ProtoIcons.shieldCheck,
                             size: 18, color: colors.info),
                         const SizedBox(width: 10),
                         Expanded(
@@ -101,7 +102,8 @@ class S16RemediationPlaybooksScreen extends StatelessWidget {
                   // 1. Restart service
                   _buildPlaybookCard(
                     context,
-                    icon: Icons.replay,
+                    icon: Icons.refresh,
+                    svg: ProtoIcons.restart,
                     title: 'Restart service',
                     desc: 'Restarts pods one at a time.',
                     impactLabel: 'Medium impact',
@@ -119,6 +121,7 @@ class S16RemediationPlaybooksScreen extends StatelessWidget {
                   _buildPlaybookCard(
                     context,
                     icon: Icons.layers_outlined,
+                    svg: ProtoIcons.layers,
                     title: 'Roll back deployment',
                     desc: 'Redeploys the last healthy version.',
                     impactLabel: 'High impact',
@@ -136,6 +139,7 @@ class S16RemediationPlaybooksScreen extends StatelessWidget {
                   _buildPlaybookCard(
                     context,
                     icon: Icons.scale_outlined,
+                    svg: ProtoIcons.scale,
                     title: 'Scale service',
                     desc: 'Adds replicas, up to a set limit.',
                     impactLabel: 'Low impact',
@@ -153,6 +157,7 @@ class S16RemediationPlaybooksScreen extends StatelessWidget {
                   _buildPlaybookCard(
                     context,
                     icon: Icons.power_settings_new_outlined,
+                    svg: ProtoIcons.circuitBreaker,
                     title: 'Enable circuit breaker',
                     desc: 'Stops calls to a failing dependency.',
                     impactLabel: 'Medium impact',
@@ -175,6 +180,7 @@ class S16RemediationPlaybooksScreen extends StatelessWidget {
   Widget _buildPlaybookCard(
     BuildContext context, {
     required IconData icon,
+    String? svg,
     required String title,
     required String desc,
     required String impactLabel,
@@ -205,7 +211,9 @@ class S16RemediationPlaybooksScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 alignment: Alignment.center,
-                child: Icon(icon, size: 20, color: colors.accent),
+                child: svg != null
+                    ? ProtoIcon(svg, size: 20, color: colors.accent)
+                    : Icon(icon, size: 20, color: colors.accent),
               ),
               const SizedBox(width: 12),
               Expanded(
