@@ -1,0 +1,204 @@
+{
+  "id": "dc33wf02loganaly",
+  "name": "02 - Log Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 02 – Log Analysis (owner: Tharindu)\nLoki `query_range` for error/warning lines of the service around `started_at`.\nConfig: `LOKI_URL`, `LOKI_SERVICE_LABEL` (**confirm with Keshan**), `LOKI_LOOKBACK_MINUTES`, `LOKI_MAX_LINES`.",
+        "width": 700,
+        "height": 220
+      },
+      "id": "d1e2ec31-eaed-4a40-a5d1-e8e773668720",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "ff0332e1-ac19-489e-a606-6aae137a1df4",
+      "name": "When called by 05 Root Cause",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Input: { incident_id, service_name, alert_name, severity, started_at }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 02 – Log Analysis (owner: Tharindu)\n// Node: \"Build LogQL query\". Validates the input and builds the Loki\n// query_range request. If Loki is not configured or the input is invalid, it\n// returns a ready-made result with skip=true (no HTTP call is made).\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst env = $env;\nconst input = readInvestigationInput($input.first().json);\nconst ctx = input.ctx;\n\nif (!input.ok) {\n  return [{ json: { skip: true, result: investigationResult('logs', ctx, { status: 'invalid_input', error: { kind: 'invalid_input', message: input.error } }) } }];\n}\n\nconst lokiUrl = String(env.LOKI_URL || '').replace(/\\/+$/, '');\nif (!/^https?:\\/\\//.test(lokiUrl)) {\n  return [{ json: { skip: true, result: investigationResult('logs', ctx, { status: 'not_configured', summary: 'Loki is not configured (LOKI_URL).', error: { kind: 'not_configured', message: 'Set LOKI_URL in the n8n environment.' } }) } }];\n}\n\n// The label that identifies a service in Loki depends on the log shipper\n// (e.g. promtail \"job\", docker \"compose_service\"). It must be confirmed with\n// the monitoring owner and set in LOKI_SERVICE_LABEL.\nconst label = String(env.LOKI_SERVICE_LABEL || 'service');\nif (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(label)) throw new Error('LOKI_SERVICE_LABEL is not a valid label name.');\n\nconst before = envInt(env, 'LOKI_LOOKBACK_MINUTES', 15, 1, 360);\nconst after = envInt(env, 'LOKI_AFTER_MINUTES', 5, 0, 60);\nconst limit = envInt(env, 'LOKI_MAX_LINES', 200, 10, 2000);\nconst started = new Date(ctx.started_at).getTime();\nconst start = new Date(started - before * 60000);\nconst end = new Date(Math.min(Date.now(), started + after * 60000));\n\n// service_name is validated to [A-Za-z0-9_.:-], so it cannot break out of the string.\nconst query = '{' + label + '=\"' + ctx.service_name + '\"} |~ \"(?i)(error|exception|fatal|panic|critical|warn)\"';\nconst params = toQuery({\n  query,\n  start: start.toISOString(),\n  end: end.toISOString(),\n  limit: String(limit),\n  direction: 'backward',\n});\n\nreturn [{\n  json: {\n    skip: false,\n    ctx,\n    query,\n    window: { start: start.toISOString(), end: end.toISOString() },\n    limit,\n    url: lokiUrl + '/loki/api/v1/query_range?' + params,\n    timeout_ms: envInt(env, 'LOKI_TIMEOUT_MS', 15000, 1000, 60000),\n  },\n}];\n"
+      },
+      "id": "a7dabe58-756f-4d24-a01b-f0ae3d83a034",
+      "name": "Build LogQL query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "193291f5-6342-4439-a65d-3f2d8c8391ac",
+              "leftValue": "={{ !$json.skip }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "3d1a103e-fa0a-4281-aab3-1e2fe67fb824",
+      "name": "Request ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": "={{ $json.timeout_ms || 15000 }}",
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "15ae0c4e-f628-4907-a78a-dd61774d8f8c",
+      "name": "Loki: query_range",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        -180
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "GET {LOKI_URL}/loki/api/v1/query_range (no auth for the local Loki).",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 02 – Node: \"Analyze logs\". Reads the Loki response, classifies the\n// lines and returns the standard investigation result.\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst req = $('Build LogQL query').first().json;\nconst ctx = req.ctx;\nconst response = $input.first().json;\nconst c = classifyHttp(response);\n\nif (c.kind !== 'ok') {\n  const status = c.kind === 'client_error' ? 'query_rejected' : 'unavailable';\n  return [{ json: investigationResult('logs', ctx, { status, window: req.window, summary: 'Loki query failed (' + c.kind + ').', error: { kind: c.kind, http_status: c.status, retryable: c.retryable, message: c.message } }) }];\n}\n\nconst body = response.body;\nif (!body || body.status !== 'success' || !body.data || !Array.isArray(body.data.result)) {\n  return [{ json: investigationResult('logs', ctx, { status: 'invalid_response', window: req.window, summary: 'Loki returned an unexpected response.', error: { kind: 'invalid_response', message: 'Expected data.result[] with status \"success\".' } }) }];\n}\n\nconst lines = [];\nfor (const stream of body.data.result) {\n  for (const v of stream.values || []) {\n    if (!Array.isArray(v) || v.length < 2) continue;\n    const ns = String(v[0]);\n    const ms = Number(ns.slice(0, -6)) || 0;\n    lines.push({ ts: ms ? new Date(ms).toISOString() : null, line: String(v[1]), labels: stream.stream || {} });\n  }\n}\n\nconst levelOf = (l) => (/(fatal|panic|critical|exception|\\berror\\b|\\berr\\b)/i.test(l) ? 'error' : /\\bwarn(ing)?\\b/i.test(l) ? 'warning' : 'other');\n// Group similar messages: numbers, hex ids and UUIDs become placeholders.\nconst pattern = (l) => l\n  .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>')\n  .replace(/\\b0x[0-9a-f]+\\b/gi, '<hex>')\n  .replace(/\\d+(\\.\\d+)?/g, '<n>')\n  .trim()\n  .slice(0, 160);\n\nlet errors = 0;\nlet warnings = 0;\nconst groups = {};\nlet firstError = null;\nfor (const l of lines) {\n  const level = levelOf(l.line);\n  if (level === 'error') {\n    errors++;\n    if (l.ts && (!firstError || l.ts < firstError)) firstError = l.ts;\n  } else if (level === 'warning') warnings++;\n  if (level !== 'other') {\n    const p = pattern(l.line);\n    groups[p] = (groups[p] || 0) + 1;\n  }\n}\nconst top = Object.entries(groups).sort((a, b) => b[1] - a[1]).slice(0, 5);\n\nif (errors === 0 && warnings === 0) {\n  return [{ json: investigationResult('logs', ctx, { status: 'no_evidence', window: req.window, summary: 'No error or warning log lines for ' + ctx.service_name + ' in the window.', findings: [], evidence: [], confidence: 0.2 }) }];\n}\n\nconst findings = [\n  errors + ' error and ' + warnings + ' warning log lines for ' + ctx.service_name + ' between ' + req.window.start + ' and ' + req.window.end + (lines.length >= req.limit ? ' (limit reached, more lines may exist)' : '') + '.',\n];\nif (firstError) findings.push('First error line at ' + firstError + '.');\nfor (const [p, n] of top) findings.push('Repeated message (' + n + 'x): ' + redact(p));\n\nconst evidence = lines\n  .filter((l) => levelOf(l.line) !== 'other')\n  .slice(0, 10)\n  .map((l) => ({ type: 'log', source: 'loki', timestamp: l.ts, level: levelOf(l.line), value: redact(truncate(l.line, 300)) }));\n\nreturn [{\n  json: investigationResult('logs', ctx, {\n    status: 'evidence_found',\n    window: req.window,\n    summary: errors > 0 ? 'Error activity found in ' + ctx.service_name + ' logs (' + errors + ' error lines).' : 'Only warnings found in ' + ctx.service_name + ' logs (' + warnings + ').',\n    findings,\n    evidence,\n    confidence: errors > 0 ? 0.7 : 0.4,\n  }),\n}];\n"
+      },
+      "id": "f7b40893-e0e5-4ecb-a56f-679b9ff043c4",
+      "name": "Analyze logs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -180
+      ],
+      "notes": "Returns automation/schemas/investigation-output.schema.json"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Shared terminal node for 02/03/04: \"Return skipped result\".\n// Used when no HTTP call is made (invalid input or source not configured).\nreturn [{ json: $input.first().json.result }];\n"
+      },
+      "id": "9367c2b4-0859-407d-a9d7-cad7e3e57ff2",
+      "name": "Return skipped result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        180
+      ],
+      "notes": "Invalid input or source not configured: no HTTP call."
+    }
+  ],
+  "connections": {
+    "When called by 05 Root Cause": {
+      "main": [
+        [
+          {
+            "node": "Build LogQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LogQL query": {
+      "main": [
+        [
+          {
+            "node": "Request ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request ready?": {
+      "main": [
+        [
+          {
+            "node": "Loki: query_range",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return skipped result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loki: query_range": {
+      "main": [
+        [
+          {
+            "node": "Analyze logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "dc33wf09errorhnd"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

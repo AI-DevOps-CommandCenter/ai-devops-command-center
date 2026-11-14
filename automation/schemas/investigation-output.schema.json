@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Investigation Output (workflows 02, 03, 04)",
+  "description": "Returned by 02-log-analysis, 03-metrics-analysis and 04-deployment-correlation to 05-root-cause. 'ok' is true only for evidence_found and no_evidence; every other status means the source could not be used.",
+  "type": "object",
+  "required": ["incident_id", "source", "status", "ok", "summary", "findings", "evidence", "confidence", "error", "collected_at"],
+  "additionalProperties": false,
+  "properties": {
+    "incident_id": { "type": ["string", "null"], "format": "uuid" },
+    "source": { "type": "string", "enum": ["logs", "metrics", "deployments"] },
+    "status": {
+      "type": "string",
+      "enum": ["evidence_found", "no_evidence", "unavailable", "not_configured", "invalid_input", "query_rejected", "invalid_response"],
+      "description": "no_evidence = the source answered and found nothing; unavailable = the source could not be reached; invalid_response = it answered with something unexpected."
+    },
+    "ok": { "type": "boolean" },
+    "summary": { "type": "string" },
+    "findings": { "type": "array", "items": { "type": "string" }, "description": "Facts from this source, in plain language." },
+    "evidence": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["type", "source"],
+        "properties": {
+          "type": { "type": "string", "enum": ["log", "metric", "commit", "deployment", "workflow_run"] },
+          "source": { "type": "string", "enum": ["loki", "prometheus", "github"] },
+          "timestamp": { "type": ["string", "null"] },
+          "value": {},
+          "ref": { "type": "string" }
+        }
+      }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "window": { "type": ["object", "null"] },
+    "error": {
+      "type": ["object", "null"],
+      "properties": {
+        "kind": { "type": "string" },
+        "http_status": { "type": ["integer", "null"] },
+        "retryable": { "type": "boolean" },
+        "message": { "type": "string" }
+      }
+    },
+    "collected_at": { "type": "string", "format": "date-time" }
+  }
+}

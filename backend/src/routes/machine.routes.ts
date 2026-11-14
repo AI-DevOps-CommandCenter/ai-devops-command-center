@@ -13,6 +13,11 @@ import {
   startPlaybookRun,
   completePlaybookRun
 } from "../services/playbook-run.service.js";
+import {
+  recordRecoveryCheck,
+  RECOVERY_CHECK_STATUSES,
+  type RecoveryCheckStatus
+} from "../services/recovery-check.service.js";
 import { sendDbError } from "../lib/db-errors.js";
 
 // n8n -> backend machine endpoints (decision A5).
@@ -169,6 +174,58 @@ export function createMachineRouter(deps: MachineDeps | null): Router {
     } catch (error) {
       resetSessionOnJwtError(deps.automation, error);
       return sendDbError(res, error, "Machine complete playbook run error:", "Failed to complete playbook run.");
+    }
+  });
+
+  // POST /api/machine/recovery-checks  (BD-3, contract B.3; sent by n8n workflow 07)
+  // Body: { incident_id, playbook_run_id, status, check_type?, details? }
+  // status: pending | healthy | unhealthy | failed (recovery_checks_status_check)
+  router.post("/recovery-checks", async (req: Request, res: Response) => {
+    const body: unknown = req.body;
+    if (!isJsonObject(body)) {
+      return res.status(400).json({ success: false, message: "A JSON object body is required." });
+    }
+    const { incident_id, playbook_run_id, status, check_type, details } = body;
+
+    if (typeof incident_id !== "string" || !uuidRegex.test(incident_id)) {
+      return res.status(400).json({ success: false, message: "A valid incident_id is required." });
+    }
+    if (typeof playbook_run_id !== "string" || !uuidRegex.test(playbook_run_id)) {
+      return res.status(400).json({ success: false, message: "A valid playbook_run_id is required." });
+    }
+    if (typeof status !== "string" || !(RECOVERY_CHECK_STATUSES as readonly string[]).includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Status must be one of: ${RECOVERY_CHECK_STATUSES.join(", ")}.`
+      });
+    }
+    if (check_type !== undefined && check_type !== null && !isBoundedText(check_type, 100)) {
+      return res.status(400).json({ success: false, message: "check_type must be 1 to 100 characters." });
+    }
+    if (details !== undefined && !isJsonObject(details)) {
+      return res.status(400).json({ success: false, message: "Details must be a JSON object." });
+    }
+
+    const client = await getAutomationClient(deps.automation, res);
+    if (!client) return;
+
+    try {
+      const recoveryCheckId = await recordRecoveryCheck(client, {
+        incident_id,
+        playbook_run_id,
+        status: status as RecoveryCheckStatus,
+        check_type: (check_type as string | null | undefined) ?? null,
+        details: details as Record<string, unknown> | undefined
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "Recovery check recorded.",
+        data: { recovery_check_id: recoveryCheckId }
+      });
+    } catch (error) {
+      resetSessionOnJwtError(deps.automation, error);
+      return sendDbError(res, error, "Machine record recovery check error:", "Failed to record recovery check.");
     }
   });
 

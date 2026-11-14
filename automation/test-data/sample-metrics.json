@@ -1,0 +1,23 @@
+{
+  "_comment": "Prometheus /api/v1/query responses used by the mock server. 'incident' = value at the incident time, 'baseline' = 30 minutes before. Metric names: cpu/memory are prom-client defaults; errrate is a test-only placeholder for PROM_QUERY_ERROR_RATE.",
+  "incident_at": "2026-11-08T10:00:00Z",
+  "abnormal": {
+    "process_cpu_seconds_total": { "baseline": 0.12, "incident": 0.95 },
+    "process_resident_memory_bytes": { "baseline": 180000000, "incident": 210000000 },
+    "errrate": { "baseline": 0.002, "incident": 0.35 }
+  },
+  "normal": {
+    "process_cpu_seconds_total": { "baseline": 0.12, "incident": 0.14 },
+    "process_resident_memory_bytes": { "baseline": 180000000, "incident": 182000000 },
+    "errrate": { "baseline": 0.002, "incident": 0.003 }
+  },
+  "example_response": {
+    "status": "success",
+    "data": {
+      "resultType": "vector",
+      "result": [
+        { "metric": { "job": "checkout-api" }, "value": [1794132120, "0.95"] }
+      ]
+    }
+  }
+}

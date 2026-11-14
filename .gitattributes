@@ -2,3 +2,7 @@
 # (bash fails on CRLF scripts; keeps migration checksums stable).
 *.sh   text eol=lf
 *.sql  text eol=lf
+
+# Automation sources, prompts, tests and generated n8n workflow JSON: LF on
+# every platform, so the generated workflows are identical on Windows and Linux.
+automation/**  text=auto eol=lf

@@ -1,0 +1,25 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"HighErrorRate\"}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "n8n-alert-intake",
+  "groupLabels": { "alertname": "HighErrorRate" },
+  "commonLabels": { "alertname": "HighErrorRate", "service": "checkout-api", "severity": "critical" },
+  "commonAnnotations": { "summary": "Error rate above 5% on checkout-api" },
+  "externalURL": "http://alertmanager:9093",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": { "alertname": "HighErrorRate", "service": "checkout-api", "severity": "critical", "instance": "checkout-api:8080" },
+      "annotations": {
+        "summary": "Error rate above 5% on checkout-api",
+        "description": "5xx responses are 35% of all requests for the last 5 minutes."
+      },
+      "startsAt": "2026-11-08T10:00:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus:9090/graph?g0.expr=error_rate",
+      "fingerprint": "a1b2c3d4e5f60718"
+    }
+  ]
+}
