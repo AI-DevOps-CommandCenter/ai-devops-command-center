@@ -77,16 +77,55 @@ export interface RequestPlaybookRunResult {
 }
 
 // Request a run; always creates its pending approval (A4).
+// Copies the authoritative incidents.service_name into request_payload
+// so the automation workflow can identify the affected service.
 // rpc: request_playbook_run(p_incident_id, p_playbook_id, p_idempotency_key, p_request_payload)
 export async function requestPlaybookRun(
   client: UserSupabaseClient,
   input: RequestPlaybookRunInput
 ) {
+  // Retrieve the service name from the incident.
+  const { data: incident, error: incidentError } = await client
+    .from("incidents")
+    .select("service_name")
+    .eq("id", input.incident_id)
+    .maybeSingle();
+
+  if (incidentError) {
+    throw incidentError;
+  }
+
+  if (!incident) {
+    throw Object.assign(new Error("Incident not found."), {
+      code: "DC404"
+    });
+  }
+
+  const serviceName =
+    typeof incident.service_name === "string"
+      ? incident.service_name.trim()
+      : "";
+
+  if (!serviceName) {
+    throw Object.assign(
+      new Error(
+        "The incident must have a service name before requesting a playbook run."
+      ),
+      { code: "DC422" }
+    );
+  }
+
+  // Preserve existing payload fields, but always trust the database value.
+  const requestPayload = {
+    ...(input.request_payload ?? {}),
+    service_name: serviceName
+  };
+
   const { data, error } = await client.rpc("request_playbook_run", {
     p_incident_id: input.incident_id,
     p_playbook_id: input.playbook_id,
     p_idempotency_key: input.idempotency_key ?? null,
-    p_request_payload: input.request_payload ?? {}
+    p_request_payload: requestPayload
   });
 
   if (error) throw error;
