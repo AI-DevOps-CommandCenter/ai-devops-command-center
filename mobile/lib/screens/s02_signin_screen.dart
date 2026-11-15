@@ -76,6 +76,7 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final isLoading = AuthController.instance.isLoading;
 
     return Scaffold(
       backgroundColor: colors.bg,

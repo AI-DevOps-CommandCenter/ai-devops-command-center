@@ -3,12 +3,48 @@ import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
 import 's24_pull_request_summary_screen.dart';
 
-class S14DeploymentDetailsScreen extends StatelessWidget {
+class S14DeploymentDetailsScreen extends StatefulWidget {
   const S14DeploymentDetailsScreen({super.key});
+
+  @override
+  State<S14DeploymentDetailsScreen> createState() => _S14DeploymentDetailsScreenState();
+}
+
+class _S14DeploymentDetailsScreenState extends State<S14DeploymentDetailsScreen> {
+  final ApiService _apiService = ApiService();
+  bool _isLoading = true;
+  WorkflowRunModel? _deploymentRun;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDeployment();
+  }
+
+  Future<void> _loadDeployment() async {
+    setState(() => _isLoading = true);
+    try {
+      final runs = await _apiService.fetchWorkflowRuns(branch: 'main');
+      if (mounted) {
+        setState(() {
+          _deploymentRun = runs.firstWhere(
+            (r) => r.name.toLowerCase().contains('deploy') || r.branch == 'main',
+            orElse: () => runs.first,
+          );
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final run = _deploymentRun;
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -76,6 +112,12 @@ class S14DeploymentDetailsScreen extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (_isLoading)
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: colors.teal),
+                    ),
                 ],
               ),
             ),

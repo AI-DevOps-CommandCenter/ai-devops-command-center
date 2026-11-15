@@ -126,6 +126,24 @@ class DevOpsCommandCenterApp extends StatelessWidget {
                 builder: (context) => S23DeveloperAssistantScreen(initialContext: ctx),
               );
             }
+            if (settings.name == '/approve-action') {
+              final approval = settings.arguments as ApprovalModel?;
+              return MaterialPageRoute(
+                builder: (context) => S18ApproveActionScreen(initialApproval: approval),
+              );
+            }
+            if (settings.name == '/execution-progress') {
+              final runId = settings.arguments as String?;
+              return MaterialPageRoute(
+                builder: (context) => S19ExecutionProgressScreen(runId: runId),
+              );
+            }
+            if (settings.name == '/recovery-verification') {
+              final incidentId = (settings.arguments as String?) ?? 'INC-1042';
+              return MaterialPageRoute(
+                builder: (context) => S20RecoveryVerificationScreen(incidentId: incidentId),
+              );
+            }
             return null;
           },
           routes: {

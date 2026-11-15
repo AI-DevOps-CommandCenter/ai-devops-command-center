@@ -3,12 +3,45 @@ import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
 import 's23_developer_assistant_screen.dart';
 
-class S24PullRequestSummaryScreen extends StatelessWidget {
+class S24PullRequestSummaryScreen extends StatefulWidget {
   const S24PullRequestSummaryScreen({super.key});
+
+  @override
+  State<S24PullRequestSummaryScreen> createState() => _S24PullRequestSummaryScreenState();
+}
+
+class _S24PullRequestSummaryScreenState extends State<S24PullRequestSummaryScreen> {
+  final ApiService _apiService = ApiService();
+  bool _isLoading = true;
+  PullRequestModel? _pr;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPullRequest();
+  }
+
+  Future<void> _loadPullRequest() async {
+    setState(() => _isLoading = true);
+    try {
+      final pr = await _apiService.fetchPullRequestDetail(number: 214);
+      if (mounted) {
+        setState(() {
+          _pr = pr;
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final pr = _pr;
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -76,6 +109,12 @@ class S24PullRequestSummaryScreen extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (_isLoading)
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: colors.teal),
+                    ),
                 ],
               ),
             ),

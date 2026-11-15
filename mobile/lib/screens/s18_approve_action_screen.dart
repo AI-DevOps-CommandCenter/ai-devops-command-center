@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import '../models/playbook_model.dart';
+import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
 import 's19_execution_progress_screen.dart';
 
 class S18ApproveActionScreen extends StatefulWidget {
-  const S18ApproveActionScreen({super.key});
+  final ApprovalModel? initialApproval;
+
+  const S18ApproveActionScreen({super.key, this.initialApproval});
 
   @override
   State<S18ApproveActionScreen> createState() => _S18ApproveActionScreenState();

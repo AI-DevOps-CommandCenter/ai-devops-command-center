@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import '../models/notification_model.dart';
+import '../services/api_service.dart';
+import '../services/notification_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
 import 's05_incident_details_screen.dart';
@@ -75,6 +78,12 @@ class _S25NotificationsScreenState extends State<S25NotificationsScreen> {
                       ),
                     ),
                   ),
+                  if (_unreadCount > 0)
+                    IconButton(
+                      icon: Icon(Icons.done_all_rounded, color: colors.teal, size: 22),
+                      tooltip: 'Mark all as read',
+                      onPressed: _markAllAsRead,
+                    ),
                 ],
               ),
             ),
@@ -598,9 +607,51 @@ class _S25NotificationsScreenState extends State<S25NotificationsScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 6),
+
+            // Notification Feed List
+            Expanded(
+              child: _isLoading
+                  ? Center(child: CircularProgressIndicator(color: colors.teal))
+                  : RefreshIndicator(
+                      onRefresh: _loadNotifications,
+                      color: colors.teal,
+                      child: _filteredNotifications.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.notifications_off_outlined, size: 48, color: colors.muted),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'No notifications found',
+                                    style: TextStyle(fontSize: 14, color: colors.muted),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : ListView.separated(
+                              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                              itemCount: _filteredNotifications.length,
+                              separatorBuilder: (context, index) => const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                final n = _filteredNotifications[index];
+                                return _buildNotificationCard(colors, n);
+                              },
+                            ),
+                    ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  String _formatTimeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 }

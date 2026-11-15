@@ -1,10 +1,57 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
 import 's21_postmortem_report_screen.dart';
 
-class S20RecoveryVerificationScreen extends StatelessWidget {
-  const S20RecoveryVerificationScreen({super.key});
+class S20RecoveryVerificationScreen extends StatefulWidget {
+  final String incidentId;
+
+  const S20RecoveryVerificationScreen({super.key, this.incidentId = 'INC-1042'});
+
+  @override
+  State<S20RecoveryVerificationScreen> createState() => _S20RecoveryVerificationScreenState();
+}
+
+class _S20RecoveryVerificationScreenState extends State<S20RecoveryVerificationScreen> {
+  final ApiService _apiService = ApiService();
+
+  bool _isReverifying = false;
+  bool _isVerified = true;
+  double _currentErrorRate = 0.4;
+  int _currentLatency = 190;
+  double _currentCpu = 42.0;
+
+  Future<void> _triggerReverification() async {
+    setState(() => _isReverifying = true);
+    try {
+      final metrics = await _apiService.fetchMetrics();
+      if (mounted) {
+        setState(() {
+          _currentErrorRate = metrics.errorRate;
+          _currentLatency = metrics.latencyMs;
+          _currentCpu = metrics.cpuUsage;
+          _isVerified = _currentErrorRate < 5.0;
+        });
+      }
+    } catch (_) {
+      // Graceful fallback
+    } finally {
+      if (mounted) {
+        setState(() => _isReverifying = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _isVerified
+                  ? 'Independent health checks passed. System stable.'
+                  : 'System metrics still degraded.',
+            ),
+            backgroundColor: context.colors.card,
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

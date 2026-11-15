@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../services/api_service.dart';
+import '../models/cicd_model.dart';
 
 class S15FailedPipelineJobScreen extends StatefulWidget {
   const S15FailedPipelineJobScreen({super.key});
@@ -36,6 +38,8 @@ class _S15FailedPipelineJobScreenState
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final job = _job;
+    final failedStep = job?.failedStep;
 
     return Scaffold(
       backgroundColor: colors.bg,

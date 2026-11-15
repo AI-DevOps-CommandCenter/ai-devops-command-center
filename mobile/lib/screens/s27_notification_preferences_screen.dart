@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 
 class S27NotificationPreferencesScreen extends StatefulWidget {
@@ -38,6 +39,63 @@ class _S27NotificationPreferencesScreenState
   ];
 
   final List<String> _channels = const ['Push', 'Email', 'Slack', 'Discord'];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    try {
+      final prefs = await _apiService.fetchNotificationPreferences();
+      if (mounted) {
+        setState(() {
+          _preferences = prefs;
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _savePreferences() async {
+    setState(() => _isSaving = true);
+    await _apiService.saveNotificationPreferences(_preferences);
+
+    if (mounted) {
+      setState(() => _isSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+              SizedBox(width: 8),
+              Text('Notification preferences saved successfully!'),
+            ],
+          ),
+          backgroundColor: context.colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  IconData _getChannelIcon(String channel) {
+    switch (channel) {
+      case 'Push':
+        return Icons.notifications_active_outlined;
+      case 'Email':
+        return Icons.mail_outline_rounded;
+      case 'Slack':
+        return Icons.tag_rounded;
+      case 'Discord':
+        return Icons.forum_outlined;
+      default:
+        return Icons.notifications_none_rounded;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

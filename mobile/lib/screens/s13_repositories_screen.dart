@@ -8,12 +8,90 @@ import 's19_execution_progress_screen.dart';
 import 's24_pull_request_summary_screen.dart';
 import 's30_search_screen.dart';
 
-class S13RepositoriesScreen extends StatelessWidget {
+class S13RepositoriesScreen extends StatefulWidget {
   const S13RepositoriesScreen({super.key});
+
+  @override
+  State<S13RepositoriesScreen> createState() => _S13RepositoriesScreenState();
+}
+
+class _S13RepositoriesScreenState extends State<S13RepositoriesScreen> {
+  final ApiService _apiService = ApiService();
+
+  bool _isLoading = true;
+  List<GithubRepoModel> _repos = [];
+  List<GitCommitModel> _commits = [];
+  List<PullRequestModel> _pulls = [];
+  List<WorkflowRunModel> _runs = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    try {
+      final repos = await _apiService.fetchRepositories();
+      final commits = await _apiService.fetchCommits();
+      final pulls = await _apiService.fetchPullRequests();
+      final runs = await _apiService.fetchWorkflowRuns();
+
+      if (mounted) {
+        setState(() {
+          _repos = repos;
+          _commits = commits;
+          _pulls = pulls;
+          _runs = runs;
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+
+    final primaryRepo = _repos.isNotEmpty ? _repos.first : null;
+    final secondaryRepo = _repos.length > 1 ? _repos[1] : null;
+    final recentCommit = _commits.isNotEmpty ? _commits.first : null;
+    final recentPr = _pulls.isNotEmpty ? _pulls.first : null;
+    final failedRun = _runs.firstWhere(
+      (r) => r.isFailed,
+      orElse: () => _runs.isNotEmpty ? _runs.first : WorkflowRunModel(
+        id: 318,
+        name: 'CI',
+        runNumber: 318,
+        event: 'push',
+        status: 'completed',
+        conclusion: 'failure',
+        branch: 'main',
+        headSha: 'a91f3c2',
+        actorLogin: 'devone',
+        htmlUrl: '',
+      ),
+    );
+    final deployRun = _runs.firstWhere(
+      (r) => r.name.toLowerCase().contains('deploy') || r.branch == 'main',
+      orElse: () => _runs.isNotEmpty ? _runs.last : WorkflowRunModel(
+        id: 317,
+        name: 'Deployment v2.8.1',
+        runNumber: 317,
+        event: 'push',
+        status: 'completed',
+        conclusion: 'success',
+        branch: 'main',
+        headSha: 'a91f3c2',
+        actorLogin: 'alexm',
+        htmlUrl: '',
+      ),
+    );
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -70,6 +148,15 @@ class S13RepositoriesScreen extends StatelessWidget {
                       child: Icon(Icons.search, size: 20, color: colors.text),
                     ),
                   ),
+                  if (_isLoading)
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: colors.teal,
+                      ),
+                    ),
                 ],
               ),
             ),
