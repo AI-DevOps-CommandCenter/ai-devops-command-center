@@ -51,7 +51,7 @@ void main() {
         password: 'himasha@123',
       );
 
-      final initialToken = authService.accessToken;
+      
       final refreshSuccess = await authService.refreshSession();
 
       expect(refreshSuccess, isTrue);
