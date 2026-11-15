@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/brand_logo.dart';
+import '../controllers/auth_controller.dart';
 
 class S02SignInScreen extends StatefulWidget {
   const S02SignInScreen({super.key});
@@ -11,16 +12,61 @@ class S02SignInScreen extends StatefulWidget {
 
 class _S02SignInScreenState extends State<S02SignInScreen> {
   final TextEditingController _emailController =
-      TextEditingController(text: 'alex.morgan@demo.dev');
+      TextEditingController(text: 'mobile.test@yourdomain.com');
   final TextEditingController _passwordController =
-      TextEditingController(text: 'demo-password');
+      TextEditingController(text: 'himasha@123');
   bool _obscurePassword = true;
+  bool _isLoading = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleSignIn() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    if (email.isEmpty || password.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please enter both work email and password.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final success = await AuthController.instance.signIn(
+      email: email,
+      password: password,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    if (success) {
+      Navigator.pushReplacementNamed(context, '/dashboard');
+    } else {
+      setState(() {
+        _errorMessage = AuthController.instance.errorMessage ?? 'Invalid login credentials.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_errorMessage ?? 'Invalid login credentials.'),
+          backgroundColor: context.colors.red,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
   }
 
   void _navigateToDashboard() {
@@ -86,6 +132,33 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            if (_errorMessage != null) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: colors.red.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: colors.red.withOpacity(0.4)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.error_outline, color: colors.red, size: 18),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _errorMessage!,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                          color: colors.red,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                            ],
                             const SizedBox(height: 8),
 
                             // Work email
@@ -204,7 +277,7 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
                             SizedBox(
                               height: 48,
                               child: ElevatedButton(
-                                onPressed: _navigateToDashboard,
+                                onPressed: _isLoading ? null : _handleSignIn,
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: colors.accent,
                                   foregroundColor: colors.onAccent,
@@ -214,13 +287,22 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
                                     side: BorderSide(color: colors.accent),
                                   ),
                                 ),
-                                child: const Text(
-                                  'Sign in',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
+                                child: _isLoading
+                                    ? SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation<Color>(colors.onAccent),
+                                        ),
+                                      )
+                                    : const Text(
+                                        'Sign in',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
                               ),
                             ),
                           ],

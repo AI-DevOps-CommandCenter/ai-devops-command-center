@@ -46,8 +46,13 @@ import 'screens/s42_logs_error_screen.dart';
 import 'screens/s43_offline_screen.dart';
 import 'screens/s44_rollback_failed_screen.dart';
 import 'screens/s45_brand_screen.dart';
+import 'services/notification_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await NotificationService().initialize();
+  } catch (_) {}
   runApp(const DevOpsCommandCenterApp());
 }
 
