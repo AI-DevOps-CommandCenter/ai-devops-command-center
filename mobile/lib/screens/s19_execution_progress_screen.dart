@@ -1,229 +1,51 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/playbook_model.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/app_back_button.dart';
+import 's21_postmortem_report_screen.dart';
 
-class S19ExecutionProgressScreen extends StatefulWidget {
-  final String? runId;
-
-  const S19ExecutionProgressScreen({super.key, this.runId});
-
-  @override
-  State<S19ExecutionProgressScreen> createState() => _S19ExecutionProgressScreenState();
-}
-
-class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen> {
-  final ApiService _apiService = ApiService();
-
-  PlaybookRunModel? _run;
-  bool _isLoading = true;
-  int _currentStepIndex = 1;
-  Timer? _stepTimer;
-  Timer? _pollTimer;
-  bool _isCancelling = false;
-
-  final List<Map<String, String>> _defaultSteps = const [
-    {
-      'time': '14:24:02',
-      'title': 'Queued & Approved',
-      'detail': 'Playbook run validated by operator decision',
-    },
-    {
-      'time': '14:24:18',
-      'title': 'Dispatched to n8n workflow',
-      'detail': 'Workflow: remediation-workflow (ID: n8n-exec-8491)',
-    },
-    {
-      'time': '14:25:05',
-      'title': 'Switching traffic & draining pods',
-      'detail': 'Routing ingress to healthy deployment v2.8.0',
-    },
-    {
-      'time': '14:26:12',
-      'title': 'Execution complete',
-      'detail': 'Playbook action finished. Awaiting health verification.',
-    },
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPlaybookRun();
-    _startSimulatedStepProgression();
-  }
-
-  @override
-  void dispose() {
-    _stepTimer?.cancel();
-    _pollTimer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _loadPlaybookRun() async {
-    try {
-      final id = widget.runId ?? 'run-uuid-1042-rb';
-      final run = await _apiService.fetchPlaybookRun(id);
-      if (mounted) {
-        setState(() {
-          _run = run;
-          _isLoading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  void _startSimulatedStepProgression() {
-    // Progressively advances the n8n execution timeline every 2.5 seconds for live visual verification
-    _stepTimer = Timer.periodic(const Duration(milliseconds: 2500), (timer) {
-      if (!mounted) return;
-      if (_currentStepIndex < _defaultSteps.length) {
-        setState(() {
-          _currentStepIndex++;
-        });
-      } else {
-        _stepTimer?.cancel();
-      }
-    });
-  }
-
-  Future<void> _handleCancelRun() async {
-    final runId = _run?.id ?? widget.runId ?? 'run-uuid-1042-rb';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: context.colors.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Cancel Playbook Run?',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.colors.text),
-        ),
-        content: Text(
-          'Are you sure you want to stop this playbook execution? Running processes in n8n will be aborted.',
-          style: TextStyle(fontSize: 13, color: context.colors.muted),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Keep Running', style: TextStyle(color: context.colors.muted)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: context.colors.red,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            child: const Text('Cancel Run', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      setState(() => _isCancelling = true);
-      _stepTimer?.cancel();
-
-      await _apiService.cancelPlaybookRun(
-        runId: runId,
-        reason: 'Execution manually cancelled from mobile command center.',
-      );
-
-      if (mounted) {
-        setState(() {
-          _isCancelling = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Playbook run cancelled successfully.'),
-            backgroundColor: context.colors.card,
-          ),
-        );
-        Navigator.pop(context);
-      }
-    }
-  }
+class S19ExecutionProgressScreen extends StatelessWidget {
+  const S19ExecutionProgressScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final isFinished = _currentStepIndex >= _defaultSteps.length;
-    final incidentId = _run?.incidentId ?? 'INC-1042';
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header
+            // Header: padding: 14px 16px 10px, gap: 10px
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
+                  const AppBackButton(),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Execution Progress',
+                          'Recovery',
                           style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
                             color: colors.text,
                           ),
                         ),
+                        const SizedBox(height: 1),
                         Text(
-                          incidentId,
+                          'INC-1042 · payments-api · rollback',
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: 13,
                             color: colors.muted,
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isFinished ? colors.badgeGreenBg : colors.cardAccent,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: isFinished ? colors.green : colors.border,
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          isFinished ? Icons.check_circle_outline : Icons.sync_rounded,
-                          size: 12,
-                          color: isFinished ? colors.green : colors.teal,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          isFinished ? 'COMPLETED' : 'RUNNING',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: isFinished ? colors.green : colors.teal,
-                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
@@ -232,107 +54,182 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
               ),
             ),
 
-            // Content
+            // Content: padding: 4px 16px 24px, gap: 14px
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Action Summary Card
-                    _buildSummaryCard(colors),
+                    // Stepper: Detect(ok), Investigate(ok), Cause(ok), Approve(ok), Recover(active), Report(idle)
+                    _buildStepper(context, activeStage: 4),
                     const SizedBox(height: 14),
 
-                    // Live Timeline Header
+                    // Green Banner: Service recovered
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: colors.successSoft,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.shield_outlined, size: 26, color: colors.ok),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Service recovered',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: colors.text,
+                                  ),
+                                ),
+                                Text(
+                                  'Verified at 14:33 after a 5-minute check window',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: colors.muted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Section: Before and after
+                    Text(
+                      'Before and after',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.52,
+                        color: colors.muted,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // 3-column Before and after cards
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'N8N WORKFLOW EXECUTION STEPS',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.8,
-                            color: colors.muted,
+                        Expanded(
+                          child: _buildBeforeAfterCard(
+                            label: 'Error rate',
+                            before: '12.4%',
+                            after: '0.4%',
+                            colors: colors,
                           ),
                         ),
-                        Text(
-                          'Step $_currentStepIndex of ${_defaultSteps.length}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: colors.teal,
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildBeforeAfterCard(
+                            label: 'P95',
+                            before: '2.4 s',
+                            after: '190 ms',
+                            colors: colors,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildBeforeAfterCard(
+                            label: 'Timeouts',
+                            before: '212',
+                            after: '0',
+                            colors: colors,
                           ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 14),
+
+                    // Section: Steps
+                    Text(
+                      'Steps',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.52,
+                        color: colors.muted,
+                      ),
+                    ),
                     const SizedBox(height: 8),
 
-                    // Timeline Card
-                    _buildTimelineCard(colors),
-                    const SizedBox(height: 16),
+                    // 5 Step Cards
+                    _buildStepCard(
+                      title: 'Approved',
+                      time: '14:24',
+                      desc: 'by Alex Morgan',
+                      colors: colors,
+                    ),
+                    const SizedBox(height: 8),
 
-                    // Post-execution Status or Cancel Button
-                    if (isFinished) ...[
-                      _buildFinishedCard(colors),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: ElevatedButton(
-                          onPressed: () {
-                            Navigator.pushNamed(context, '/recovery-verification');
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: colors.teal,
-                            foregroundColor: colors.isDark ? const Color(0xFF0B1226) : Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                    _buildStepCard(
+                      title: 'Deploy v2.8.0',
+                      time: '14:25',
+                      desc: 'GitHub Actions · pipeline #320',
+                      colors: colors,
+                    ),
+                    const SizedBox(height: 8),
+
+                    _buildStepCard(
+                      title: 'Restart pods',
+                      time: '14:26',
+                      desc: '3 of 3 pods healthy',
+                      colors: colors,
+                    ),
+                    const SizedBox(height: 8),
+
+                    _buildStepCard(
+                      title: 'Health checks',
+                      time: '14:27',
+                      desc: 'Error rate below 1% · P95 below 300 ms',
+                      colors: colors,
+                    ),
+                    const SizedBox(height: 8),
+
+                    _buildStepCard(
+                      title: 'Verify for 5 minutes',
+                      time: '14:33',
+                      desc: 'No new connection timeouts',
+                      colors: colors,
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Button: Open postmortem
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const S21PostmortemReportScreen(),
                             ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: colors.accent,
+                          foregroundColor: colors.onAccent,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                'Verify Recovery',
-                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                              ),
-                              SizedBox(width: 6),
-                              Icon(Icons.arrow_forward_rounded, size: 16),
-                            ],
+                        ),
+                        child: const Text(
+                          'Open postmortem',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
-                    ] else ...[
-                      // Cancel Button while in progress
-                      SizedBox(
-                        width: double.infinity,
-                        height: 46,
-                        child: OutlinedButton(
-                          onPressed: _isCancelling ? null : _handleCancelRun,
-                          style: OutlinedButton.styleFrom(
-                            backgroundColor: colors.cardAccent,
-                            foregroundColor: colors.red,
-                            side: BorderSide(color: colors.red.withOpacity(0.5)),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: _isCancelling
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Text(
-                                  'Cancel Run (POST /api/playbook-runs/:id/cancel)',
-                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                                ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 20),
+                    ),
                   ],
                 ),
               ),
@@ -343,242 +240,196 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
     );
   }
 
-  Widget _buildSummaryCard(AppColorScheme colors) {
-    final action = _run?.actionType ?? PlaybookActionType.rollback;
-    final service = _run?.serviceName ?? 'payments-api';
-    final fromTo = '${_run?.fromVersion ?? "v2.8.1"} → ${_run?.toVersion ?? "v2.8.0"}';
-
+  Widget _buildBeforeAfterCard({
+    required String label,
+    required String before,
+    required String after,
+    required dynamic colors,
+  }) {
     return Container(
-      width: double.infinity,
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: colors.card,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(width: 4, color: colors.teal),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(14.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            action.displayName,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: colors.text,
-                            ),
-                          ),
-                          Text(
-                            service,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: colors.teal,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Target: $fromTo · Production Cluster',
-                        style: TextStyle(fontSize: 12, color: colors.muted),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTimelineCard(AppColorScheme colors) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
+        border: Border.all(color: colors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: List.generate(_defaultSteps.length, (index) {
-          final step = _defaultSteps[index];
-          final isCompleted = index < _currentStepIndex;
-          final isCurrent = index == _currentStepIndex - 1;
-          final isLast = index == _defaultSteps.length - 1;
-
-          Color dotColor = colors.border;
-          if (isCompleted) {
-            dotColor = colors.teal;
-          } else if (isCurrent) {
-            dotColor = colors.warnText;
-          }
-
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Indicator & Line
-              Column(
-                children: [
-                  Container(
-                    width: 14,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: dotColor,
-                    ),
-                    child: isCompleted
-                        ? const Icon(Icons.check, size: 10, color: Colors.white)
-                        : (isCurrent
-                            ? Container(
-                                margin: const EdgeInsets.all(3),
-                                decoration: const BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : null),
-                  ),
-                  if (!isLast)
-                    Container(
-                      width: 2,
-                      height: 46,
-                      color: isCompleted ? colors.teal : colors.border,
-                    ),
-                ],
-              ),
-              const SizedBox(width: 12),
-
-              // Details
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            step['title']!,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: isCompleted || isCurrent ? FontWeight.bold : FontWeight.w500,
-                              color: isCompleted || isCurrent ? colors.text : colors.muted,
-                            ),
-                          ),
-                          Text(
-                            isCompleted ? step['time']! : '--:--:--',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontFamily: 'monospace',
-                              color: isCompleted ? colors.muted : colors.border,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        step['detail']!,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: colors.muted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        }),
+        children: [
+          Text(label, style: TextStyle(fontSize: 12, color: colors.muted)),
+          const SizedBox(height: 2),
+          Text(
+            before,
+            style: TextStyle(
+              fontSize: 13,
+              color: colors.muted,
+              decoration: TextDecoration.lineThrough,
+            ),
+          ),
+          Text(
+            after,
+            style: TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.bold,
+              color: colors.ok,
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildFinishedCard(AppColorScheme colors) {
+  Widget _buildStepCard({
+    required String title,
+    required String time,
+    required String desc,
+    required dynamic colors,
+  }) {
     return Container(
-      width: double.infinity,
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: colors.successSoft,
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.check, size: 16, color: colors.ok),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: colors.text,
+                      ),
+                    ),
+                    Text(
+                      time,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontFamily: 'JetBrains Mono',
+                        color: colors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  desc,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colors.muted,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(width: 4, color: colors.green),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(14.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.check_circle_rounded, color: colors.green, size: 18),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Execution finished successfully',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: colors.text,
-                            ),
-                          ),
-                        ],
+    );
+  }
+
+  Widget _buildStepper(BuildContext context, {required int activeStage}) {
+    final colors = context.colors;
+    final stages = ['Detect', 'Investigate', 'Cause', 'Approve', 'Recover', 'Report'];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+      decoration: BoxDecoration(
+        color: colors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        children: List.generate(stages.length, (index) {
+          final isCompleted = index < activeStage;
+          final isActive = index == activeStage;
+
+          return Expanded(
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 2,
+                        color: index == 0
+                            ? Colors.transparent
+                            : (index <= activeStage ? colors.ok : colors.border),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'n8n automated workflow has terminated with exit code 0. Health is not yet verified. Recovery must be checked independently.',
-                        style: TextStyle(fontSize: 12, color: colors.muted, height: 1.4),
+                    ),
+                    Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: isCompleted
+                            ? colors.ok
+                            : (isActive ? colors.accentSoft : colors.card),
+                        shape: BoxShape.circle,
+                        border: isCompleted
+                            ? null
+                            : Border.all(
+                                color: isActive ? colors.accent : colors.border,
+                                width: 2,
+                              ),
                       ),
-                    ],
+                      alignment: Alignment.center,
+                      child: isCompleted
+                          ? Icon(Icons.check, size: 13, color: colors.card)
+                          : (isActive
+                              ? Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: colors.accent,
+                                    shape: BoxShape.circle,
+                                  ),
+                                )
+                              : null),
+                    ),
+                    Expanded(
+                      child: Container(
+                        height: 2,
+                        color: index == stages.length - 1
+                            ? Colors.transparent
+                            : (index < activeStage ? colors.ok : colors.border),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  stages[index],
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                    color: isActive
+                        ? colors.accent
+                        : (isCompleted ? colors.text : colors.muted),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ),
+              ],
+            ),
+          );
+        }),
       ),
     );
   }

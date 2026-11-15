@@ -4,7 +4,6 @@ import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 
 /// Centralized Auth State Manager (ChangeNotifier)
-/// Matches Gayathri's ThemeController.instance design pattern
 class AuthController extends ChangeNotifier {
   static final AuthController instance = AuthController._internal();
   factory AuthController() => instance;
@@ -21,7 +20,7 @@ class AuthController extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
-  /// Sign in with Email and Password
+  /// Sign in with Real Supabase Email and Password
   Future<bool> signIn({
     required String email,
     required String password,
@@ -37,35 +36,26 @@ class AuthController extends ChangeNotifier {
       );
       _currentUser = user;
       _isLoading = false;
+      _errorMessage = null;
       notifyListeners();
+
+      // Register device token with push notifications
       NotificationService().registerTokenOnLogin();
       return true;
     } catch (e) {
       _isLoading = false;
-      _errorMessage = 'Authentication failed. Please check credentials.';
+      // Strip "Exception: " if present for user-friendly UI display
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      _errorMessage = msg;
       notifyListeners();
       return false;
     }
   }
 
-  /// One-click Demo Mode Login for presentations
-  Future<bool> enterDemoMode() async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
-    final user = await _authService.signInDemo();
-    _currentUser = user;
-    _isLoading = false;
-    notifyListeners();
-    NotificationService().registerTokenOnLogin();
-    return true;
-  }
-
   /// Sign out
-  void signOut() {
-    NotificationService().unregisterTokenOnLogout();
-    _authService.signOut();
+  Future<void> signOut() async {
+    await NotificationService().unregisterTokenOnLogout();
+    await _authService.signOut();
     _currentUser = null;
     _errorMessage = null;
     notifyListeners();

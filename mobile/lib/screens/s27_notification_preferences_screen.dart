@@ -1,47 +1,44 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
-import '../widgets/app_bottom_nav.dart';
 
 class S27NotificationPreferencesScreen extends StatefulWidget {
   const S27NotificationPreferencesScreen({super.key});
 
   @override
-  State<S27NotificationPreferencesScreen> createState() => _S27NotificationPreferencesScreenState();
+  State<S27NotificationPreferencesScreen> createState() =>
+      _S27NotificationPreferencesScreenState();
 }
 
-class _S27NotificationPreferencesScreenState extends State<S27NotificationPreferencesScreen> {
-  final ApiService _apiService = ApiService();
-
-  bool _isLoading = true;
-  bool _isSaving = false;
-
-  Map<String, bool> _preferences = {
-    'Push-Detection': true,
-    'Push-Approval requests': true,
-    'Push-Action results': true,
-    'Push-Resolution': true,
-    'Email-Detection': true,
-    'Email-Approval requests': true,
-    'Email-Action results': false,
-    'Email-Resolution': true,
-    'Slack-Detection': true,
-    'Slack-Approval requests': true,
-    'Slack-Action results': true,
-    'Slack-Resolution': true,
-    'Discord-Detection': false,
-    'Discord-Approval requests': false,
-    'Discord-Action results': false,
-    'Discord-Resolution': false,
+class _S27NotificationPreferencesScreenState
+    extends State<S27NotificationPreferencesScreen> {
+  final Map<String, bool> _state = {
+    'detectPush': true,
+    'detectEmail': false,
+    'detectSlack': true,
+    'detectDiscord': false,
+    'approvePush': true,
+    'approveEmail': true,
+    'approveSlack': true,
+    'approveDiscord': false,
+    'resultPush': true,
+    'resultEmail': false,
+    'resultSlack': true,
+    'resultDiscord': false,
+    'resolvePush': true,
+    'resolveEmail': true,
+    'resolveSlack': true,
+    'resolveDiscord': false,
   };
 
-  final List<String> _channels = const ['Push', 'Email', 'Slack', 'Discord'];
-  final List<String> _events = const [
-    'Detection',
-    'Approval requests',
-    'Action results',
-    'Resolution',
+  final List<Map<String, String>> _events = const [
+    {'k': 'detect', 'n': 'Incident detected'},
+    {'k': 'approve', 'n': 'Approval needed'},
+    {'k': 'result', 'n': 'Action result'},
+    {'k': 'resolve', 'n': 'Incident resolved'},
   ];
+
+  final List<String> _channels = const ['Push', 'Email', 'Slack', 'Discord'];
 
   @override
   void initState() {
@@ -109,57 +106,49 @@ class _S27NotificationPreferencesScreenState extends State<S27NotificationPrefer
       body: SafeArea(
         child: Column(
           children: [
-            // Header
+            // Header: Notifications · Choose where each event goes
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
+                  InkWell(
+                    onTap: () => Navigator.pop(context),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: colors.border),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(Icons.chevron_left, size: 20, color: colors.text),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Preferences',
+                          'Notifications',
                           style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
                             color: colors.text,
                           ),
                         ),
+                        const SizedBox(height: 1),
                         Text(
-                          'Notification channels & alert triggers',
-                          style: TextStyle(fontSize: 12, color: colors.muted),
+                          'Choose where each event goes',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colors.muted,
+                          ),
                         ),
                       ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: colors.cardAccent,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: colors.border, width: 0.8),
-                    ),
-                    child: Text(
-                      'S27',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: colors.teal,
-                      ),
                     ),
                   ),
                 ],
@@ -168,118 +157,234 @@ class _S27NotificationPreferencesScreenState extends State<S27NotificationPrefer
 
             // Content
             Expanded(
-              child: _isLoading
-                  ? Center(child: CircularProgressIndicator(color: colors.teal))
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          ..._channels.map((channel) {
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 12.0),
-                              child: Container(
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                  color: colors.card,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: colors.cardBorder, width: 0.8),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: colors.isDark
-                                          ? Colors.black.withOpacity(0.3)
-                                          : const Color.fromRGBO(15, 27, 51, 0.06),
-                                      blurRadius: 4,
-                                      offset: const Offset(0, 1),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Icon(_getChannelIcon(channel), size: 18, color: colors.teal),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          channel,
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                            color: colors.text,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    ..._events.map((event) {
-                                      final key = '$channel-$event';
-                                      final isChecked = _preferences[key] ?? false;
-
-                                      return Padding(
-                                        padding: const EdgeInsets.symmetric(vertical: 2.0),
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Text(
-                                              event,
-                                              style: TextStyle(fontSize: 13, color: colors.text),
-                                            ),
-                                            Switch.adaptive(
-                                              value: isChecked,
-                                              activeColor: colors.teal,
-                                              onChanged: (val) {
-                                                setState(() {
-                                                  _preferences[key] = val;
-                                                });
-                                              },
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    }),
-                                  ],
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                children: [
+                  // Table Card
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        // Table Header
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Event',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: colors.muted,
+                                  ),
                                 ),
                               ),
-                            );
-                          }),
-                          const SizedBox(height: 10),
-
-                          // Save Button
-                          SizedBox(
-                            width: double.infinity,
-                            height: 48,
-                            child: ElevatedButton(
-                              onPressed: _isSaving ? null : _savePreferences,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: colors.teal,
-                                foregroundColor: colors.isDark ? const Color(0xFF0B1226) : Colors.white,
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              child: _isSaving
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                    )
-                                  : const Text(
-                                      'Save changes',
-                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                              ..._channels.map((c) => SizedBox(
+                                    width: 48,
+                                    child: Text(
+                                      c,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: colors.muted,
+                                      ),
                                     ),
-                            ),
+                                  )),
+                            ],
                           ),
-                          const SizedBox(height: 20),
-                        ],
+                        ),
+                        // Table Rows
+                        ..._events.map((ev) {
+                          final k = ev['k']!;
+                          final name = ev['n']!;
+                          return Container(
+                            decoration: BoxDecoration(
+                              border: Border(
+                                top: BorderSide(color: colors.border),
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    name,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                ),
+                                ..._channels.map((c) {
+                                  final key = '$k$c';
+                                  final isOn = _state[key] ?? false;
+                                  return SizedBox(
+                                    width: 48,
+                                    height: 48,
+                                    child: Center(
+                                      child: InkWell(
+                                        onTap: () {
+                                          setState(() {
+                                            _state[key] = !isOn;
+                                          });
+                                        },
+                                        borderRadius: BorderRadius.circular(7),
+                                        child: Container(
+                                          width: 24,
+                                          height: 24,
+                                          decoration: BoxDecoration(
+                                            color: isOn
+                                                ? colors.accent
+                                                : Colors.transparent,
+                                            borderRadius:
+                                                BorderRadius.circular(7),
+                                            border: Border.all(
+                                              color: isOn
+                                                  ? colors.accent
+                                                  : colors.muted,
+                                              width: 2,
+                                            ),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: isOn
+                                              ? Icon(
+                                                  Icons.check,
+                                                  size: 14,
+                                                  color: colors.onAccent,
+                                                )
+                                              : null,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Footnote
+                  Text(
+                    'Push uses Firebase Cloud Messaging. Discord needs a webhook in Integrations.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: colors.muted,
+                      height: 1.45,
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Quiet hours Header
+                  Text(
+                    'QUIET HOURS',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.52,
+                      color: colors.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Quiet Hours Card
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Mute non-critical',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: colors.muted,
+                              ),
+                            ),
+                            Text(
+                              '22:00 – 07:00',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: colors.text,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Critical alerts',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: colors.muted,
+                              ),
+                            ),
+                            Text(
+                              'Always deliver',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: colors.text,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Save Button
+                  SizedBox(
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: colors.accent,
+                        foregroundColor: colors.onAccent,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Save',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       ),
-      bottomNavigationBar: const AppBottomNav(currentRoute: 's28'),
     );
   }
 }

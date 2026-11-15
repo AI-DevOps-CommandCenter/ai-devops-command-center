@@ -15,8 +15,13 @@ class ApiService {
   factory ApiService() => _instance;
   ApiService._internal();
 
+  String? _customToken;
+  void setAuthToken(String token) {
+    _customToken = token.isNotEmpty ? token : null;
+  }
+
   Map<String, String> _headers() {
-    final token = AuthService().accessToken;
+    final token = _customToken ?? AuthService().accessToken;
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',

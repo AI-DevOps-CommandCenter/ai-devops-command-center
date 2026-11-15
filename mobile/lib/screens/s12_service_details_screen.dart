@@ -16,22 +16,25 @@ class S12ServiceDetailsScreen extends StatelessWidget {
           children: [
             // Header
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
+                  InkWell(
+                    onTap: () => Navigator.pop(context),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: colors.border),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(Icons.chevron_left, size: 20, color: colors.text),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -39,19 +42,36 @@ class S12ServiceDetailsScreen extends StatelessWidget {
                         Text(
                           'payments-api',
                           style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
                             color: colors.text,
                           ),
                         ),
+                        const SizedBox(height: 1),
                         Text(
-                          'Production',
+                          'Production \u00b7 v2.8.1 \u00b7 3 pods',
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: 13,
                             color: colors.muted,
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: colors.criticalSoft,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      'Degraded',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: colors.critical,
+                      ),
                     ),
                   ),
                 ],
@@ -60,267 +80,445 @@ class S12ServiceDetailsScreen extends StatelessWidget {
 
             // Content
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Status & Health Card
-                    _buildCard(
-                      colors: colors,
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Status',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: colors.text,
-                                ),
-                              ),
-                              _buildBadge('Degraded', colors.badgeAmberBg, colors.amber),
-                            ],
-                          ),
-                          Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
-                          _buildRow(colors, 'Error rate', '12.4%'),
-                          Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
-                          _buildRow(colors, 'P95', '2.4 s'),
-                          Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
-                          _buildRow(colors, 'CPU / Mem', '71% / 64%'),
-                        ],
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                children: [
+                  // 2x2 Metrics Grid
+                  GridView.count(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    childAspectRatio: 1.45,
+                    children: [
+                      _buildMetricCard(
+                        context,
+                        title: 'Error rate',
+                        value: '12.4%',
+                        color: colors.critical,
+                        points: const [Offset(0, 33), Offset(29, 33), Offset(56, 32.8), Offset(83, 19.8), Offset(110, 8.2), Offset(138, 5)],
                       ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Deployments
-                    Text(
-                      'Deployments',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: colors.text,
+                      _buildMetricCard(
+                        context,
+                        title: 'P95 latency',
+                        value: '2.4 s',
+                        color: colors.critical,
+                        points: const [Offset(0, 33), Offset(29, 32.9), Offset(56, 23.9), Offset(83, 12.6), Offset(110, 5), Offset(138, 5)],
                       ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Deployment v2.8.1 (Suspect)
-                    InkWell(
-                      onTap: () {
-                        Navigator.pushNamed(context, '/deployment-details');
-                      },
-                      borderRadius: BorderRadius.circular(14),
-                      child: _buildCard(
-                        colors: colors,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            RichText(
-                              text: TextSpan(
-                                style: TextStyle(fontSize: 13, color: colors.text),
-                                children: [
-                                  const TextSpan(text: 'v2.8.1', style: TextStyle(fontWeight: FontWeight.bold)),
-                                  TextSpan(text: ' · 14:05 · ', style: TextStyle(color: colors.muted)),
-                                ],
-                              ),
-                            ),
-                            _buildBadge('Suspect', colors.badgeRedBg, colors.red),
-                          ],
-                        ),
+                      _buildMetricCard(
+                        context,
+                        title: 'CPU',
+                        value: '71%',
+                        color: colors.warning,
+                        points: const [Offset(0, 33), Offset(29, 26.8), Offset(56, 21.6), Offset(83, 13.3), Offset(110, 6), Offset(138, 5)],
                       ),
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Deployment v2.8.0 (Healthy)
-                    _buildCard(
-                      colors: colors,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          RichText(
-                            text: TextSpan(
-                              style: TextStyle(fontSize: 13, color: colors.text),
-                              children: [
-                                const TextSpan(text: 'v2.8.0', style: TextStyle(fontWeight: FontWeight.bold)),
-                                TextSpan(text: ' · yesterday 16:40 · ', style: TextStyle(color: colors.muted)),
-                              ],
-                            ),
-                          ),
-                          _buildBadge('Healthy', colors.badgeGreenBg, colors.green),
-                        ],
+                      _buildMetricCard(
+                        context,
+                        title: 'Memory',
+                        value: '64%',
+                        color: colors.info,
+                        points: const [Offset(0, 33), Offset(29, 23.7), Offset(56, 19.0), Offset(83, 14.3), Offset(110, 9.7), Offset(138, 5)],
                       ),
-                    ),
-                    const SizedBox(height: 16),
+                    ],
+                  ),
 
-                    // Related Incident
-                    Text(
-                      'Related incident',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: colors.text,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
+                  const SizedBox(height: 14),
 
-                    // Incident Card
-                    InkWell(
+                  // Open incident
+                  Text(
+                    'OPEN INCIDENT',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.52,
+                      color: colors.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: InkWell(
                       onTap: () {
                         Navigator.pushNamed(context, '/incident-details');
                       },
-                      borderRadius: BorderRadius.circular(14),
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: colors.card,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border(
-                            left: BorderSide(color: colors.red, width: 4),
-                            top: BorderSide(color: colors.cardBorder, width: 0.8),
-                            right: BorderSide(color: colors.cardBorder, width: 0.8),
-                            bottom: BorderSide(color: colors.cardBorder, width: 0.8),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-                              blurRadius: 4,
-                              offset: const Offset(0, 1),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        child: Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 20, color: colors.critical),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'INC-1042 · Elevated errors',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Awaiting approval · 19 min',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: colors.criticalSoft,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                'Critical',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.critical,
+                                ),
+                              ),
                             ),
                           ],
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Recent deployments
+                  Text(
+                    'RECENT DEPLOYMENTS',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.52,
+                      color: colors.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        InkWell(
+                          onTap: () {
+                            Navigator.pushNamed(context, '/deployment-details');
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            child: Row(
                               children: [
+                                Icon(Icons.layers_outlined, size: 20, color: colors.critical),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'v2.8.1',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w600,
+                                          color: colors.text,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Today 14:05 \u00b7 PR #214',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: colors.muted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: colors.criticalSoft,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    'Suspect',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.critical,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Divider(height: 1, indent: 46, color: colors.border),
+                        InkWell(
+                          onTap: () {},
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            child: Row(
+                              children: [
+                                Icon(Icons.layers_outlined, size: 20, color: colors.success),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'v2.8.0',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w600,
+                                          color: colors.text,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Yesterday 16:40 \u00b7 stable 22 h',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: colors.muted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: colors.successSoft,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    'Rollback target',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.success,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Quick links
+                  Text(
+                    'QUICK LINKS',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.52,
+                      color: colors.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.pushNamed(context, '/logs');
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: colors.card,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: colors.border),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(Icons.terminal_rounded, size: 20, color: colors.text),
+                                const SizedBox(height: 6),
                                 Text(
-                                  'INC-1042',
+                                  'Logs',
                                   style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
                                     color: colors.text,
                                   ),
                                 ),
-                                _buildBadge('Critical', colors.badgeRedBg, colors.red),
                               ],
                             ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Elevated errors after deployment',
-                              style: TextStyle(fontSize: 13, color: colors.text),
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'payments-api · Production',
-                                  style: TextStyle(fontSize: 11, color: colors.muted),
-                                ),
-                                _buildBadge('Investigating', colors.badgeAmberBg, colors.amber),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // View Logs Button
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.pushNamed(context, '/logs');
-                        },
-                        style: OutlinedButton.styleFrom(
-                          backgroundColor: colors.cardAccent,
-                          foregroundColor: colors.text,
-                          side: BorderSide(color: colors.border),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        child: Text(
-                          'View Logs',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.pushNamed(context, '/metrics');
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: colors.card,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: colors.border),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(Icons.show_chart_rounded, size: 20, color: colors.text),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Metrics',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: colors.text,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.pushNamed(context, '/playbooks');
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: colors.card,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: colors.border),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(Icons.bolt_rounded, size: 20, color: colors.text),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Playbooks',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: colors.text,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ],
         ),
       ),
-      bottomNavigationBar: const AppBottomNav(currentRoute: 's11'),
+      bottomNavigationBar: const AppBottomNav(currentRoute: 'monitor'),
     );
   }
 
-  Widget _buildCard({required AppColorScheme colors, required Widget child}) {
+  Widget _buildMetricCard(
+    BuildContext context, {
+    required String title,
+    required String value,
+    required Color color,
+    required List<Offset> points,
+  }) {
+    final colors = context.colors;
     return Container(
-      width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(fontSize: 13, color: colors.muted),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(
+            height: 28,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _SparklinePainter(points: points, color: color),
+            ),
           ),
         ],
       ),
-      child: child,
     );
+  }
+}
+
+class _SparklinePainter extends CustomPainter {
+  final List<Offset> points;
+  final Color color;
+
+  _SparklinePainter({required this.points, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.isEmpty) return;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final path = Path();
+    for (int i = 0; i < points.length; i++) {
+      final x = points[i].dx * (size.width / 140.0);
+      final y = points[i].dy * (size.height / 36.0);
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(path, paint);
   }
 
-  Widget _buildRow(AppColorScheme colors, String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            color: colors.muted,
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-            color: colors.text,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBadge(String label, Color bg, Color text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: text,
-        ),
-      ),
-    );
-  }
+  @override
+  bool shouldRepaint(covariant _SparklinePainter oldDelegate) => false;
 }

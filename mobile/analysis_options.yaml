@@ -18,6 +18,10 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+  errors:
+    deprecated_member_use: ignore
+    unnecessary_underscores: ignore
+    unnecessary_to_list_in_spreads: ignore
 
 linter:
   # The lint rules applied to this project can be customized in the

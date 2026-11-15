@@ -3,7 +3,12 @@ import '../models/notification_model.dart';
 import '../services/api_service.dart';
 import '../services/notification_service.dart';
 import '../theme/app_colors.dart';
-import '../widgets/app_bottom_nav.dart';
+import '../widgets/app_back_button.dart';
+import 's05_incident_details_screen.dart';
+import 's07_root_cause_screen.dart';
+import 's17_recommended_action_screen.dart';
+import 's32_inc_1041_screen.dart';
+import 's34_pm_1037_screen.dart';
 
 class S25NotificationsScreen extends StatefulWidget {
   const S25NotificationsScreen({super.key});
@@ -13,141 +18,64 @@ class S25NotificationsScreen extends StatefulWidget {
 }
 
 class _S25NotificationsScreenState extends State<S25NotificationsScreen> {
-  final ApiService _apiService = ApiService();
-  final NotificationService _notificationService = NotificationService();
-
-  List<NotificationModel> _notifications = [];
-  bool _isLoading = true;
-  String _activeFilter = 'All'; // 'All', 'Unread', 'Critical'
-
-  @override
-  void initState() {
-    super.initState();
-    _loadNotifications();
-  }
-
-  Future<void> _loadNotifications() async {
-    setState(() => _isLoading = true);
-    try {
-      final list = await _apiService.fetchNotifications();
-      if (mounted) {
-        setState(() {
-          _notifications = list;
-          _isLoading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _handleNotificationTap(NotificationModel notification) async {
-    // 1. Mark as read on backend (PATCH /api/notifications/:id/read)
-    if (!notification.isRead) {
-      await _apiService.markNotificationAsRead(notification.id);
-      setState(() {
-        final idx = _notifications.indexWhere((n) => n.id == notification.id);
-        if (idx != -1) {
-          _notifications[idx] = notification.copyWith(readAt: DateTime.now());
-        }
-      });
-    }
-
-    // 2. Trigger deep linking to the target screen
-    if (mounted) {
-      _notificationService.handleDeepLink(context, notification);
-    }
-  }
-
-  void _markAllAsRead() {
-    setState(() {
-      _notifications = _notifications.map((n) {
-        if (!n.isRead) {
-          _apiService.markNotificationAsRead(n.id);
-          return n.copyWith(readAt: DateTime.now());
-        }
-        return n;
-      }).toList();
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('All notifications marked as read.'),
-        backgroundColor: context.colors.card,
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  List<NotificationModel> get _filteredNotifications {
-    if (_activeFilter == 'Unread') {
-      return _notifications.where((n) => !n.isRead).toList();
-    }
-    if (_activeFilter == 'Critical') {
-      return _notifications.where((n) => n.category == NotificationCategory.incidentAlert).toList();
-    }
-    return _notifications;
-  }
-
-  int get _unreadCount => _notifications.where((n) => !n.isRead).length;
+  bool _allRead = false;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final unreadCount = _allRead ? 0 : 2;
+    final countLabel = unreadCount > 0 ? '$unreadCount unread · 6 total' : 'All caught up · 6 total';
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header
+            // Header: padding: 14px 16px 10px, gap: 10px
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
+                  const AppBackButton(),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'Notifications',
                           style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
                             color: colors.text,
                           ),
                         ),
-                        if (_unreadCount > 0) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: colors.badgeRedBg,
-                              borderRadius: BorderRadius.circular(99),
-                            ),
-                            child: Text(
-                              '$_unreadCount new',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: colors.red,
-                              ),
-                            ),
+                        const SizedBox(height: 1),
+                        Text(
+                          countLabel,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colors.muted,
                           ),
-                        ],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => _allRead = true),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      foregroundColor: colors.accent,
+                    ),
+                    child: const Text(
+                      'Mark all read',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   if (_unreadCount > 0)
@@ -160,43 +88,523 @@ class _S25NotificationsScreenState extends State<S25NotificationsScreen> {
               ),
             ),
 
-            // Filter Tabs
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
-              child: Row(
-                children: ['All', 'Unread', 'Critical'].map((filter) {
-                  final isSelected = _activeFilter == filter;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: FilterChip(
-                      label: Text(
-                        filter,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                          color: isSelected
-                              ? (colors.isDark ? const Color(0xFF0B1226) : Colors.white)
-                              : colors.text,
-                        ),
+            // Content: padding: 4px 16px 24px, gap: 14px
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Section: Today
+                    Text(
+                      'Today',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.52,
+                        color: colors.muted,
                       ),
-                      selected: isSelected,
-                      selectedColor: colors.teal,
-                      backgroundColor: colors.card,
-                      checkmarkColor: Colors.transparent,
-                      showCheckmark: false,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        side: BorderSide(
-                          color: isSelected ? colors.teal : colors.cardBorder,
-                          width: 0.8,
-                        ),
-                      ),
-                      onSelected: (_) {
-                        setState(() => _activeFilter = filter);
-                      },
                     ),
-                  );
-                }).toList(),
+                    const SizedBox(height: 8),
+
+                    // Notification 1: Approval needed
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: colors.badgeAmberBg,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            alignment: Alignment.center,
+                            child: Icon(Icons.lock_outline, size: 18, color: colors.warning),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Approval needed',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: colors.text,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Roll back payments-api to v2.8.0 for INC-1042',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: colors.muted,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '14:16 · Push · Slack · Email',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: colors.muted,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: SizedBox(
+                                        height: 48,
+                                        child: ElevatedButton(
+                                          onPressed: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (context) => const S17RecommendedActionScreen(),
+                                              ),
+                                            );
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: colors.accent,
+                                            foregroundColor: colors.onAccent,
+                                            elevation: 0,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            'Review',
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: SizedBox(
+                                        height: 48,
+                                        child: OutlinedButton(
+                                          onPressed: () => Navigator.pop(context),
+                                          style: OutlinedButton.styleFrom(
+                                            backgroundColor: colors.card,
+                                            side: BorderSide(color: colors.border),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            'Later',
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                              color: colors.text,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (!_allRead) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              width: 8,
+                              height: 8,
+                              margin: const EdgeInsets.only(top: 6),
+                              decoration: BoxDecoration(
+                                color: colors.accent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Notification 2: Investigation complete
+                    InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const S07RootCauseScreen(),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: colors.card,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: colors.accentSoft,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(Icons.auto_awesome, size: 18, color: colors.accent),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Investigation complete',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Probable cause found for INC-1042 (moderate confidence)',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '14:15 · Push · Slack',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (!_allRead) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                width: 8,
+                                height: 8,
+                                margin: const EdgeInsets.only(top: 6),
+                                decoration: BoxDecoration(
+                                  color: colors.accent,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Notification 3: Incident detected INC-1042
+                    InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const S05IncidentDetailsScreen(),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: colors.card,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: colors.badgeRedBg,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(Icons.warning_amber_rounded, size: 18, color: colors.critical),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Incident detected',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'INC-1042 · Error rate above 5% on payments-api',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '14:12 · Push · Slack',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Notification 4: Incident detected INC-1041
+                    InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const S32Inc1041Screen(),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: colors.card,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: colors.badgeAmberBg,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(Icons.warning_amber_rounded, size: 18, color: colors.warning),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Incident detected',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'INC-1041 · Queue backlog growing on orders-worker',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '13:40 · Push',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Section: Yesterday
+                    Text(
+                      'Yesterday',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.52,
+                        color: colors.muted,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Notification 5: Recovery verified
+                    InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const S34Pm1037Screen(),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: colors.card,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: colors.badgeGreenBg,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(Icons.check, size: 18, color: colors.success),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Recovery verified',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'INC-1037 · Cache hit ratio back to normal',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '17:02 · Push · Discord',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Notification 6: Postmortem ready
+                    InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const S34Pm1037Screen(),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: colors.card,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: colors.info.withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(Icons.description_outlined, size: 18, color: colors.info),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Postmortem ready',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'INC-1037 report saved to history',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '17:05 · Email',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: colors.muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 6),
@@ -234,140 +642,6 @@ class _S25NotificationsScreenState extends State<S25NotificationsScreen> {
                     ),
             ),
           ],
-        ),
-      ),
-      bottomNavigationBar: const AppBottomNav(currentRoute: 's25'),
-    );
-  }
-
-  Widget _buildNotificationCard(AppColorScheme colors, NotificationModel n) {
-    Color accentColor = colors.teal;
-    switch (n.category) {
-      case NotificationCategory.incidentAlert:
-        accentColor = colors.red;
-        break;
-      case NotificationCategory.approvalRequest:
-        accentColor = colors.warnText;
-        break;
-      case NotificationCategory.remediationResult:
-        accentColor = colors.teal;
-        break;
-      case NotificationCategory.recoveryResolution:
-        accentColor = colors.green;
-        break;
-      case NotificationCategory.systemNotice:
-        accentColor = colors.muted;
-        break;
-    }
-
-    final isUnread = !n.isRead;
-
-    return InkWell(
-      onTap: () => _handleNotificationTap(n),
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        decoration: BoxDecoration(
-          color: colors.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isUnread ? accentColor.withOpacity(0.5) : colors.cardBorder,
-            width: isUnread ? 1.0 : 0.8,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-              blurRadius: 4,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(width: 4, color: accentColor),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(n.category.icon, size: 16, color: accentColor),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                n.title,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: isUnread ? FontWeight.bold : FontWeight.w600,
-                                  color: colors.text,
-                                ),
-                              ),
-                            ),
-                            if (isUnread) ...[
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: accentColor,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                            ],
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: colors.cardAccent,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                n.channel.slug,
-                                style: TextStyle(fontSize: 10, color: colors.muted, fontFamily: 'monospace'),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          n.message,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isUnread ? colors.text : colors.muted,
-                            height: 1.3,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              _formatTimeAgo(n.createdAt),
-                              style: TextStyle(fontSize: 11, color: colors.muted),
-                            ),
-                            Row(
-                              children: [
-                                Text(
-                                  'Tap to view',
-                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: accentColor),
-                                ),
-                                const SizedBox(width: 4),
-                                Icon(Icons.arrow_forward_ios_rounded, size: 10, color: accentColor),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
         ),
       ),
     );

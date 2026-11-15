@@ -1,59 +1,10 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../widgets/app_back_button.dart';
 import 's07_root_cause_screen.dart';
 
-class S06AiInvestigationProgressScreen extends StatefulWidget {
+class S06AiInvestigationProgressScreen extends StatelessWidget {
   const S06AiInvestigationProgressScreen({super.key});
-
-  @override
-  State<S06AiInvestigationProgressScreen> createState() => _S06AiInvestigationProgressScreenState();
-}
-
-class _S06AiInvestigationProgressScreenState extends State<S06AiInvestigationProgressScreen> {
-  double _progress = 0.0;
-  int _currentStepIndex = 0;
-  Timer? _timer;
-
-  final List<String> _steps = const [
-    'Collecting logs',
-    'Checking metrics',
-    'Reviewing deployments',
-    'Correlating evidence',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _startInvestigationSimulation();
-  }
-
-  void _startInvestigationSimulation() {
-    _timer = Timer.periodic(const Duration(milliseconds: 700), (timer) {
-      if (_currentStepIndex < _steps.length) {
-        setState(() {
-          _currentStepIndex++;
-          _progress = (_currentStepIndex) / _steps.length;
-        });
-      } else {
-        _timer?.cancel();
-        Future.delayed(const Duration(milliseconds: 600), () {
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const S07RootCauseScreen()),
-            );
-          }
-        });
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -62,158 +13,437 @@ class _S06AiInvestigationProgressScreenState extends State<S06AiInvestigationPro
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
+        child: Column(
+          children: [
+            // Header: padding: 14px 16px 10px, gap: 10px
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+              child: Row(
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Investigating',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: colors.text,
+                  const AppBackButton(),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'AI investigation',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                            color: colors.text,
+                          ),
                         ),
-                      ),
-                      Text(
-                        'INC-1042',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: colors.muted,
+                        const SizedBox(height: 1),
+                        Text(
+                          'INC-1042 · payments-api',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colors.muted,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
+            ),
 
-              // Progress Bar
-              Container(
-                height: 8,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: colors.isDark ? const Color(0xFF26335C) : const Color(0xFFE1E8F4),
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: _progress,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: colors.teal,
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 28),
-
-              // Steps List with animated checkmarks
-              Expanded(
+            // Content: padding: 4px 16px 24px, gap: 14px
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                 child: Column(
-                  children: List.generate(_steps.length, (index) {
-                    final isDone = index < _currentStepIndex;
-                    final isCurrent = index == _currentStepIndex;
-                    final isPending = index > _currentStepIndex;
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 6-Stage Stepper: Detect (done), Investigate (active), Cause, Approve, Recover, Report
+                    _buildStepper(context, activeStage: 1),
+                    const SizedBox(height: 14),
 
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 20.0),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 22,
-                            height: 22,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: isDone
-                                  ? colors.teal
-                                  : isCurrent
-                                      ? colors.badgeTealBg
-                                      : Colors.transparent,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: isDone || isCurrent ? colors.teal : colors.border,
-                                width: 2,
-                              ),
-                            ),
-                            child: isDone
-                                ? Icon(Icons.check, size: 14, color: colors.isDark ? const Color(0xFF06202A) : Colors.white)
-                                : isCurrent
-                                    ? Container(
-                                        width: 8,
-                                        height: 8,
-                                        decoration: BoxDecoration(
-                                          color: colors.teal,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      )
-                                    : null,
+                    // Progress Header: AI INVESTIGATION / Started 14:13
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'AI INVESTIGATION',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.52,
+                            color: colors.muted,
                           ),
-                          const SizedBox(width: 14),
+                        ),
+                        Text(
+                          'Started 14:13',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colors.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Progress Summary Card: 3 of 4 checks complete (75%)
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '3 of 4 checks complete',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.text,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Correlating logs with recent commit',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: colors.muted,
+                                ),
+                              ),
+                            ],
+                          ),
                           Text(
-                            _steps[index],
+                            '75%',
                             style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: isDone || isCurrent ? FontWeight.bold : FontWeight.w500,
-                              color: isPending ? colors.muted : colors.text,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: colors.accent,
                             ),
                           ),
                         ],
                       ),
-                    );
-                  }),
-                ),
-              ),
+                    ),
+                    const SizedBox(height: 14),
 
-              // Button when completed
-              if (_progress >= 1.0)
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(builder: (context) => const S07RootCauseScreen()),
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: colors.teal,
-                      foregroundColor: colors.isDark ? const Color(0xFF06202A) : Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    // Check 1: Collect logs (Done)
+                    _buildCheckCard(
+                      context,
+                      title: 'Collect logs',
+                      status: 'Done',
+                      isDone: true,
+                      description: '212 “connection timeout” errors since 14:07',
+                      source: 'Source: Loki',
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Check 2: Check metrics (Done)
+                    _buildCheckCard(
+                      context,
+                      title: 'Check metrics',
+                      status: 'Done',
+                      isDone: true,
+                      description: 'Error rate and P95 latency jumped at 14:07',
+                      source: 'Source: Prometheus',
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Check 3: Review deployments (Done)
+                    _buildCheckCard(
+                      context,
+                      title: 'Review deployments',
+                      status: 'Done',
+                      isDone: true,
+                      description: 'v2.8.1 went live at 14:05 · PR #214 changed the DB pool timeout',
+                      source: 'Source: GitHub',
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Check 4: Correlate and explain (Running)
+                    _buildCheckCard(
+                      context,
+                      title: 'Correlate and explain',
+                      status: 'Running',
+                      isDone: false,
+                      description: 'Combining the three results into one probable cause',
+                      source: 'Source: Groq via n8n',
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Guardrail Blue Card
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: colors.info.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.shield_outlined, color: colors.info, size: 18),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'The AI only reads data and suggests. It can recommend one of 4 reviewed playbooks, but it cannot run anything on its own.',
+                              style: TextStyle(
+                                fontSize: 14,
+                                height: 1.45,
+                                color: colors.text,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    child: const Text(
-                      'See Root Cause',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                    const SizedBox(height: 14),
+
+                    // Primary Button: See root cause
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const S07RootCauseScreen(),
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: colors.accent,
+                          foregroundColor: colors.onAccent,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'See root cause',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                     ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCheckCard(
+    BuildContext context, {
+    required String title,
+    required String status,
+    required bool isDone,
+    required String description,
+    required String source,
+  }) {
+    final colors = context.colors;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (isDone)
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: colors.badgeGreenBg,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.check, size: 16, color: colors.success),
+            )
+          else
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: colors.accentSoft, width: 3),
+              ),
+              alignment: Alignment.center,
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  valueColor: AlwaysStoppedAnimation<Color>(colors.accent),
+                ),
+              ),
+            ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: colors.text,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: isDone ? colors.badgeGreenBg : colors.accentSoft,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        status,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          height: 1.5,
+                          color: isDone ? colors.success : colors.accent,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  description,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: colors.muted,
                   ),
                 ),
-            ],
+                const SizedBox(height: 3),
+                Text(
+                  source,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colors.muted,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStepper(BuildContext context, {required int activeStage}) {
+    final colors = context.colors;
+    final stages = ['Detect', 'Investigate', 'Cause', 'Approve', 'Recover', 'Report'];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+      decoration: BoxDecoration(
+        color: colors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        children: List.generate(stages.length, (index) {
+          final isCompleted = index < activeStage;
+          final isActive = index == activeStage;
+          final title = stages[index];
+
+          Color textColor = colors.muted;
+          FontWeight fontWeight = FontWeight.w500;
+          if (isActive) {
+            textColor = colors.accent;
+            fontWeight = FontWeight.w600;
+          } else if (isCompleted) {
+            textColor = colors.text;
+          }
+
+          return Expanded(
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
+              children: [
+                if (index > 0)
+                  Positioned(
+                    top: 10,
+                    right: 0,
+                    left: -50,
+                    child: Container(
+                      height: 2,
+                      color: isCompleted || isActive ? colors.success : colors.border,
+                    ),
+                  ),
+
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: isCompleted
+                            ? colors.success
+                            : isActive
+                                ? colors.accentSoft
+                                : colors.card,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isCompleted
+                              ? colors.success
+                              : isActive
+                                  ? colors.accent
+                                  : colors.border,
+                          width: 2,
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: isCompleted
+                          ? Icon(Icons.check, size: 13, color: colors.card)
+                          : isActive
+                              ? Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: colors.accent,
+                                    shape: BoxShape.circle,
+                                  ),
+                                )
+                              : null,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: fontWeight,
+                        color: textColor,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
       ),
     );
   }

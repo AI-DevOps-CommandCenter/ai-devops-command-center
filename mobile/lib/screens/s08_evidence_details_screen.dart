@@ -295,7 +295,7 @@ class S08EvidenceDetailsScreen extends StatelessWidget {
       child: RichText(
         text: TextSpan(
           style: TextStyle(
-            fontFamily: 'Consolas',
+            fontFamily: 'JetBrains Mono',
             fontSize: 12,
             color: colors.text,
             height: 1.4,
@@ -337,7 +337,7 @@ class S08EvidenceDetailsScreen extends StatelessWidget {
                   child: Text(
                     highlight,
                     style: TextStyle(
-                      fontFamily: 'Consolas',
+                      fontFamily: 'JetBrains Mono',
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                       color: colors.isDark ? const Color(0xFFFFB4B4) : const Color(0xFFB91C1C),

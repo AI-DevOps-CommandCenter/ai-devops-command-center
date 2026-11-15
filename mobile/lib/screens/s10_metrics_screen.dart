@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../widgets/app_bottom_nav.dart';
 
 class S10MetricsScreen extends StatefulWidget {
   const S10MetricsScreen({super.key});
@@ -14,94 +15,184 @@ class _S10MetricsScreenState extends State<S10MetricsScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final double factor = _selectedRange == '1h' ? 1.0 : (_selectedRange == '6h' ? 0.8 : 0.6);
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header
+            // Header: Monitor · payments-api · Prometheus
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Monitor',
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.52,
+                          color: colors.text,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'payments-api · Prometheus',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: colors.muted,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Metrics',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: colors.text,
-                          ),
-                        ),
-                        Text(
-                          'payments-api',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: colors.muted,
-                          ),
-                        ),
-                      ],
+                  InkWell(
+                    onTap: () {
+                      Navigator.pushNamed(context, '/services');
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: colors.border),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(Icons.dns_outlined, size: 20, color: colors.text),
                     ),
                   ),
                 ],
               ),
             ),
 
-            // Content
+            // Main Content
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Time Range Selector Tabs (1h, 6h, 24h)
-                    Row(
-                      children: ['1h', '6h', '24h'].map((range) {
-                        final isSelected = _selectedRange == range;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8.0),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                children: [
+                  // Sub-nav tabs: Services, Logs, Metrics (active)
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: colors.cardSecondary,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.pushReplacementNamed(context, '/services');
+                            },
+                            child: Container(
+                              height: 38,
+                              alignment: Alignment.center,
+                              child: Text(
+                                'Services',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.muted,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.pushReplacementNamed(context, '/logs');
+                            },
+                            child: Container(
+                              height: 38,
+                              alignment: Alignment.center,
+                              child: Text(
+                                'Logs',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.muted,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Container(
+                            height: 38,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: colors.card,
+                              borderRadius: BorderRadius.circular(9),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color.fromRGBO(0, 0, 0, 0.18),
+                                  blurRadius: 2,
+                                  offset: Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                            child: Text(
+                              'Metrics',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: colors.text,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Time range selector: 15m, 1h, 6h, 24h
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: colors.cardSecondary,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: ['15m', '1h', '6h', '24h'].map((r) {
+                        final isSelected = _selectedRange == r;
+                        return Expanded(
                           child: InkWell(
                             onTap: () {
                               setState(() {
-                                _selectedRange = range;
+                                _selectedRange = r;
                               });
                             },
-                            borderRadius: BorderRadius.circular(99),
+                            borderRadius: BorderRadius.circular(9),
                             child: Container(
                               height: 36,
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
                               alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: isSelected ? colors.teal : Colors.transparent,
-                                borderRadius: BorderRadius.circular(99),
-                                border: isSelected ? null : Border.all(color: colors.border),
-                              ),
+                              decoration: isSelected
+                                  ? BoxDecoration(
+                                      color: colors.card,
+                                      borderRadius: BorderRadius.circular(9),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Color.fromRGBO(0, 0, 0, 0.18),
+                                          blurRadius: 2,
+                                          offset: Offset(0, 1),
+                                        ),
+                                      ],
+                                    )
+                                  : null,
                               child: Text(
-                                range,
+                                r,
                                 style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                  color: isSelected
-                                      ? (colors.isDark ? const Color(0xFF06202A) : Colors.white)
-                                      : colors.muted,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: isSelected ? colors.text : colors.muted,
                                 ),
                               ),
                             ),
@@ -109,214 +200,499 @@ class _S10MetricsScreenState extends State<S10MetricsScreen> {
                         );
                       }).toList(),
                     ),
-                    const SizedBox(height: 16),
+                  ),
 
-                    // Chart 1: CPU (%)
-                    _buildChartCard(
-                      colors: colors,
-                      title: 'CPU',
-                      unit: '%',
-                      points: [40, 42, 41, 55, 70, 71].map((x) => x * factor).toList(),
-                      color: colors.teal,
-                      currentValue: '${(71 * factor).toStringAsFixed(0)}%',
-                    ),
-                    const SizedBox(height: 12),
+                  const SizedBox(height: 14),
 
-                    // Chart 2: Memory (%)
-                    _buildChartCard(
-                      colors: colors,
-                      title: 'Memory',
-                      unit: '%',
-                      points: [55, 56, 58, 60, 63, 64].map((x) => x * factor).toList(),
-                      color: colors.isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED),
-                      currentValue: '${(64 * factor).toStringAsFixed(0)}%',
+                  // Error rate card
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border),
                     ),
-                    const SizedBox(height: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Text(
+                              'Error rate',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: colors.text,
+                              ),
+                            ),
+                            Text(
+                              '12.4%',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: colors.critical,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 90,
+                          width: double.infinity,
+                          child: CustomPaint(
+                            painter: _ErrorRateChartPainter(
+                              lineColor: colors.critical,
+                              areaColor: colors.critical.withOpacity(0.14),
+                              targetColor: colors.ok,
+                              deployColor: colors.muted,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('13:45',
+                                style: TextStyle(fontSize: 12, color: colors.muted)),
+                            Text('▾ deploy 14:05',
+                                style: TextStyle(fontSize: 12, color: colors.muted)),
+                            Text('14:45',
+                                style: TextStyle(fontSize: 12, color: colors.muted)),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Dashed green line: 1% target',
+                          style: TextStyle(fontSize: 13, color: colors.muted),
+                        ),
+                      ],
+                    ),
+                  ),
 
-                    // Chart 3: Error rate (%)
-                    _buildChartCard(
-                      colors: colors,
-                      title: 'Error rate',
-                      unit: '%',
-                      points: [0.3, 0.3, 0.3, 8.0, 12.0, 12.4].map((x) => x * factor).toList(),
-                      color: colors.red,
-                      currentValue: '${(12.4 * factor).toStringAsFixed(1)}%',
-                    ),
-                    const SizedBox(height: 12),
+                  const SizedBox(height: 14),
 
-                    // Chart 4: P95 latency (ms)
-                    _buildChartCard(
-                      colors: colors,
-                      title: 'P95 latency',
-                      unit: 'ms',
-                      points: [180, 185, 190, 1600, 2300, 2400].map((x) => x * factor).toList(),
-                      color: colors.amber,
-                      currentValue: '${(2400 * factor).toStringAsFixed(0)} ms',
+                  // P95 latency card
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border),
                     ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Text(
+                              'P95 latency',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: colors.text,
+                              ),
+                            ),
+                            Text(
+                              '2.4 s',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: colors.warning,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 90,
+                          width: double.infinity,
+                          child: CustomPaint(
+                            painter: _LatencyChartPainter(
+                              lineColor: colors.warning,
+                              areaColor: colors.warning.withOpacity(0.14),
+                              targetColor: colors.ok,
+                              deployColor: colors.muted,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('13:45',
+                                style: TextStyle(fontSize: 12, color: colors.muted)),
+                            Text('▾ deploy 14:05',
+                                style: TextStyle(fontSize: 12, color: colors.muted)),
+                            Text('14:45',
+                                style: TextStyle(fontSize: 12, color: colors.muted)),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Dashed green line: 300 ms target',
+                          style: TextStyle(fontSize: 13, color: colors.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // 2-column CPU & Memory row
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: colors.card,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: colors.border),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('CPU',
+                                  style:
+                                      TextStyle(fontSize: 13, color: colors.muted)),
+                              const SizedBox(height: 2),
+                              Text(
+                                '71%',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: colors.text,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              SizedBox(
+                                height: 36,
+                                width: double.infinity,
+                                child: CustomPaint(
+                                  painter: _MiniSparklinePainter(
+                                    color: colors.info,
+                                    points: const [
+                                      Offset(2.0, 33.0),
+                                      Offset(19.0, 30.1),
+                                      Offset(36.0, 31.1),
+                                      Offset(53.0, 25.3),
+                                      Offset(70.0, 20.4),
+                                      Offset(87.0, 12.7),
+                                      Offset(104.0, 7.9),
+                                      Offset(121.0, 6.0),
+                                      Offset(138.0, 5.0),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: colors.card,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: colors.border),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Memory',
+                                  style:
+                                      TextStyle(fontSize: 13, color: colors.muted)),
+                              const SizedBox(height: 2),
+                              Text(
+                                '64%',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: colors.text,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              SizedBox(
+                                height: 36,
+                                width: double.infinity,
+                                child: CustomPaint(
+                                  painter: _MiniSparklinePainter(
+                                    color: colors.info,
+                                    points: const [
+                                      Offset(2.0, 33.0),
+                                      Offset(19.0, 28.3),
+                                      Offset(36.0, 23.7),
+                                      Offset(53.0, 23.7),
+                                      Offset(70.0, 19.0),
+                                      Offset(87.0, 14.3),
+                                      Offset(104.0, 9.7),
+                                      Offset(121.0, 5.0),
+                                      Offset(138.0, 5.0),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
+
+            // Bottom Nav
+            const AppBottomNav(currentIndex: 2),
           ],
         ),
       ),
     );
   }
-
-  Widget _buildChartCard({
-    required AppColorScheme colors,
-    required String title,
-    required String unit,
-    required List<double> points,
-    required Color color,
-    required String currentValue,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Row: Title & Unit
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: colors.text,
-                ),
-              ),
-              Text(
-                unit,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: colors.muted,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // Custom Chart Canvas with Polyline and Amber Marker
-          SizedBox(
-            height: 90,
-            width: double.infinity,
-            child: CustomPaint(
-              painter: _MetricChartPainter(
-                points: points,
-                lineColor: color,
-                markerColor: colors.amber,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-
-          // Bottom Info Row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Deploy v2.8.1 marker (amber)',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: colors.muted,
-                ),
-              ),
-              Text(
-                'Now: $currentValue',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
 }
 
-class _MetricChartPainter extends CustomPainter {
-  final List<double> points;
+class _ErrorRateChartPainter extends CustomPainter {
   final Color lineColor;
-  final Color markerColor;
+  final Color areaColor;
+  final Color targetColor;
+  final Color deployColor;
 
-  _MetricChartPainter({
-    required this.points,
+  _ErrorRateChartPainter({
     required this.lineColor,
-    required this.markerColor,
+    required this.areaColor,
+    required this.targetColor,
+    required this.deployColor,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (points.isEmpty) return;
+    final rawPoints = [
+      const Offset(0.0, 84.1),
+      const Offset(26.7, 84.1),
+      const Offset(53.3, 83.4),
+      const Offset(80.0, 84.1),
+      const Offset(106.7, 84.1),
+      const Offset(133.3, 83.4),
+      const Offset(160.0, 47.3),
+      const Offset(186.7, 15.0),
+      const Offset(213.3, 6.0),
+      const Offset(240.0, 7.9),
+      const Offset(266.7, 6.0),
+      const Offset(293.3, 7.3),
+      const Offset(320.0, 6.0),
+    ];
 
-    final double maxVal = (points.reduce((a, b) => a > b ? a : b) * 1.15).clamp(1.0, double.infinity);
-    final double stepX = size.width / (points.length - 1);
+    final sx = size.width / 320.0;
+    final sy = size.height / 90.0;
 
-    // Draw dashed amber marker in center (deployment point)
-    final Paint markerPaint = Paint()
-      ..color = markerColor
-      ..strokeWidth = 1.5
+    // Fill area
+    final fillPath = Path();
+    fillPath.moveTo(0, size.height);
+    for (final p in rawPoints) {
+      fillPath.lineTo(p.dx * sx, p.dy * sy);
+    }
+    fillPath.lineTo(size.width, size.height);
+    fillPath.close();
+
+    final fillPaint = Paint()
+      ..color = areaColor
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(fillPath, fillPaint);
+
+    // Target line y = 79.5 (dashed)
+    final targetY = 79.5 * sy;
+    final targetPaint = Paint()
+      ..color = targetColor
+      ..strokeWidth = 1
       ..style = PaintingStyle.stroke;
+    _drawDashedLine(canvas, Offset(0, targetY), Offset(size.width, targetY), 4, 4,
+        targetPaint);
 
-    final double centerX = size.width * 0.5;
-    const double dashHeight = 4.0;
-    const double dashSpace = 3.0;
-    double startY = 0;
-    while (startY < size.height) {
-      canvas.drawLine(
-        Offset(centerX, startY),
-        Offset(centerX, (startY + dashHeight).clamp(0, size.height)),
-        markerPaint,
-      );
-      startY += dashHeight + dashSpace;
+    // Deploy line x = 106.7 (dashed)
+    final deployX = 106.7 * sx;
+    final deployPaint = Paint()
+      ..color = deployColor
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    _drawDashedLine(
+        canvas, Offset(deployX, 0), Offset(deployX, size.height), 3, 3, deployPaint);
+
+    // Polyline
+    final linePath = Path();
+    linePath.moveTo(rawPoints.first.dx * sx, rawPoints.first.dy * sy);
+    for (int i = 1; i < rawPoints.length; i++) {
+      linePath.lineTo(rawPoints[i].dx * sx, rawPoints[i].dy * sy);
     }
-
-    // Draw metric polyline
-    final Path path = Path();
-    for (int i = 0; i < points.length; i++) {
-      final double x = i * stepX;
-      final double y = size.height - (points[i] / maxVal * size.height).clamp(0.0, size.height);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-
-    final Paint linePaint = Paint()
+    final linePaint = Paint()
       ..color = lineColor
-      ..strokeWidth = 3.0
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+    canvas.drawPath(linePath, linePaint);
+  }
+
+  void _drawDashedLine(Canvas canvas, Offset p1, Offset p2, double dashWidth,
+      double dashSpace, Paint paint) {
+    final dx = p2.dx - p1.dx;
+    final dy = p2.dy - p1.dy;
+    final distance = (dx * dx + dy * dy) > 0 ? (Offset(dx, dy).distance) : 0;
+    if (distance == 0) return;
+    final unitX = dx / distance;
+    final unitY = dy / distance;
+    double current = 0;
+    while (current < distance) {
+      final startX = p1.dx + unitX * current;
+      final startY = p1.dy + unitY * current;
+      final len = (current + dashWidth < distance) ? dashWidth : distance - current;
+      final endX = startX + unitX * len;
+      final endY = startY + unitY * len;
+      canvas.drawLine(Offset(startX, startY), Offset(endX, endY), paint);
+      current += dashWidth + dashSpace;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _LatencyChartPainter extends CustomPainter {
+  final Color lineColor;
+  final Color areaColor;
+  final Color targetColor;
+  final Color deployColor;
+
+  _LatencyChartPainter({
+    required this.lineColor,
+    required this.areaColor,
+    required this.targetColor,
+    required this.deployColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rawPoints = [
+      const Offset(0.0, 80.0),
+      const Offset(26.7, 80.2),
+      const Offset(53.3, 79.7),
+      const Offset(80.0, 79.8),
+      const Offset(106.7, 80.0),
+      const Offset(133.3, 79.3),
+      const Offset(160.0, 56.0),
+      const Offset(186.7, 26.0),
+      const Offset(213.3, 9.3),
+      const Offset(240.0, 6.0),
+      const Offset(266.7, 7.7),
+      const Offset(293.3, 6.0),
+      const Offset(320.0, 6.0),
+    ];
+
+    final sx = size.width / 320.0;
+    final sy = size.height / 90.0;
+
+    // Fill area
+    final fillPath = Path();
+    fillPath.moveTo(0, size.height);
+    for (final p in rawPoints) {
+      fillPath.lineTo(p.dx * sx, p.dy * sy);
+    }
+    fillPath.lineTo(size.width, size.height);
+    fillPath.close();
+
+    final fillPaint = Paint()
+      ..color = areaColor
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(fillPath, fillPaint);
+
+    // Target line y = 76.0 (dashed)
+    final targetY = 76.0 * sy;
+    final targetPaint = Paint()
+      ..color = targetColor
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    _drawDashedLine(canvas, Offset(0, targetY), Offset(size.width, targetY), 4, 4,
+        targetPaint);
+
+    // Deploy line x = 106.7 (dashed)
+    final deployX = 106.7 * sx;
+    final deployPaint = Paint()
+      ..color = deployColor
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    _drawDashedLine(
+        canvas, Offset(deployX, 0), Offset(deployX, size.height), 3, 3, deployPaint);
+
+    // Polyline
+    final linePath = Path();
+    linePath.moveTo(rawPoints.first.dx * sx, rawPoints.first.dy * sy);
+    for (int i = 1; i < rawPoints.length; i++) {
+      linePath.lineTo(rawPoints[i].dx * sx, rawPoints[i].dy * sy);
+    }
+    final linePaint = Paint()
+      ..color = lineColor
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+    canvas.drawPath(linePath, linePaint);
+  }
+
+  void _drawDashedLine(Canvas canvas, Offset p1, Offset p2, double dashWidth,
+      double dashSpace, Paint paint) {
+    final dx = p2.dx - p1.dx;
+    final dy = p2.dy - p1.dy;
+    final distance = (dx * dx + dy * dy) > 0 ? (Offset(dx, dy).distance) : 0;
+    if (distance == 0) return;
+    final unitX = dx / distance;
+    final unitY = dy / distance;
+    double current = 0;
+    while (current < distance) {
+      final startX = p1.dx + unitX * current;
+      final startY = p1.dy + unitY * current;
+      final len = (current + dashWidth < distance) ? dashWidth : distance - current;
+      final endX = startX + unitX * len;
+      final endY = startY + unitY * len;
+      canvas.drawLine(Offset(startX, startY), Offset(endX, endY), paint);
+      current += dashWidth + dashSpace;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _MiniSparklinePainter extends CustomPainter {
+  final Color color;
+  final List<Offset> points;
+
+  _MiniSparklinePainter({required this.color, required this.points});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.isEmpty) return;
+    final sx = size.width / 140.0;
+    final sy = size.height / 36.0;
+
+    final path = Path();
+    path.moveTo(points.first.dx * sx, points.first.dy * sy);
+    for (int i = 1; i < points.length; i++) {
+      path.lineTo(points[i].dx * sx, points[i].dy * sy);
+    }
+
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
 
-    canvas.drawPath(path, linePaint);
+    canvas.drawPath(path, paint);
   }
 
   @override
-  bool shouldRepaint(covariant _MetricChartPainter oldDelegate) {
-    return oldDelegate.points != points ||
-        oldDelegate.lineColor != lineColor ||
-        oldDelegate.markerColor != markerColor;
-  }
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
