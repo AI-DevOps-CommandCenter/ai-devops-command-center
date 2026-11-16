@@ -1,0 +1,122 @@
+# Monitoring stack: sample app, load generator, Prometheus, Alertmanager, Loki, Promtail.
+# Local development only. Every published port is bound to MONITORING_BIND_ADDRESS
+# (default 127.0.0.1). n8n (automation/docker-compose.yml) reaches Prometheus and
+# Loki through host.docker.internal, and Alertmanager reaches n8n the same way
+# (checked on Docker Desktop for Windows, 13 Nov 2026; see D-MON-3).
+name: dc-monitoring
+
+services:
+  sample-app:
+    build: ./sample-app
+    image: dc-sample-app:dev
+    container_name: dc-sample-app
+    restart: unless-stopped
+    # No published port: /admin/* has no authentication and must stay on this network.
+    environment:
+      SERVICE_NAME: sample-app
+    labels:
+      logging: promtail
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  loadgen:
+    image: dc-sample-app:dev
+    restart: unless-stopped
+    command: ["python", "-m", "loadgen.loadgen"]
+    environment:
+      TARGET_URL: http://sample-app:8000
+      LOADGEN_RPS: "${LOADGEN_RPS:-5}"
+    depends_on:
+      sample-app:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:${PROMETHEUS_VERSION:-v3.15.1}
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+
+  alertmanager:
+    image: prom/alertmanager:${ALERTMANAGER_VERSION:-v0.34.2}
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_PORT:-9093}:9093"
+    extra_hosts:
+      # Built in on Docker Desktop; needed on Linux.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      # Holds the n8n webhook token file (gitignored). Create it with scripts/create-n8n-token.sh.
+      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro
+      - alertmanager_data:/alertmanager
+
+  loki:
+    image: grafana/loki:${LOKI_VERSION:-3.7.9}
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    ports:
+      - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+
+  promtail:
+    image: grafana/promtail:${PROMTAIL_VERSION:-3.6.11}
+    restart: unless-stopped
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      # Docker API, used to discover containers labelled logging=promtail and read their
+      # logs. Note: ":ro" only protects the socket file; the API itself is not limited.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail_positions:/var/lib/promtail
+    depends_on:
+      - loki
+
+  # Playbook executor (infrastructure/playbooks/executor), called by n8n workflow 06.
+  # Every request is HMAC signed; only the services and actions in allowlist.json.
+  executor:
+    build: ../infrastructure/playbooks/executor
+    image: dc-playbook-executor:dev
+    restart: unless-stopped
+    environment:
+      # 32+ characters, in monitoring/.env (gitignored). Create it with
+      # scripts/create-executor-secret.sh. Without it every request gets 503.
+      EXECUTOR_SIGNING_SECRET: "${EXECUTOR_SIGNING_SECRET:-}"
+      HEALTH_TIMEOUT_SECONDS: "60"
+    # The Docker socket belongs to root:root (mode 660) inside containers; the
+    # non-root executor user gets access through the group.
+    group_add:
+      - "0"
+    ports:
+      # n8n calls http://host.docker.internal:9095/v1/execute (D-MON-3).
+      - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${EXECUTOR_PORT:-9095}:9095"
+    volumes:
+      # Full Docker API access (root-equivalent on this host). The code only gets
+      # and restarts the allowlisted container.
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9095/health', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  loki_data:
+  promtail_positions:

@@ -1,0 +1,23 @@
+route:
+  receiver: n8n-alert-intake
+  group_by: [alertname, service]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: n8n-alert-intake
+    webhook_configs:
+      # n8n workflow 01. n8n is published on 127.0.0.1:5678 by automation/docker-compose.yml;
+      # host.docker.internal reaches it (D-MON-3). If both stacks share a Docker
+      # network instead, use http://n8n:5678/webhook/alertmanager.
+      - url: http://host.docker.internal:5678/webhook/alertmanager
+        send_resolved: true
+        # Workflow 01 rejects notifications with more than 50 alerts.
+        max_alerts: 50
+        timeout: 10s
+        http_config:
+          authorization:
+            type: Bearer
+            # Same value as the n8n credential "Alertmanager Webhook Token" (without "Bearer").
+            credentials_file: /etc/alertmanager/secrets/n8n-token
