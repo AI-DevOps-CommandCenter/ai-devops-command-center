@@ -8,6 +8,7 @@ import {
   getIncidentByIdController,
   updateIncidentController
 } from "../controllers/incident.controller.js";
+import { getRecommendationController, getRecoveryChecksController } from "../controllers/recommendation.controller.js";
 
 const router = Router();
 
@@ -21,6 +22,12 @@ router.post("/", createIncidentController);
 // GET /api/incidents
 // Retrieve incidents
 router.get("/", getIncidentsController);
+
+// GET /api/incidents/:id/recommendation (latest AI analysis + matching enabled playbooks)
+router.get("/:id/recommendation", getRecommendationController);
+
+// GET /api/incidents/:id/recovery-checks (newest first)
+router.get("/:id/recovery-checks", getRecoveryChecksController);
 
 router.get("/:id", getIncidentByIdController);
 
