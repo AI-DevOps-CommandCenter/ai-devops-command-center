@@ -14,17 +14,28 @@ function groqModel(env) {
   return m;
 }
 
+// Reasoning models (e.g. openai/gpt-oss-*, qwen3) spend part of max_tokens on
+// hidden reasoning; without headroom the JSON answer is cut off and Groq
+// answers "Failed to validate JSON". They get low reasoning effort and
+// REASONING_TOKEN_HEADROOM extra tokens.
+const REASONING_MODEL = /(^|\/)(gpt-oss|qwen3)/i;
+const REASONING_TOKEN_HEADROOM = 2048;
+
 function groqRequest(env, system, user, maxTokens) {
-  return {
-    model: groqModel(env),
+  const model = groqModel(env);
+  const reasoning = REASONING_MODEL.test(model);
+  const request = {
+    model,
     temperature: 0.1,
-    max_tokens: maxTokens || 1200,
+    max_tokens: (maxTokens || 1200) + (reasoning ? REASONING_TOKEN_HEADROOM : 0),
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
   };
+  if (reasoning) request.reasoning_effort = 'low';
+  return request;
 }
 
 // Extract the JSON object the model returned. Returns { ok, value, error }.
