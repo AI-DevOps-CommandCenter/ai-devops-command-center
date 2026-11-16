@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/service_model.dart';
@@ -8,6 +9,17 @@ import '../models/playbook_model.dart';
 import '../models/notification_model.dart';
 import 'api_endpoints.dart';
 import 'auth_service.dart';
+
+/// Custom API Exception to propagate real backend error messages
+class ApiException implements Exception {
+  final String message;
+  final int? statusCode;
+
+  ApiException(this.message, [this.statusCode]);
+
+  @override
+  String toString() => message;
+}
 
 /// Central API Client handling authenticated requests to Vinuka's backend and Thilina's GitHub services
 class ApiService {
@@ -29,80 +41,156 @@ class ApiService {
     };
   }
 
-  /// Fetches registered backend services (Matches Vinuka's GET /api/services)
-  Future<List<ServiceModel>> fetchServices() async {
+  String _parseErrorMessage(http.Response response) {
     try {
-      final response = await http
-          .get(Uri.parse(ApiEndpoints.services), headers: _headers())
-          .timeout(const Duration(seconds: 4));
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> body = jsonDecode(response.body);
-        if (body['data'] is List) {
-          final List list = body['data'];
-          return list.map((e) => ServiceModel.fromJson(e)).toList();
-        }
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map && decoded['message'] != null) {
+        return decoded['message'].toString();
       }
     } catch (_) {}
-
-    // Mock data fallback matching backend schema for crash-free presentation
-    return [
-      ServiceModel(
-        id: 'srv-001',
-        name: 'payment-gateway',
-        description: 'Processes credit card & wallet checkouts',
-        environment: ServiceEnvironment.production,
-        endpoint: 'https://pay.internal/health',
-        status: ServiceStatus.degraded,
-      ),
-      ServiceModel(
-        id: 'srv-002',
-        name: 'auth-service',
-        description: 'Supabase JWT verification and RBAC tokens',
-        environment: ServiceEnvironment.production,
-        endpoint: 'https://auth.internal/health',
-        status: ServiceStatus.healthy,
-      ),
-      ServiceModel(
-        id: 'srv-003',
-        name: 'order-api',
-        description: 'Manages cart dispatch and warehouse pipeline',
-        environment: ServiceEnvironment.production,
-        endpoint: 'https://orders.internal/health',
-        status: ServiceStatus.healthy,
-      ),
-    ];
+    if (response.statusCode == 401) {
+      return 'Session expired or unauthenticated. Please sign in again.';
+    }
+    if (response.statusCode == 403) {
+      return 'Action forbidden. Users cannot approve their own requests.';
+    }
+    if (response.statusCode == 404) {
+      return 'Requested resource not found.';
+    }
+    if (response.statusCode == 409) {
+      return 'Conflict: this approval has already been decided.';
+    }
+    return 'Request failed with status ${response.statusCode}';
   }
 
-  /// Fetches production incidents
-  Future<List<IncidentModel>> fetchIncidents() async {
+  Future<http.Response> _safeGet(String url) async {
     try {
-      final response = await http
-          .get(Uri.parse(ApiEndpoints.incidents), headers: _headers())
-          .timeout(const Duration(seconds: 4));
+      return await http
+          .get(Uri.parse(url), headers: _headers())
+          .timeout(const Duration(seconds: 8));
+    } on TimeoutException {
+      throw ApiException('Backend server timed out after 8 seconds.', 408);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Network error or server unreachable: $e', 0);
+    }
+  }
 
-      if (response.statusCode == 200) {
-        final List data = jsonDecode(response.body);
-        return data.map((e) => IncidentModel.fromJson(e)).toList();
+  Future<http.Response> _safePost(String url, {Object? body}) async {
+    try {
+      return await http
+          .post(Uri.parse(url), headers: _headers(), body: body)
+          .timeout(const Duration(seconds: 8));
+    } on TimeoutException {
+      throw ApiException('Backend server timed out after 8 seconds.', 408);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Network error or server unreachable: $e', 0);
+    }
+  }
+
+  Future<http.Response> _safePatch(String url, {Object? body}) async {
+    try {
+      return await http
+          .patch(Uri.parse(url), headers: _headers(), body: body)
+          .timeout(const Duration(seconds: 8));
+    } on TimeoutException {
+      throw ApiException('Backend server timed out after 8 seconds.', 408);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Network error or server unreachable: $e', 0);
+    }
+  }
+
+  /// GET /api/dashboard/summary
+  Future<Map<String, dynamic>> fetchDashboardSummary() async {
+    final response = await _safeGet(ApiEndpoints.dashboardSummary);
+
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic> && decoded['data'] is Map<String, dynamic>) {
+        return Map<String, dynamic>.from(decoded['data']);
       }
-    } catch (_) {}
+      return decoded is Map<String, dynamic> ? decoded : {};
+    } else {
+      throw ApiException(_parseErrorMessage(response), response.statusCode);
+    }
+  }
 
-    return [
-      IncidentModel(
-        id: 'INC-2026-904',
-        title: 'Connection Pool Exhaustion',
-        serviceName: 'payment-gateway',
-        severity: IncidentSeverity.critical,
-        status: IncidentStatus.open,
-        detectedAt: DateTime.now().subtract(const Duration(minutes: 18)),
-        summary: 'Database connection pool reached 100% capacity. HTTP 500 error spike.',
-        rootCause: 'Connection leak introduced in deployment #104.',
-        recommendedPlaybookId: 'PB-ROLLBACK',
-        cpuUsage: 94.2,
-        memoryUsage: 88.5,
-        errorRate: 14.8,
-      ),
-    ];
+  /// Fetches registered backend services (GET /api/services)
+  Future<List<ServiceModel>> fetchServices() async {
+    final response = await _safeGet(ApiEndpoints.services);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> body = jsonDecode(response.body);
+      if (body['data'] is List) {
+        final List list = body['data'];
+        return list.map((e) => ServiceModel.fromJson(e)).toList();
+      }
+      return [];
+    } else {
+      throw ApiException(_parseErrorMessage(response), response.statusCode);
+    }
+  }
+
+  /// Fetches production incidents (GET /api/incidents)
+  Future<List<IncidentModel>> fetchIncidents({
+    String? status,
+    String? severity,
+    String? serviceName,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    var url = ApiEndpoints.incidents;
+    final params = <String>[];
+    if (status != null && status.isNotEmpty) params.add('status=$status');
+    if (severity != null && severity.isNotEmpty) params.add('severity=$severity');
+    if (serviceName != null && serviceName.isNotEmpty) params.add('service_name=$serviceName');
+    if (params.isNotEmpty) {
+      url = '$url?${params.join('&')}';
+    }
+
+    final response = await _safeGet(url);
+
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final List list = decoded is List
+          ? decoded
+          : (decoded['data'] is List ? decoded['data'] as List : []);
+      return list.map((e) => IncidentModel.fromJson(e)).toList();
+    } else {
+      throw ApiException(_parseErrorMessage(response), response.statusCode);
+    }
+  }
+
+  /// Fetches a specific incident by ID (GET /api/incidents/:id)
+  Future<IncidentModel> fetchIncidentById(String id) async {
+    final url = ApiEndpoints.incidentById(id);
+    final response = await _safeGet(url);
+
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final data = decoded is Map && decoded['data'] != null ? decoded['data'] : decoded;
+      return IncidentModel.fromJson(data);
+    } else {
+      throw ApiException(_parseErrorMessage(response), response.statusCode);
+    }
+  }
+
+  /// Fetches AI investigations for an incident (GET /api/investigations?incident_id=...)
+  Future<List<Map<String, dynamic>>> fetchInvestigations(String incidentId) async {
+    final url = ApiEndpoints.investigations(incidentId: incidentId);
+    final response = await _safeGet(url);
+
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      if (decoded['data'] is List) {
+        return List<Map<String, dynamic>>.from(decoded['data']);
+      }
+      return [];
+    } else {
+      throw ApiException(_parseErrorMessage(response), response.statusCode);
+    }
   }
 
   /// Fetches live system metrics
@@ -402,48 +490,29 @@ class ApiService {
   // PLAYBOOK RUNS & APPROVALS (Vinuka M5 Handoff)
   // ==========================================
 
+  /// GET /api/approvals (with optional status filter)
+  Future<List<ApprovalModel>> fetchApprovals({String? status}) async {
+    var url = ApiEndpoints.approvals;
+    if (status != null && status.isNotEmpty) {
+      url = '$url?status=$status';
+    }
+
+    final response = await _safeGet(url);
+
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final List list = decoded is List
+          ? decoded
+          : (decoded['data'] is List ? decoded['data'] as List : []);
+      return list.map((e) => ApprovalModel.fromJson(e)).toList();
+    } else {
+      throw ApiException(_parseErrorMessage(response), response.statusCode);
+    }
+  }
+
   /// GET /api/approvals?status=pending
   Future<List<ApprovalModel>> fetchPendingApprovals() async {
-    try {
-      final url = '${ApiEndpoints.approvals}?status=pending';
-      final response = await http
-          .get(Uri.parse(url), headers: _headers())
-          .timeout(const Duration(seconds: 4));
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> body = jsonDecode(response.body);
-        if (body['data'] is List) {
-          final List list = body['data'];
-          return list.map((e) => ApprovalModel.fromJson(e)).toList();
-        }
-      }
-    } catch (_) {}
-
-    // Mock pending approval matching Vinuka's exact backend schema
-    return [
-      ApprovalModel(
-        id: 'appr-uuid-1042-rb',
-        playbookRunId: 'run-uuid-1042-rb',
-        incidentId: 'INC-1042',
-        playbookId: 'pb-uuid-rollback-01',
-        actionType: PlaybookActionType.rollback,
-        status: 'pending',
-        requestedBy: 'Alex Morgan',
-        serviceName: 'payments-api',
-        environment: 'Production',
-        fromVersion: 'v2.8.1',
-        toVersion: 'v2.8.0',
-        impactDescription:
-            'Impact: brief request failures during switchover (about 30 s). Nothing runs until you confirm.',
-        requestPayload: {
-          'service': 'payments-api',
-          'environment': 'Production',
-          'from_version': 'v2.8.1',
-          'to_version': 'v2.8.0',
-        },
-        createdAt: DateTime.now().subtract(const Duration(minutes: 5)),
-      ),
-    ];
+    return fetchApprovals(status: 'pending');
   }
 
   /// GET /api/playbook-runs?status=...&incident_id=...
@@ -451,88 +520,37 @@ class ApiService {
     String? status,
     String? incidentId,
   }) async {
-    try {
-      final params = <String>[];
-      if (status != null) params.add('status=$status');
-      if (incidentId != null) params.add('incident_id=$incidentId');
-      final query = params.isNotEmpty ? '?${params.join('&')}' : '';
-      final url = '${ApiEndpoints.playbookRuns}$query';
+    final params = <String>[];
+    if (status != null && status.isNotEmpty) params.add('status=$status');
+    if (incidentId != null && incidentId.isNotEmpty) params.add('incident_id=$incidentId');
+    final query = params.isNotEmpty ? '?${params.join('&')}' : '';
+    final url = '${ApiEndpoints.playbookRuns}$query';
 
-      final response = await http
-          .get(Uri.parse(url), headers: _headers())
-          .timeout(const Duration(seconds: 4));
+    final response = await _safeGet(url);
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> body = jsonDecode(response.body);
-        if (body['data'] is List) {
-          final List list = body['data'];
-          return list.map((e) => PlaybookRunModel.fromJson(e)).toList();
-        }
-      }
-    } catch (_) {}
-
-    return [
-      PlaybookRunModel(
-        id: 'run-uuid-1042-rb',
-        incidentId: incidentId ?? 'INC-1042',
-        playbookId: 'pb-uuid-rollback-01',
-        approvalId: 'appr-uuid-1042-rb',
-        actionType: PlaybookActionType.rollback,
-        status: PlaybookRunStatus.pendingApproval,
-        serviceName: 'payments-api',
-        environment: 'Production',
-        fromVersion: 'v2.8.1',
-        toVersion: 'v2.8.0',
-        requestedBy: 'Alex Morgan',
-        createdAt: DateTime.now().subtract(const Duration(minutes: 5)),
-        steps: const [
-          PlaybookExecutionStep(time: '14:24', title: 'Queued', detail: 'Pending operator approval', status: 'completed'),
-          PlaybookExecutionStep(time: '14:25', title: 'Switching traffic to v2.8.0', detail: 'Ingress routing update', status: 'pending'),
-          PlaybookExecutionStep(time: '14:26', title: 'Draining v2.8.1', detail: 'Connection drain timeout 30s', status: 'pending'),
-          PlaybookExecutionStep(time: '14:27', title: 'Execution complete', detail: 'Playbook completed', status: 'pending'),
-        ],
-      ),
-    ];
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final List list = decoded is List
+          ? decoded
+          : (decoded['data'] is List ? decoded['data'] as List : []);
+      return list.map((e) => PlaybookRunModel.fromJson(e)).toList();
+    } else {
+      throw ApiException(_parseErrorMessage(response), response.statusCode);
+    }
   }
 
   /// GET /api/playbook-runs/:id
   Future<PlaybookRunModel> fetchPlaybookRun(String runId) async {
-    try {
-      final url = ApiEndpoints.playbookRunById(runId);
-      final response = await http
-          .get(Uri.parse(url), headers: _headers())
-          .timeout(const Duration(seconds: 4));
+    final url = ApiEndpoints.playbookRunById(runId);
+    final response = await _safeGet(url);
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> body = jsonDecode(response.body);
-        if (body['data'] is Map<String, dynamic>) {
-          return PlaybookRunModel.fromJson(body['data']);
-        }
-      }
-    } catch (_) {}
-
-    // Fallback model for offline/demo reliability
-    return PlaybookRunModel(
-      id: runId.isNotEmpty ? runId : 'run-uuid-1042-rb',
-      incidentId: 'INC-1042',
-      playbookId: 'pb-uuid-rollback-01',
-      approvalId: 'appr-uuid-1042-rb',
-      actionType: PlaybookActionType.rollback,
-      status: PlaybookRunStatus.running,
-      serviceName: 'payments-api',
-      environment: 'Production',
-      fromVersion: 'v2.8.1',
-      toVersion: 'v2.8.0',
-      requestedBy: 'Alex Morgan',
-      createdAt: DateTime.now().subtract(const Duration(minutes: 6)),
-      startedAt: DateTime.now().subtract(const Duration(minutes: 2)),
-      steps: const [
-        PlaybookExecutionStep(time: '14:24', title: 'Queued', detail: 'Dispatched to n8n engine', status: 'completed'),
-        PlaybookExecutionStep(time: '14:25', title: 'Switching traffic to v2.8.0', detail: 'Ingress routing updated', status: 'completed'),
-        PlaybookExecutionStep(time: '14:26', title: 'Draining v2.8.1', detail: 'Drain in progress (30s timeout)', status: 'running'),
-        PlaybookExecutionStep(time: '14:27', title: 'Execution complete', detail: 'Ready for health verification', status: 'pending'),
-      ],
-    );
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final data = decoded is Map && decoded['data'] != null ? decoded['data'] : decoded;
+      return PlaybookRunModel.fromJson(data);
+    } else {
+      throw ApiException(_parseErrorMessage(response), response.statusCode);
+    }
   }
 
   /// POST /api/playbook-runs
@@ -550,73 +568,94 @@ class ApiService {
       'idempotency_key': key,
     });
 
-    try {
-      final response = await http
-          .post(
-            Uri.parse(ApiEndpoints.playbookRuns),
-            headers: _headers(),
-            body: body,
-          )
-          .timeout(const Duration(seconds: 4));
+    final response = await _safePost(
+      ApiEndpoints.playbookRuns,
+      body: body,
+    );
 
-      final Map<String, dynamic> res = jsonDecode(response.body);
-      return res;
-    } catch (_) {
-      return {
-        'success': true,
-        'message': 'Playbook execution request created successfully (Demo Mode).',
-        'data': {
-          'id': 'run-uuid-demo-${DateTime.now().millisecondsSinceEpoch}',
-          'approval_id': 'appr-uuid-demo-${DateTime.now().millisecondsSinceEpoch}',
-        },
-      };
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return jsonDecode(response.body);
+    } else {
+      throw ApiException(_parseErrorMessage(response), response.statusCode);
     }
   }
 
-  /// PATCH /api/playbook-runs/:id/decision
-  /// Approves or rejects a playbook run (or /api/approvals/:id/decision)
+  /// Decides an approval via PATCH /api/approvals/:id/decision
+  Future<Map<String, dynamic>> decideApproval({
+    required String approvalId,
+    required bool approve,
+    String? reason,
+  }) async {
+    final decision = approve ? 'approved' : 'rejected';
+    final url = ApiEndpoints.approvalDecision(approvalId);
+    final payload = jsonEncode({
+      'decision': decision,
+      'status': decision,
+      if (reason != null && reason.trim().isNotEmpty) ...{
+        'reason': reason.trim(),
+        'comments': reason.trim(),
+      } else if (approve) ...{
+        'comments': 'Approved by operator after incident review.',
+      }
+    });
+
+    final response = await _safePatch(url, body: payload);
+
+    try {
+      final body = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        return body is Map<String, dynamic> ? body : {'success': true, 'data': body};
+      } else if (response.statusCode == 403) {
+        throw ApiException(body['message'] ?? 'Users cannot approve their own requests.', 403);
+      } else if (response.statusCode == 409) {
+        throw ApiException(body['message'] ?? 'This approval request has already been decided.', 409);
+      } else {
+        throw ApiException(_parseErrorMessage(response), response.statusCode);
+      }
+    } on ApiException {
+      rethrow;
+    } catch (_) {
+      throw ApiException('Unexpected response from approval server (${response.statusCode})', response.statusCode);
+    }
+  }
+
+  /// Backwards-compatible decision caller
   Future<Map<String, dynamic>> submitPlaybookDecision({
     required String runId,
     required bool approve,
     String? comments,
     String? approvalId,
   }) async {
+    if (approvalId != null && approvalId.isNotEmpty) {
+      return decideApproval(
+        approvalId: approvalId,
+        approve: approve,
+        reason: comments,
+      );
+    }
+
+    // Direct run decision endpoint
     final status = approve ? 'approved' : 'rejected';
     final payload = jsonEncode({
       'status': status,
+      'decision': status,
       'comments': comments ?? (approve ? 'Approved after reviewing incident.' : 'Rejected upon review.'),
+      'reason': comments,
     });
 
-    try {
-      // Primary route: /api/playbook-runs/:id/decision
-      final url = ApiEndpoints.playbookRunDecision(runId);
-      final response = await http
-          .patch(Uri.parse(url), headers: _headers(), body: payload)
-          .timeout(const Duration(seconds: 4));
+    final url = ApiEndpoints.playbookRunDecision(runId);
+    final response = await _safePatch(url, body: payload);
 
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else if (response.statusCode == 403) {
-        // Enforce Vinuka's Authorization rule: Users cannot approve their own requests
-        final res = jsonDecode(response.body);
-        return {
-          'success': false,
-          'message': res['message'] ?? 'Users cannot approve their own requests.',
-        };
-      }
-    } catch (_) {}
-
-    // Simulated successful decision response
-    return {
-      'success': true,
-      'message': approve
-          ? 'Playbook request approved successfully.'
-          : 'Playbook request rejected.',
-      'data': {
-        'id': runId,
-        'status': status,
-      },
-    };
+    final body = jsonDecode(response.body);
+    if (response.statusCode == 200) {
+      return body;
+    } else if (response.statusCode == 403) {
+      throw ApiException(body['message'] ?? 'Users cannot approve their own requests.', 403);
+    } else if (response.statusCode == 409) {
+      throw ApiException(body['message'] ?? 'This request has already been decided.', 409);
+    } else {
+      throw ApiException(_parseErrorMessage(response), response.statusCode);
+    }
   }
 
   /// POST /api/playbook-runs/:id/cancel

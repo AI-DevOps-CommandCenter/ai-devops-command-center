@@ -3,15 +3,24 @@ import 'package:flutter/foundation.dart';
 /// Centralized API Endpoints Configuration
 /// Matches Vinuka's Express backend running on Port 3000
 class ApiEndpoints {
+  // Support dynamic base URL via: --dart-define=API_BASE_URL=http://...
+  static const String _envBaseUrl = String.fromEnvironment('API_BASE_URL');
+
   // Configurable host:
-  // Android Emulator uses 10.0.2.2, Web / Windows Desktop uses localhost
+  // Environment override > Android Emulator 10.0.2.2 > Localhost 3000
   static String get baseUrl {
+    if (_envBaseUrl.isNotEmpty) {
+      return _envBaseUrl;
+    }
     if (kIsWeb) return 'http://localhost:3000';
     if (defaultTargetPlatform == TargetPlatform.android) {
       return 'http://10.0.2.2:3000';
     }
     return 'http://localhost:3000';
   }
+
+  // Dashboard summary endpoint (GET /api/dashboard/summary)
+  static String get dashboardSummary => '$baseUrl/api/dashboard/summary';
 
   // Authentication & User Profile
   static String get me => '$baseUrl/api/me';
@@ -22,9 +31,13 @@ class ApiEndpoints {
   static String get services => '$baseUrl/api/services';
   static String serviceById(String id) => '$baseUrl/api/services/$id';
 
-  // Incidents & AI Investigation
+  // Incidents & AI Investigation (Vinuka's routes)
   static String get incidents => '$baseUrl/api/incidents';
   static String incidentById(String id) => '$baseUrl/api/incidents/$id';
+  static String investigations({String? incidentId}) => incidentId != null && incidentId.isNotEmpty
+      ? '$baseUrl/api/investigations?incident_id=$incidentId'
+      : '$baseUrl/api/investigations';
+  static String investigationById(String id) => '$baseUrl/api/investigations/$id';
 
   // GitHub & CI/CD Pipelines (Thilina's routes - M7)
   static String get githubRepositories => '$baseUrl/api/github/repositories';

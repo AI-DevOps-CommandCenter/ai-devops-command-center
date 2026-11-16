@@ -4,7 +4,9 @@ import '../widgets/app_back_button.dart';
 import 's21_postmortem_report_screen.dart';
 
 class S20RecoveryVerificationScreen extends StatelessWidget {
-  const S20RecoveryVerificationScreen({super.key});
+  final String? playbookRunId;
+
+  const S20RecoveryVerificationScreen({super.key, this.playbookRunId});
 
   @override
   Widget build(BuildContext context) {

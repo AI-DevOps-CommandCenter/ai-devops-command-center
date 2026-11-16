@@ -1,24 +1,32 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
+import '../services/api_service.dart';
 
 class S31RejectActionScreen extends StatefulWidget {
-  const S31RejectActionScreen({super.key});
+  final String? approvalId;
+  final String? incidentId;
+
+  const S31RejectActionScreen({super.key, this.approvalId, this.incidentId});
 
   @override
   State<S31RejectActionScreen> createState() => _S31RejectActionScreenState();
 }
 
 class _S31RejectActionScreenState extends State<S31RejectActionScreen> {
-  String? _selectedReason;
+  String? _selectedReason = 'Evidence is not strong enough';
   final TextEditingController _notesController = TextEditingController(
-    text: 'Will ship PR #215 instead.',
+    text: 'Manual investigation required before executing playbook.',
   );
+
+  bool _isSubmitting = false;
+  String? _errorMessage;
 
   final List<String> _reasons = [
     'Evidence is not strong enough',
     'I will fix it with a new deploy',
     'Wrong time, high traffic now',
+    'Action parameters require correction',
     'Other',
   ];
 
@@ -28,17 +36,75 @@ class _S31RejectActionScreenState extends State<S31RejectActionScreen> {
     super.dispose();
   }
 
+  Future<void> _handleReject() async {
+    final approvalId = widget.approvalId;
+    if (approvalId == null || approvalId.isEmpty) {
+      setState(() {
+        _errorMessage = 'Approval ID is required.';
+      });
+      return;
+    }
+
+    final reason = _notesController.text.trim().isNotEmpty
+        ? '${_selectedReason ?? "Rejected"}: ${_notesController.text.trim()}'
+        : (_selectedReason ?? 'Action rejected by operator.');
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await ApiService().decideApproval(
+        approvalId: approvalId,
+        approve: false,
+        reason: reason,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Action rejected successfully.'),
+            backgroundColor: context.colors.critical,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        Navigator.pop(context, true);
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+          _errorMessage = e.message;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+          _errorMessage = e.toString();
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final ready = _selectedReason != null;
+
+    final shortInc = widget.incidentId != null && widget.incidentId!.length > 8
+        ? (widget.incidentId!.startsWith('INC-')
+            ? widget.incidentId!
+            : 'INC-${widget.incidentId!.substring(0, 8).toUpperCase()}')
+        : (widget.incidentId ?? 'INC-REJECT');
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header: padding: 14px 16px 10px, gap: 10px
+            // Header
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
@@ -50,7 +116,7 @@ class _S31RejectActionScreenState extends State<S31RejectActionScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Reject rollback',
+                          'Reject Action',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w700,
@@ -60,7 +126,7 @@ class _S31RejectActionScreenState extends State<S31RejectActionScreen> {
                         ),
                         const SizedBox(height: 1),
                         Text(
-                          'INC-1042 · payments-api',
+                          '$shortInc · Remediation decision',
                           style: TextStyle(
                             fontSize: 13,
                             color: colors.muted,
@@ -75,27 +141,56 @@ class _S31RejectActionScreenState extends State<S31RejectActionScreen> {
               ),
             ),
 
-            // Content: padding: 4px 16px 24px, gap: 14px
+            // Content
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    if (_errorMessage != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 14),
+                        decoration: BoxDecoration(
+                          color: colors.red.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: colors.red.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.error_outline, size: 18, color: colors.red),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _errorMessage!,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: colors.red,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
                     Text(
-                      'Nothing will run. The incident stays open and the reason is saved to the audit log.',
+                      'Nothing will run. The incident stays open and the rejection reason is saved to the backend audit log.',
                       style: TextStyle(
-                        fontSize: 15,
+                        fontSize: 14,
                         color: colors.muted,
+                        height: 1.4,
                       ),
                     ),
                     const SizedBox(height: 14),
 
                     // Section: Reason
                     Text(
-                      'REASON',
+                      'SELECT REJECTION REASON',
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0.52,
                         color: colors.muted,
@@ -103,142 +198,119 @@ class _S31RejectActionScreenState extends State<S31RejectActionScreen> {
                     ),
                     const SizedBox(height: 8),
 
-                    // Radiogroup
-                    Column(
-                      children: _reasons.map((r) {
-                        final isSelected = _selectedReason == r;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 8.0),
-                          child: InkWell(
-                            onTap: () => setState(() => _selectedReason = r),
-                            borderRadius: BorderRadius.circular(14),
-                            child: Container(
-                              constraints: const BoxConstraints(minHeight: 52),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: colors.card,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: colors.border),
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 22,
-                                    height: 22,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: isSelected ? colors.accent : colors.muted,
-                                        width: 2,
-                                      ),
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: isSelected
-                                        ? Container(
-                                            width: 10,
-                                            height: 10,
-                                            decoration: BoxDecoration(
-                                              color: colors.accent,
-                                              shape: BoxShape.circle,
-                                            ),
-                                          )
-                                        : null,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      r,
-                                      style: TextStyle(
-                                        fontSize: 15,
-                                        color: colors.text,
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                    // Reasons List
+                    ..._reasons.map((r) {
+                      final isSelected = _selectedReason == r;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              _selectedReason = r;
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: isSelected ? colors.accentSoft : colors.card,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected ? colors.accent : colors.border,
                               ),
                             ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isSelected
+                                      ? Icons.radio_button_checked
+                                      : Icons.radio_button_off,
+                                  size: 18,
+                                  color: isSelected ? colors.accent : colors.muted,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    r,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                      color: colors.text,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        );
-                      }).toList(),
-                    ),
+                        ),
+                      );
+                    }),
                     const SizedBox(height: 14),
 
-                    // Note (optional)
+                    // Additional Notes
                     Text(
-                      'Note (optional)',
+                      'ADDITIONAL AUDIT COMMENTS',
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: colors.text,
+                        letterSpacing: 0.52,
+                        color: colors.muted,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
+
                     Container(
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: colors.card,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: colors.border),
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       child: TextField(
                         controller: _notesController,
                         maxLines: 3,
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: colors.text,
-                        ),
+                        style: TextStyle(fontSize: 14, color: colors.text),
                         decoration: const InputDecoration(
-                          isDense: true,
+                          hintText: 'Enter reason for rejecting this playbook...',
                           border: InputBorder.none,
+                          isDense: true,
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 20),
 
                     // Action Button
-                    if (ready)
-                      SizedBox(
-                        height: 48,
-                        child: ElevatedButton(
-                          onPressed: () {
-                            Navigator.pop(context);
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: colors.critical,
-                            foregroundColor: colors.card,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: const Text(
-                            'Reject and keep investigating',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: ready && !_isSubmitting ? _handleReject : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: colors.critical,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                      )
-                    else
-                      Container(
-                        height: 48,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: colors.surface2,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Text(
-                          'Choose a reason',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: colors.muted,
-                          ),
-                        ),
+                        child: _isSubmitting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text(
+                                'Confirm Rejection',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                       ),
+                    ),
                   ],
                 ),
               ),

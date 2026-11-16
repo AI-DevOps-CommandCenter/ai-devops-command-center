@@ -75,7 +75,7 @@ class IncidentModel {
       severity: _parseSeverity(json['severity']),
       status: _parseStatus(json['status']),
       detectedAt: DateTime.tryParse(json['detected_at']?.toString() ?? '') ?? DateTime.now(),
-      summary: json['summary']?.toString() ?? '',
+      summary: json['summary']?.toString() ?? json['description']?.toString() ?? '',
       rootCause: json['root_cause']?.toString(),
       evidence: json['evidence'] != null ? IncidentEvidence.fromJson(json['evidence']) : null,
       recommendedPlaybookId: json['recommended_playbook_id']?.toString(),
@@ -114,10 +114,17 @@ class IncidentModel {
 
   static IncidentStatus _parseStatus(dynamic val) {
     switch (val?.toString().toLowerCase()) {
-      case 'investigating': return IncidentStatus.investigating;
-      case 'remediating': return IncidentStatus.remediating;
-      case 'resolved': return IncidentStatus.resolved;
-      default: return IncidentStatus.open;
+      case 'investigating':
+      case 'identified':
+        return IncidentStatus.investigating;
+      case 'remediating':
+      case 'mitigating':
+        return IncidentStatus.remediating;
+      case 'resolved':
+      case 'closed':
+        return IncidentStatus.resolved;
+      default:
+        return IncidentStatus.open;
     }
   }
 }

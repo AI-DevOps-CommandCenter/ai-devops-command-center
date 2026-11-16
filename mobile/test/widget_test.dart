@@ -33,8 +33,8 @@ void main() {
     );
 
     expect(find.text('Incidents'), findsAtLeastNWidgets(1));
-    expect(find.text('Active'), findsOneWidget);
-    expect(find.text('History'), findsOneWidget);
+    expect(find.textContaining('Active'), findsOneWidget);
+    expect(find.textContaining('History'), findsOneWidget);
   });
 
   testWidgets('S21PostmortemReportScreen renders postmortem sections', (WidgetTester tester) async {

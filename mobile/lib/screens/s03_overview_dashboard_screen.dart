@@ -3,13 +3,66 @@ import '../theme/app_colors.dart';
 import '../widgets/brand_logo.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../widgets/app_icons.dart';
+import '../services/api_service.dart';
+import '../services/auth_service.dart';
+import '../models/incident_model.dart';
+import 's05_incident_details_screen.dart';
+import 's18_approve_action_screen.dart';
 
-class S03OverviewDashboardScreen extends StatelessWidget {
+class S03OverviewDashboardScreen extends StatefulWidget {
   const S03OverviewDashboardScreen({super.key});
+
+  @override
+  State<S03OverviewDashboardScreen> createState() => _S03OverviewDashboardScreenState();
+}
+
+class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen> {
+  int _criticalCount = 1;
+  int _openCount = 2;
+  int _resolvedCount = 3;
+  IncidentModel? _topIncident;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboardData();
+  }
+
+  Future<void> _loadDashboardData() async {
+    try {
+      final summary = await ApiService().fetchDashboardSummary();
+      if (mounted && summary.isNotEmpty) {
+        setState(() {
+          _criticalCount = int.tryParse(summary['critical']?.toString() ?? '') ?? _criticalCount;
+          _openCount = int.tryParse(summary['open']?.toString() ?? '') ??
+              (int.tryParse(summary['total']?.toString() ?? '') ?? _openCount);
+          _resolvedCount = int.tryParse(summary['resolved']?.toString() ?? '') ?? _resolvedCount;
+        });
+      }
+    } catch (_) {}
+
+    try {
+      final incidents = await ApiService().fetchIncidents();
+      if (mounted && incidents.isNotEmpty) {
+        setState(() {
+          _topIncident = incidents.firstWhere(
+            (i) => i.severity == IncidentSeverity.critical && i.status != IncidentStatus.resolved,
+            orElse: () => incidents.first,
+          );
+          _criticalCount = incidents
+              .where((i) => i.severity == IncidentSeverity.critical && i.status != IncidentStatus.resolved)
+              .length;
+          _openCount = incidents.where((i) => i.status != IncidentStatus.resolved).length;
+          _resolvedCount = incidents.where((i) => i.status == IncidentStatus.resolved).length;
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final userName = AuthService().currentUser?.name ?? 'Admin';
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -43,7 +96,7 @@ class S03OverviewDashboardScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Production · Good afternoon, Alex',
+                          'Production · Good afternoon, $userName',
                           style: TextStyle(fontSize: 13, color: colors.muted),
                         ),
                       ],
@@ -187,7 +240,9 @@ class S03OverviewDashboardScreen extends StatelessWidget {
 
                         // Title & Subtitle
                         Text(
-                          'INC-1042 · payments-api',
+                          _topIncident != null
+                              ? '${_topIncident!.id.length > 8 ? "INC-${_topIncident!.id.substring(0, 8).toUpperCase()}" : _topIncident!.id} · ${_topIncident!.serviceName}'
+                              : 'INC-1042 · payments-api',
                           style: TextStyle(
                             fontSize: 13,
                             fontFamily: 'JetBrains Mono',
@@ -196,7 +251,7 @@ class S03OverviewDashboardScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Elevated errors after deployment',
+                          _topIncident?.title ?? 'Elevated errors after deployment',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
@@ -231,7 +286,19 @@ class S03OverviewDashboardScreen extends StatelessWidget {
                                 height: 48,
                                 child: OutlinedButton(
                                   onPressed: () {
-                                    Navigator.pushNamed(context, '/incident-details');
+                                    if (_topIncident != null) {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => S05IncidentDetailsScreen(
+                                            incidentId: _topIncident!.id,
+                                          ),
+                                          settings: RouteSettings(arguments: _topIncident!.id),
+                                        ),
+                                      );
+                                    } else {
+                                      Navigator.pushNamed(context, '/incident-details');
+                                    }
                                   },
                                   style: OutlinedButton.styleFrom(
                                     backgroundColor: colors.card,
@@ -257,7 +324,19 @@ class S03OverviewDashboardScreen extends StatelessWidget {
                                 height: 48,
                                 child: ElevatedButton(
                                   onPressed: () {
-                                    Navigator.pushNamed(context, '/recommended-action');
+                                    if (_topIncident != null) {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => S18ApproveActionScreen(
+                                            incidentId: _topIncident!.id,
+                                          ),
+                                          settings: RouteSettings(arguments: _topIncident!.id),
+                                        ),
+                                      );
+                                    } else {
+                                      Navigator.pushNamed(context, '/recommended-action');
+                                    }
                                   },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: colors.accent,
@@ -324,7 +403,7 @@ class S03OverviewDashboardScreen extends StatelessWidget {
                           context,
                           title: 'Critical',
                           dotColor: colors.critical,
-                          count: '1',
+                          count: '$_criticalCount',
                           sub: 'open',
                           onTap: () {
                             Navigator.pushNamed(context, '/incidents');
@@ -337,7 +416,7 @@ class S03OverviewDashboardScreen extends StatelessWidget {
                           context,
                           title: 'Warning',
                           dotColor: colors.warning,
-                          count: '2',
+                          count: '$_openCount',
                           sub: 'open',
                           onTap: () {
                             Navigator.pushNamed(context, '/incidents');
@@ -350,8 +429,8 @@ class S03OverviewDashboardScreen extends StatelessWidget {
                           context,
                           title: 'Resolved',
                           dotColor: colors.ok,
-                          count: '3',
-                          sub: 'last 7 days',
+                          count: '$_resolvedCount',
+                          sub: 'resolved',
                           onTap: () {
                             Navigator.pushNamed(context, '/incidents');
                           },

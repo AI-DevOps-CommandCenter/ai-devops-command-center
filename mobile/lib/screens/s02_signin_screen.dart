@@ -12,9 +12,9 @@ class S02SignInScreen extends StatefulWidget {
 
 class _S02SignInScreenState extends State<S02SignInScreen> {
   final TextEditingController _emailController =
-      TextEditingController(text: 'mobile.test@yourdomain.com');
+      TextEditingController(text: '');
   final TextEditingController _passwordController =
-      TextEditingController(text: 'himasha@123');
+      TextEditingController(text: '');
   bool _obscurePassword = true;
   bool _isLoading = false;
   String? _errorMessage;
@@ -67,10 +67,6 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
         ),
       );
     }
-  }
-
-  void _navigateToDashboard() {
-    Navigator.pushReplacementNamed(context, '/dashboard');
   }
 
   @override
@@ -184,7 +180,12 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
                                 controller: _emailController,
                                 keyboardType: TextInputType.emailAddress,
                                 style: TextStyle(fontSize: 15, color: colors.text),
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
+                                  hintText: 'name@company.com',
+                                  hintStyle: TextStyle(
+                                    fontSize: 15,
+                                    color: colors.muted,
+                                  ),
                                   isDense: true,
                                   border: InputBorder.none,
                                   contentPadding: EdgeInsets.zero,
@@ -218,7 +219,12 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
                                       controller: _passwordController,
                                       obscureText: _obscurePassword,
                                       style: TextStyle(fontSize: 15, color: colors.text),
-                                      decoration: const InputDecoration(
+                                      decoration: InputDecoration(
+                                        hintText: '••••••••••••',
+                                        hintStyle: TextStyle(
+                                          fontSize: 15,
+                                          color: colors.muted,
+                                        ),
                                         isDense: true,
                                         border: InputBorder.none,
                                         contentPadding: EdgeInsets.zero,
@@ -308,133 +314,6 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
                           ],
                         ),
 
-                        const SizedBox(height: 14),
-
-                        // "or" divider
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Container(
-                                height: 1,
-                                color: colors.border,
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
-                              child: Text(
-                                'or',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: colors.muted,
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Container(
-                                height: 1,
-                                color: colors.border,
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 14),
-
-                        // Continue with GitHub
-                        SizedBox(
-                          height: 48,
-                          child: OutlinedButton(
-                            onPressed: _navigateToDashboard,
-                            style: OutlinedButton.styleFrom(
-                              backgroundColor: colors.card,
-                              side: BorderSide(color: colors.border),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                CustomPaint(
-                                  size: const Size(18, 18),
-                                  painter: _GithubIconPainter(color: colors.text),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Continue with GitHub',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                    color: colors.text,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 14),
-
-                        // Try demo as Alex Morgan
-                        InkWell(
-                          onTap: _navigateToDashboard,
-                          borderRadius: BorderRadius.circular(14),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            decoration: BoxDecoration(
-                              color: colors.accentSoft,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 20,
-                                  backgroundColor: colors.accent,
-                                  child: Text(
-                                    'AM',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
-                                      color: colors.onAccent,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Try the demo as Alex Morgan',
-                                        style: TextStyle(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w600,
-                                          color: colors.text,
-                                        ),
-                                      ),
-                                      Text(
-                                        'Tech lead · can approve playbooks',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: colors.muted,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CustomPaint(
-                                    painter: _LucideChevronRightPainter(color: colors.text),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-
                         // Bottom push spacer
                         const Spacer(),
 
@@ -512,82 +391,4 @@ class _LucideEyePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _LucideEyePainter oldDelegate) =>
       oldDelegate.obscure != obscure || oldDelegate.color != color;
-}
-
-class _LucideChevronRightPainter extends CustomPainter {
-  final Color color;
-  _LucideChevronRightPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final scale = size.width / 24.0;
-    canvas.save();
-    canvas.scale(scale, scale);
-
-    final strokePaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final path = Path();
-    path.moveTo(9, 18);
-    path.lineTo(15, 12);
-    path.lineTo(9, 6);
-    canvas.drawPath(path, strokePaint);
-
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant _LucideChevronRightPainter oldDelegate) =>
-      oldDelegate.color != color;
-}
-
-class _GithubIconPainter extends CustomPainter {
-  final Color color;
-  _GithubIconPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final scale = size.width / 24.0;
-    canvas.save();
-    canvas.scale(scale, scale);
-
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final path = Path();
-    // Lucide github icon:
-    // M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21
-    path.moveTo(9, 19);
-    path.cubicTo(4.7, 20.4, 4.7, 16.5, 3, 16);
-    path.moveTo(15, 21);
-    path.lineTo(15, 17.5);
-    path.cubicTo(15, 16.5, 15.1, 16.1, 14.5, 15.5);
-    path.cubicTo(17.3, 15.2, 20, 14.1, 20, 9.5);
-    path.cubicTo(20, 8.2, 19.5, 7.1, 18.7, 6.3);
-    path.cubicTo(18.8, 5.1, 18.7, 3.9, 18.6, 3.1);
-    path.cubicTo(18.6, 3.1, 17.5, 2.8, 15.1, 4.4);
-    path.cubicTo(13.9, 4.1, 12.7, 3.9, 11.5, 3.9);
-    path.cubicTo(10.3, 3.9, 9.1, 4.1, 7.9, 4.4);
-    path.cubicTo(5.5, 2.8, 4.4, 3.1, 4.4, 3.1);
-    path.cubicTo(4.3, 3.9, 4.2, 5.1, 4.3, 6.3);
-    path.cubicTo(3.5, 7.1, 3, 8.2, 3, 9.5);
-    path.cubicTo(3, 14.1, 5.7, 15.2, 8.5, 15.5);
-    path.cubicTo(7.9, 16.1, 7.9, 16.7, 8, 17.5);
-    path.lineTo(8, 21);
-
-    canvas.drawPath(path, paint);
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant _GithubIconPainter oldDelegate) =>
-      oldDelegate.color != color;
 }

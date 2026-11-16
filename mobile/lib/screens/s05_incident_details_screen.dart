@@ -2,24 +2,116 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
 import '../widgets/proto_icon.dart';
-import 's06_ai_investigation_progress_screen.dart';
+import '../services/api_service.dart';
+import '../models/incident_model.dart';
+import 's07_root_cause_screen.dart';
+import 's18_approve_action_screen.dart';
 import 's09_logs_explorer_screen.dart';
 import 's10_metrics_screen.dart';
 import 's14_deployment_details_screen.dart';
 
-class S05IncidentDetailsScreen extends StatelessWidget {
-  const S05IncidentDetailsScreen({super.key});
+class S05IncidentDetailsScreen extends StatefulWidget {
+  final String? incidentId;
+
+  const S05IncidentDetailsScreen({super.key, this.incidentId});
+
+  @override
+  State<S05IncidentDetailsScreen> createState() => _S05IncidentDetailsScreenState();
+}
+
+class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
+  bool _isLoading = true;
+  String? _errorMessage;
+  IncidentModel? _incident;
+  String? _resolvedIncidentId;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_resolvedIncidentId == null) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is String && args.isNotEmpty) {
+        _resolvedIncidentId = args;
+      } else if (widget.incidentId != null && widget.incidentId!.isNotEmpty) {
+        _resolvedIncidentId = widget.incidentId;
+      }
+      _loadIncident();
+    }
+  }
+
+  Future<void> _loadIncident() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final id = _resolvedIncidentId;
+    if (id == null || id.isEmpty) {
+      // If no ID passed, try fetching the first incident from the list
+      try {
+        final list = await ApiService().fetchIncidents();
+        if (list.isNotEmpty && mounted) {
+          setState(() {
+            _incident = list.first;
+            _resolvedIncidentId = list.first.id;
+            _isLoading = false;
+          });
+          return;
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _errorMessage = e.toString();
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+    }
+
+    try {
+      final incident = await ApiService().fetchIncidentById(_resolvedIncidentId!);
+      if (mounted) {
+        setState(() {
+          _incident = incident;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  String _formatDateTime(DateTime dt) {
+    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final incident = _incident;
+
+    final shortId = incident != null
+        ? (incident.id.length > 8
+            ? (incident.id.startsWith('INC-')
+                ? incident.id
+                : 'INC-${incident.id.substring(0, 8).toUpperCase()}')
+            : incident.id)
+        : (_resolvedIncidentId != null && _resolvedIncidentId!.length > 8
+            ? 'INC-${_resolvedIncidentId!.substring(0, 8).toUpperCase()}'
+            : 'INC-DETAILS');
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header: padding: 14px 16px 10px, gap: 10px
+            // Header
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
@@ -31,7 +123,7 @@ class S05IncidentDetailsScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'INC-1042',
+                          shortId,
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w700,
@@ -41,7 +133,7 @@ class S05IncidentDetailsScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 1),
                         Text(
-                          'Elevated errors after deployment',
+                          incident?.title ?? 'Incident details',
                           style: TextStyle(
                             fontSize: 13,
                             color: colors.muted,
@@ -56,480 +148,415 @@ class S05IncidentDetailsScreen extends StatelessWidget {
               ),
             ),
 
-            // Content: padding: 4px 16px 24px, gap: 14px
+            // Content
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+              child: _buildBody(colors, incident),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody(AppColorScheme colors, IncidentModel? incident) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_errorMessage != null || incident == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, size: 48, color: colors.red),
+              const SizedBox(height: 12),
+              Text(
+                'Failed to load incident details',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: colors.text,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _errorMessage ?? 'Incident not found on backend.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: colors.muted),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _loadIncident,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Try Again'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: colors.accent,
+                  foregroundColor: colors.onAccent,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final isCritical = incident.severity == IncidentSeverity.critical;
+    final sevBg = isCritical ? colors.badgeRedBg : colors.badgeAmberBg;
+    final sevFg = isCritical ? colors.critical : colors.warning;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Badges row
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(
+                  color: sevBg,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Badges row: gap 8px
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: colors.badgeRedBg,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.warning_amber_rounded, size: 13, color: colors.critical),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Critical',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  height: 1.5,
-                                  color: colors.critical,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: colors.accentSoft,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            'Investigating',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              height: 1.5,
-                              color: colors.accent,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: colors.surface2,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            'Production',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              height: 1.5,
-                              color: colors.muted,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-
-                    // 6-Stage Stepper: Detect (done), Investigate (active), Cause, Approve, Recover, Report
-                    _buildStepper(context, activeStage: 1),
-                    const SizedBox(height: 14),
-
-                    // Metadata Card: Service, Detected, Owner, Suspected change
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Column(
-                        children: [
-                          _buildMetaRow(
-                            label: 'Service',
-                            valueWidget: Text(
-                              'payments-api',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontFamily: 'JetBrains Mono',
-                                fontWeight: FontWeight.w500,
-                                color: colors.text,
-                              ),
-                            ),
-                            colors: colors,
-                          ),
-                          const SizedBox(height: 10),
-                          _buildMetaRow(
-                            label: 'Detected',
-                            valueWidget: Text(
-                              '14:12 · by Prometheus alert',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: colors.text,
-                              ),
-                            ),
-                            colors: colors,
-                          ),
-                          const SizedBox(height: 10),
-                          _buildMetaRow(
-                            label: 'Owner',
-                            valueWidget: Text(
-                              'Alex Morgan (on call)',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: colors.text,
-                              ),
-                            ),
-                            colors: colors,
-                          ),
-                          const SizedBox(height: 10),
-                          _buildMetaRow(
-                            label: 'Suspected change',
-                            valueWidget: RichText(
-                              text: TextSpan(
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                  color: colors.text,
-                                ),
-                                children: [
-                                  TextSpan(
-                                    text: 'v2.8.1',
-                                    style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 13),
-                                  ),
-                                  const TextSpan(text: ' · PR #214'),
-                                ],
-                              ),
-                            ),
-                            colors: colors,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Metrics grid: Error rate (0.3% -> 12.4%) & P95 latency (180 ms -> 2.4 s)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: colors.badgeRedBg,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Error rate',
-                                  style: TextStyle(fontSize: 13, color: colors.muted),
-                                ),
-                                const SizedBox(height: 2),
-                                RichText(
-                                  text: TextSpan(
-                                    style: const TextStyle(fontSize: 15),
-                                    children: [
-                                      TextSpan(
-                                        text: '0.3%',
-                                        style: TextStyle(color: colors.muted),
-                                      ),
-                                      TextSpan(
-                                        text: ' → ',
-                                        style: TextStyle(color: colors.muted),
-                                      ),
-                                      TextSpan(
-                                        text: '12.4%',
-                                        style: TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                          color: colors.critical,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: colors.badgeRedBg,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'P95 latency',
-                                  style: TextStyle(fontSize: 13, color: colors.muted),
-                                ),
-                                const SizedBox(height: 2),
-                                RichText(
-                                  text: TextSpan(
-                                    style: const TextStyle(fontSize: 15),
-                                    children: [
-                                      TextSpan(
-                                        text: '180 ms',
-                                        style: TextStyle(color: colors.muted),
-                                      ),
-                                      TextSpan(
-                                        text: ' → ',
-                                        style: TextStyle(color: colors.muted),
-                                      ),
-                                      TextSpan(
-                                        text: '2.4 s',
-                                        style: TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                          color: colors.critical,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Timeline Header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'TIMELINE',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.52,
-                            color: colors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Timeline Card
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildTimelineRow(
-                            time: '14:05',
-                            title: 'v2.8.1 deployed',
-                            subtitle: 'Pipeline #318 passed · GitHub Actions',
-                            dotColor: colors.info,
-                            hasLineAfter: true,
-                            colors: colors,
-                          ),
-                          _buildTimelineRow(
-                            time: '14:07',
-                            title: 'First DB connection timeouts',
-                            subtitle: 'Loki · payments-api pods',
-                            dotColor: colors.warning,
-                            hasLineAfter: true,
-                            colors: colors,
-                          ),
-                          _buildTimelineRow(
-                            time: '14:12',
-                            title: 'Alert: error rate above 5%',
-                            subtitle: 'Prometheus · notified Alex Morgan',
-                            dotColor: colors.critical,
-                            hasLineAfter: true,
-                            colors: colors,
-                          ),
-                          _buildTimelineRow(
-                            time: '14:13',
-                            title: 'AI investigation started',
-                            subtitle: 'n8n workflow · logs, metrics, deployments',
-                            dotColor: colors.accent,
-                            hasLineAfter: false,
-                            colors: colors,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Explore Header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'EXPLORE',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.52,
-                            color: colors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-
-                    // 3 Explore Buttons: Logs, Metrics, Deploy
-                    Row(
-                      children: [
-                        Expanded(
-                          child: InkWell(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const S09LogsExplorerScreen(),
-                                ),
-                              );
-                            },
-                            borderRadius: BorderRadius.circular(14),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-                              decoration: BoxDecoration(
-                                color: colors.card,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: colors.border),
-                              ),
-                              child: Column(
-                                children: [
-                                  ProtoIcon(ProtoIcons.logs, size: 20, color: colors.text),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Logs',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.text,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: InkWell(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const S10MetricsScreen(),
-                                ),
-                              );
-                            },
-                            borderRadius: BorderRadius.circular(14),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-                              decoration: BoxDecoration(
-                                color: colors.card,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: colors.border),
-                              ),
-                              child: Column(
-                                children: [
-                                  ProtoIcon(ProtoIcons.metrics, size: 20, color: colors.text),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Metrics',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.text,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: InkWell(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const S14DeploymentDetailsScreen(),
-                                ),
-                              );
-                            },
-                            borderRadius: BorderRadius.circular(14),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-                              decoration: BoxDecoration(
-                                color: colors.card,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: colors.border),
-                              ),
-                              child: Column(
-                                children: [
-                                  ProtoIcon(ProtoIcons.deploy, size: 20, color: colors.text),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Deploy',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.text,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Primary Button: View AI investigation
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const S06AiInvestigationProgressScreen(),
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.auto_awesome, size: 18),
-                        label: const Text(
-                          'View AI investigation',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: colors.accent,
-                          foregroundColor: colors.onAccent,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
+                    Icon(Icons.warning_amber_rounded, size: 13, color: sevFg),
+                    const SizedBox(width: 4),
+                    Text(
+                      incident.severity.name.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        height: 1.5,
+                        color: sevFg,
                       ),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(
+                  color: colors.accentSoft,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  incident.status.name.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.5,
+                    color: colors.accent,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(
+                  color: colors.surface2,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  'Production',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.5,
+                    color: colors.muted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Stepper: Detect -> Investigate -> Cause -> Approve -> Recover -> Report
+          _buildStepper(context, activeStage: incident.status == IncidentStatus.open ? 0 : 1),
+          const SizedBox(height: 14),
+
+          // Metadata Card
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colors.card,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.border),
             ),
-          ],
-        ),
+            child: Column(
+              children: [
+                _buildMetaRow(
+                  label: 'Service',
+                  valueWidget: Text(
+                    incident.serviceName,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontFamily: 'JetBrains Mono',
+                      fontWeight: FontWeight.w600,
+                      color: colors.text,
+                    ),
+                  ),
+                  colors: colors,
+                ),
+                const SizedBox(height: 12),
+                _buildMetaRow(
+                  label: 'Detected',
+                  valueWidget: Text(
+                    _formatDateTime(incident.detectedAt),
+                    style: TextStyle(fontSize: 13, color: colors.text),
+                  ),
+                  colors: colors,
+                ),
+                const SizedBox(height: 12),
+                _buildMetaRow(
+                  label: 'Status',
+                  valueWidget: Text(
+                    incident.status.name,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: colors.accent,
+                    ),
+                  ),
+                  colors: colors,
+                ),
+                const SizedBox(height: 12),
+                _buildMetaRow(
+                  label: 'ID',
+                  valueWidget: Text(
+                    incident.id,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'JetBrains Mono',
+                      color: colors.muted,
+                    ),
+                  ),
+                  colors: colors,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Description Card
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colors.card,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'INCIDENT SUMMARY',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                    color: colors.muted,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  incident.summary.isNotEmpty
+                      ? incident.summary
+                      : 'Production alert triggered on ${incident.serviceName}. Automated investigation in progress.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: colors.text,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Explore Buttons (Logs, Metrics, Deploy)
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const S09LogsExplorerScreen(),
+                      ),
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        ProtoIcon(ProtoIcons.logs, size: 20, color: colors.text),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Logs',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: colors.text,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const S10MetricsScreen(),
+                      ),
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        ProtoIcon(ProtoIcons.metrics, size: 20, color: colors.text),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Metrics',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: colors.text,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const S14DeploymentDetailsScreen(),
+                      ),
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: colors.card,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        ProtoIcon(ProtoIcons.deploy, size: 20, color: colors.text),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Deploy',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: colors.text,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Primary Button 1: View AI Root Cause
+          SizedBox(
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => S07RootCauseScreen(incidentId: incident.id),
+                    settings: RouteSettings(arguments: incident.id),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              label: const Text(
+                'View AI Root Cause',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: colors.accent,
+                foregroundColor: colors.onAccent,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Primary Button 2: Remediation / Approve Action
+          SizedBox(
+            height: 48,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => S18ApproveActionScreen(incidentId: incident.id),
+                    settings: RouteSettings(arguments: incident.id),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.check_circle_outline, size: 18),
+              label: const Text(
+                'Review Remediation & Approvals',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: colors.card,
+                foregroundColor: colors.text,
+                side: BorderSide(color: colors.border),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -551,77 +578,6 @@ class S05IncidentDetailsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildTimelineRow({
-    required String time,
-    required String title,
-    required String subtitle,
-    required Color dotColor,
-    required bool hasLineAfter,
-    required AppColorScheme colors,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 12,
-              height: 12,
-              margin: const EdgeInsets.only(top: 4),
-              decoration: BoxDecoration(
-                color: dotColor,
-                shape: BoxShape.circle,
-              ),
-            ),
-            if (hasLineAfter)
-              Container(
-                width: 2,
-                height: 38,
-                color: colors.border,
-                margin: const EdgeInsets.symmetric(vertical: 4),
-              ),
-          ],
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(bottom: hasLineAfter ? 14.0 : 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                RichText(
-                  text: TextSpan(
-                    style: TextStyle(fontSize: 14, color: colors.text),
-                    children: [
-                      TextSpan(
-                        text: time,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontFamily: 'JetBrains Mono',
-                          color: colors.muted,
-                        ),
-                      ),
-                      const TextSpan(text: '  '),
-                      TextSpan(
-                        text: title,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(fontSize: 13, color: colors.muted),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildStepper(BuildContext context, {required int activeStage}) {
     final colors = context.colors;
     final stages = ['Detect', 'Investigate', 'Cause', 'Approve', 'Recover', 'Report'];
@@ -634,95 +590,34 @@ class S05IncidentDetailsScreen extends StatelessWidget {
         border: Border.all(color: colors.border),
       ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: List.generate(stages.length, (index) {
-          final isCompleted = index < activeStage;
-          final isActive = index == activeStage;
-          final title = stages[index];
+          final isPast = index < activeStage;
+          final isCurrent = index == activeStage;
+          Color dotColor = colors.muted;
+          if (isPast) dotColor = colors.ok;
+          if (isCurrent) dotColor = colors.accent;
 
-          Color textColor = colors.muted;
-          FontWeight fontWeight = FontWeight.w500;
-          if (isActive) {
-            textColor = colors.accent;
-            fontWeight = FontWeight.w600;
-          } else if (isCompleted) {
-            textColor = colors.text;
-          }
-
-          return Expanded(
-            child: Stack(
-              clipBehavior: Clip.none,
-              alignment: Alignment.center,
-              children: [
-                // Connecting bar
-                if (index > 0)
-                  Positioned(
-                    top: 10,
-                    right: 0,
-                    left: -50,
-                    child: Container(
-                      height: 2,
-                      color: isCompleted || isActive ? colors.success : colors.border,
-                    ),
-                  ),
-
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: isCompleted
-                            ? colors.success
-                            : isActive
-                                ? colors.accentSoft
-                                : colors.card,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isCompleted
-                              ? colors.success
-                              : isActive
-                                  ? colors.accent
-                                  : colors.border,
-                          width: 2,
-                        ),
-                      ),
-                      alignment: Alignment.center,
-                      child: isCompleted
-                          ? Icon(Icons.check, size: 13, color: colors.card)
-                          : isActive
-                              ? Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: colors.accent,
-                                    shape: BoxShape.circle,
-                                  ),
-                                )
-                              : null,
-                    ),
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      height: 14,
-                      child: OverflowBox(
-                        maxWidth: double.infinity,
-                        child: Text(
-                          title,
-                          softWrap: false,
-                          maxLines: 1,
-                          overflow: TextOverflow.visible,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: fontWeight,
-                            color: textColor,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+          return Column(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: dotColor,
+                  shape: BoxShape.circle,
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                stages[index],
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                  color: isCurrent ? colors.text : colors.muted,
+                ),
+              ),
+            ],
           );
         }),
       ),

@@ -77,15 +77,9 @@ void main() {
       expect(run.steps.first.title, 'Queued');
     });
 
-    test('ApiService provides fallback approval and playbook data', () async {
+    test('ApiService throws ApiException on network failure without mock fallbacks', () async {
       final api = ApiService();
-      final approvals = await api.fetchPendingApprovals();
-      expect(approvals.isNotEmpty, true);
-      expect(approvals.first.serviceName, 'payments-api');
-
-      final run = await api.fetchPlaybookRun('run-uuid-1042-rb');
-      expect(run.actionType, PlaybookActionType.rollback);
-      expect(run.steps.isNotEmpty, true);
+      expect(() => api.fetchPendingApprovals(), throwsA(isA<ApiException>()));
     });
   });
 }
