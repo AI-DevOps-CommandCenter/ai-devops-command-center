@@ -18,6 +18,18 @@ import {
   RECOVERY_CHECK_STATUSES,
   type RecoveryCheckStatus
 } from "../services/recovery-check.service.js";
+import {
+  recordAiAnalysis,
+  AI_ACTIONS,
+  AI_SEVERITIES
+} from "../services/ai-analysis.service.js";
+import {
+  createIncidentFromAlert,
+  getIncidentContext,
+  savePostmortem,
+  INCIDENT_SEVERITIES,
+  type PostmortemReport
+} from "../services/alert-intake.service.js";
 import { sendDbError } from "../lib/db-errors.js";
 
 // n8n -> backend machine endpoints (decision A5).
@@ -226,6 +238,195 @@ export function createMachineRouter(deps: MachineDeps | null): Router {
     } catch (error) {
       resetSessionOnJwtError(deps.automation, error);
       return sendDbError(res, error, "Machine record recovery check error:", "Failed to record recovery check.");
+    }
+  });
+
+  // POST /api/machine/investigations/:id/analysis  (BD-2, contract B.3; sent by n8n workflow 05)
+  // Body: { incident_id, summary, root_cause?, severity?, confidence?, evidence?, recommended_action?, model_name? }
+  router.post("/investigations/:id/analysis", async (req: Request, res: Response) => {
+    const investigationId = req.params.id;
+    if (typeof investigationId !== "string" || !uuidRegex.test(investigationId)) {
+      return res.status(400).json({ success: false, message: "A valid investigation id is required." });
+    }
+    const body: unknown = req.body;
+    if (!isJsonObject(body)) {
+      return res.status(400).json({ success: false, message: "A JSON object body is required." });
+    }
+    const { incident_id, summary, root_cause, severity, confidence, evidence, recommended_action, model_name } = body;
+
+    if (typeof incident_id !== "string" || !uuidRegex.test(incident_id)) {
+      return res.status(400).json({ success: false, message: "A valid incident_id is required." });
+    }
+    if (!isBoundedText(summary, 8000)) {
+      return res.status(400).json({ success: false, message: "summary must be 1 to 8000 characters." });
+    }
+    if (root_cause !== undefined && root_cause !== null && !isBoundedText(root_cause, 8000)) {
+      return res.status(400).json({ success: false, message: "root_cause must be 1 to 8000 characters." });
+    }
+    if (severity !== undefined && severity !== null &&
+        (typeof severity !== "string" || !(AI_SEVERITIES as readonly string[]).includes(severity))) {
+      return res.status(400).json({ success: false, message: `severity must be one of: ${AI_SEVERITIES.join(", ")}.` });
+    }
+    if (confidence !== undefined && confidence !== null &&
+        (typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1)) {
+      return res.status(400).json({ success: false, message: "confidence must be a number from 0 to 1." });
+    }
+    if (evidence !== undefined && evidence !== null && !Array.isArray(evidence)) {
+      return res.status(400).json({ success: false, message: "evidence must be an array." });
+    }
+    if (recommended_action !== undefined && recommended_action !== null &&
+        (typeof recommended_action !== "string" || !(AI_ACTIONS as readonly string[]).includes(recommended_action))) {
+      return res.status(400).json({ success: false, message: `recommended_action must be one of: ${AI_ACTIONS.join(", ")}.` });
+    }
+    if (model_name !== undefined && model_name !== null && !isBoundedText(model_name, 100)) {
+      return res.status(400).json({ success: false, message: "model_name must be 1 to 100 characters." });
+    }
+
+    const client = await getAutomationClient(deps.automation, res);
+    if (!client) return;
+
+    try {
+      const analysisId = await recordAiAnalysis(client, {
+        incident_id,
+        investigation_id: investigationId,
+        model_name: (model_name as string | null | undefined) ?? null,
+        summary,
+        root_cause: (root_cause as string | null | undefined) ?? null,
+        severity: (severity as string | null | undefined) ?? null,
+        confidence: (confidence as number | null | undefined) ?? null,
+        evidence: (evidence as unknown[] | null | undefined) ?? [],
+        recommended_action: (recommended_action as string | null | undefined) ?? null
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "AI analysis recorded.",
+        data: { analysis_id: analysisId }
+      });
+    } catch (error) {
+      resetSessionOnJwtError(deps.automation, error);
+      return sendDbError(res, error, "Machine record AI analysis error:", "Failed to record AI analysis.");
+    }
+  });
+
+  // POST /api/machine/incidents  (BD-1; sent by n8n workflow 01)
+  // Body: { fingerprint, title, severity, service_name, description?, environment?, detected_at? }
+  // 201 when created, 200 when an active incident for the fingerprint already exists.
+  router.post("/incidents", async (req: Request, res: Response) => {
+    const body: unknown = req.body;
+    if (!isJsonObject(body)) {
+      return res.status(400).json({ success: false, message: "A JSON object body is required." });
+    }
+    const { fingerprint, title, description, severity, service_name, environment, detected_at } = body;
+
+    if (!isBoundedText(fingerprint, 200)) {
+      return res.status(400).json({ success: false, message: "fingerprint must be 1 to 200 characters." });
+    }
+    if (!isBoundedText(title, 300)) {
+      return res.status(400).json({ success: false, message: "title must be 1 to 300 characters." });
+    }
+    if (typeof severity !== "string" || !(INCIDENT_SEVERITIES as readonly string[]).includes(severity)) {
+      return res.status(400).json({ success: false, message: `severity must be one of: ${INCIDENT_SEVERITIES.join(", ")}.` });
+    }
+    if (!isBoundedText(service_name, 200)) {
+      return res.status(400).json({ success: false, message: "service_name must be 1 to 200 characters." });
+    }
+    if (description !== undefined && description !== null && !isBoundedText(description, 4000)) {
+      return res.status(400).json({ success: false, message: "description must be 1 to 4000 characters." });
+    }
+    if (environment !== undefined && environment !== null && !isBoundedText(environment, 100)) {
+      return res.status(400).json({ success: false, message: "environment must be 1 to 100 characters." });
+    }
+    if (detected_at !== undefined && detected_at !== null &&
+        (typeof detected_at !== "string" || Number.isNaN(Date.parse(detected_at)))) {
+      return res.status(400).json({ success: false, message: "detected_at must be an ISO 8601 timestamp." });
+    }
+
+    const client = await getAutomationClient(deps.automation, res);
+    if (!client) return;
+
+    try {
+      const result = await createIncidentFromAlert(client, {
+        fingerprint,
+        title,
+        description: (description as string | null | undefined) ?? null,
+        severity,
+        service_name,
+        environment: (environment as string | null | undefined) ?? null,
+        detected_at: (detected_at as string | null | undefined) ?? null
+      });
+      return res.status(result.created ? 201 : 200).json({
+        success: true,
+        message: result.created ? "Incident created." : "Incident already exists for this alert.",
+        data: result
+      });
+    } catch (error) {
+      resetSessionOnJwtError(deps.automation, error);
+      return sendDbError(res, error, "Machine create incident error:", "Failed to create incident.");
+    }
+  });
+
+  // GET /api/machine/incidents/:id/context  (BD-4; read by n8n workflow 08)
+  router.get("/incidents/:id/context", async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (typeof id !== "string" || !uuidRegex.test(id)) {
+      return res.status(400).json({ success: false, message: "Invalid incident ID." });
+    }
+    const client = await getAutomationClient(deps.automation, res);
+    if (!client) return;
+
+    try {
+      const context = await getIncidentContext(client, id);
+      return res.status(200).json({ success: true, data: context });
+    } catch (error) {
+      resetSessionOnJwtError(deps.automation, error);
+      return sendDbError(res, error, "Machine incident context error:", "Failed to read incident context.");
+    }
+  });
+
+  // POST /api/machine/incidents/:id/postmortem  (BD-4; sent by n8n workflow 08)
+  // Body: the validated postmortem (automation/schemas/postmortem-output.schema.json).
+  router.post("/incidents/:id/postmortem", async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (typeof id !== "string" || !uuidRegex.test(id)) {
+      return res.status(400).json({ success: false, message: "Invalid incident ID." });
+    }
+    const body: unknown = req.body;
+    if (!isJsonObject(body)) {
+      return res.status(400).json({ success: false, message: "A JSON object body is required." });
+    }
+    const textFields = ["title", "summary", "root_cause", "impact", "remediation", "recovery_result"] as const;
+    for (const field of textFields) {
+      if (!isBoundedText(body[field], 4000)) {
+        return res.status(400).json({ success: false, message: `${field} must be 1 to 4000 characters.` });
+      }
+    }
+    const listFields = ["evidence", "lessons_learned", "preventive_actions"] as const;
+    for (const field of listFields) {
+      const list = body[field];
+      if (!Array.isArray(list) || list.length > 20 || !list.every((item) => isBoundedText(item, 500))) {
+        return res.status(400).json({ success: false, message: `${field} must be a list of up to 20 texts.` });
+      }
+    }
+    const timeline = body.timeline;
+    if (!Array.isArray(timeline) || timeline.length > 50 || !timeline.every((entry) =>
+        isJsonObject(entry) && isBoundedText(entry.time, 40) && isBoundedText(entry.event, 500))) {
+      return res.status(400).json({ success: false, message: "timeline must be a list of { time, event }." });
+    }
+
+    const client = await getAutomationClient(deps.automation, res);
+    if (!client) return;
+
+    try {
+      const postmortemId = await savePostmortem(client, id, body as unknown as PostmortemReport);
+      return res.status(201).json({
+        success: true,
+        message: "Postmortem saved.",
+        data: { postmortem_id: postmortemId }
+      });
+    } catch (error) {
+      resetSessionOnJwtError(deps.automation, error);
+      return sendDbError(res, error, "Machine save postmortem error:", "Failed to save postmortem.");
     }
   });
 
