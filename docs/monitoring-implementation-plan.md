@@ -2,7 +2,7 @@
 
 **Owner:** Keshan
 **Branch:** `feature/monitoring`
-**Status (13 Nov 2026):** steps 1 to 7 built and verified locally on Docker Desktop for Windows; step 8 blocked on other owners. Results per step below and in section 9.
+**Status (16 Nov 2026):** steps 1 to 7 built and verified locally on Docker Desktop for Windows (13 Nov; tests and live checks re-run 16 Nov). Workflow 06 now calls the executor (n8n side, 14 Nov). Step 8 waits on the backend items. Results per step below and in section 9.
 **Consumers:** Tharindu (workflows 02, 03, 07), Vishwa (workflows 01, 06), Vinuka (backend trigger BD-5, BD-6).
 
 The contracts this plan targets were read from the code on `origin/feature/n8n-incident-workflow`:
@@ -266,17 +266,18 @@ Location: `infrastructure/playbooks/executor/`, Python.
 - pytest: 32 pass, including a signature vector produced by `automation/src/lib/hmac.js`.
 - Live, signed by `signedBackendRequest()` from `hmac.js` inside the n8n container, over `host.docker.internal:9095`: `restart` 200 and the container really restarted (`StartedAt` changed, healthy after 2 s); same run re-signed 200 with `repeated: true` and no second restart; exact replay 409; forged signature 401; `rollback` 422; `circuit_breaker` 200 and the app reported `breaker_open: true`.
 - Recovery: fault at 50% for 2.5 minutes, executor `restart`, then workflow 07 (live, via a harness workflow): `recovered`, `db_status: healthy` on the 2nd check (error rate 0.211, then 0). With the earlier 5m query it answered `not_recovered`; see D-MON-9. Storing the recovery check failed only because no backend was running.
-- Not done: a socket proxy; 06 calling the executor (Vishwa's change).
+- Not done: a socket proxy.
+- 16 Nov re-run: executor 32 tests pass in a fresh environment; a signed `restart` to the running executor restarted the sample app (healthy after 2 s) and `rollback` answered 422.
 
 ### Step 8: Full remediation loop (with Vishwa, Tharindu, Vinuka)
 
 Fault, alert, n8n 01, approval, backend trigger (BD-5), 06 calls executor, 07 verifies recovery. This depends on BD-5 (backend trigger) and BD-6 (`service_name` in `request_payload`), which are not built yet. Until then, 06 can be triggered with a signed test request as `npm run test:n8n` already does.
 
-**Status: blocked, not run.** Every hop that exists has been tested on its own (steps 5 and 7). What is missing, by owner:
+**Status: in progress (16 Nov).** Every hop on the monitoring side has been tested on its own (steps 5 and 7).
 
-| Missing | Owner | What exactly |
+| Item | Owner | Status |
 |---|---|---|
-| 06 calls the executor | Vishwa | Replace the 4 `Execute: <action>` Code nodes with one signed request: `signedBackendRequest({ MACHINE_SIGNING_SECRET: $env.EXECUTOR_SIGNING_SECRET, BACKEND_BASE_URL: $env.EXECUTOR_URL, BACKEND_TIMEOUT_MS: '90000' }, 'POST', '/v1/execute', { action, service_name, playbook_run_id })`, then an HTTP Request node with a 90 s timeout. 200 = success; 500 = failed (do not retry with the same run); 4xx = refused. Add `EXECUTOR_URL=http://host.docker.internal:9095` and `EXECUTOR_SIGNING_SECRET` to `automation/.env` and the compose file |
+| 06 calls the executor | Vishwa | **Done** on `feature/n8n-incident-workflow` (14 Nov): `REMEDIATION_EXECUTION_MODE=executor` sends a signed `POST <EXECUTOR_URL>/v1/execute` built with `signedBackendRequest()` (`automation/src/nodes/06-remediation/execute-action.js`), with `EXECUTOR_URL`, `EXECUTOR_SIGNING_SECRET` and `EXECUTOR_TIMEOUT_MS` (default 90000). Vishwa reports a live test where 06 restarted sample-app and 07 confirmed recovery against real Prometheus; I did not see that run |
 | Backend calls 06 after approval | Vinuka | BD-5 |
 | `service_name` in the run's `request_payload` | Vinuka | BD-6 |
 | Incident created from the alert | Backend + database team | BD-1 |
@@ -305,9 +306,10 @@ PROM_THRESHOLD_ERROR_RATE=0.05
 PROM_THRESHOLD_LATENCY_P95=0.5
 # PROM_QUERY_CPU / PROM_QUERY_MEMORY left empty: the workflow 03 defaults match prometheus_client's process metrics.
 
-# Executor (06, once Vishwa wires it; D-MON-8)
+# Executor (06, REMEDIATION_EXECUTION_MODE=executor; D-MON-8)
 EXECUTOR_URL=http://host.docker.internal:9095
-EXECUTOR_SIGNING_SECRET=<same value as monitoring/.env, shared out of band>
+EXECUTOR_SIGNING_SECRET=<same value as monitoring/.env, never sent through chat>
+EXECUTOR_TIMEOUT_MS=90000
 ```
 
 Notes for the workflow owners:
@@ -354,4 +356,4 @@ All results are from a local Docker Desktop (Windows) run, not a shared or hoste
 | Playbook executor: restart, circuit_breaker | ready | Live signed calls from the n8n container; real restart; recovery confirmed by workflow 07 (step 7) |
 | Playbook executor: rollback, scale | not built | 422 until D-MON-6 is decided |
 | Executor integration endpoint | `POST http://host.docker.internal:9095/v1/execute`, HMAC with `EXECUTOR_SIGNING_SECRET` | `infrastructure/playbooks/executor/README.md` |
-| Ready for real-service testing | **monitoring: yes. Remediation loop: no** | The loop needs 06 wired to the executor (Vishwa), BD-5 and BD-6 (Vinuka) and BD-1 (backend + database), step 8 |
+| Ready for real-service testing | **monitoring and executor: yes** | 06 is wired to the executor (14 Nov). The full loop from an approval still needs BD-5 and BD-6 (Vinuka) and BD-1 (backend + database); step 8 |

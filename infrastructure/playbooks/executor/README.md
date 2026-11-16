@@ -28,7 +28,17 @@ Signed with the project HMAC scheme (same as `automation/src/lib/hmac.js` and `b
 | 500 | Action failed: `{ executed: false, message }` (stored; a retry needs a new run) |
 | 503 | `EXECUTOR_SIGNING_SECRET` missing or shorter than 32 characters |
 
-Set the n8n HTTP timeout to at least 90 s: a restart waits up to 10 s for the stop and up to 60 s for `/health`.
+Set the n8n HTTP timeout to at least 90 s: a restart waits up to 10 s for the stop and up to 60 s for `/health`. Workflow 06 uses `EXECUTOR_URL`, `EXECUTOR_SIGNING_SECRET` and `EXECUTOR_TIMEOUT_MS` (default 90000) with `REMEDIATION_EXECUTION_MODE=executor`.
+
+## Environment
+
+| Variable | Required | Default | |
+|---|---|---|---|
+| `EXECUTOR_SIGNING_SECRET` | yes | none | 32+ characters; every request gets 503 without it |
+| `EXECUTOR_ALLOWLIST` | no | `/srv/allowlist.json` in the image | |
+| `HEALTH_TIMEOUT_SECONDS` | no | `60` | Wait for `/health` after a restart |
+| `HOST`, `PORT` | no | `0.0.0.0`, `9095` in the image | |
+| `LOG_LEVEL` | no | `INFO` | |
 
 ## Actions
 
