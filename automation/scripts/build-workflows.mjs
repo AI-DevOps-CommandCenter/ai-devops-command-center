@@ -110,7 +110,7 @@ function makeWorkflow(meta) {
           { name: 'X-DC-Signature', value: '={{ $json.request.headers["X-DC-Signature"] }}' },
         ];
         p.url = '={{ $json.request.url }}';
-        body = { raw: '={{ $json.request.body }}' };
+        body = method === 'GET' ? null : { raw: '={{ $json.request.body }}' };
       }
       if (headers.length) { p.sendHeaders = true; p.headerParameters = { parameters: headers }; }
       if (body && body.raw) { p.sendBody = true; p.contentType = 'raw'; p.rawContentType = 'application/json'; p.body = body.raw; }
@@ -224,7 +224,7 @@ function wf00() {
 // ---------- 01 Alert Intake (Vishwa) ----------
 function wf01() {
   const w = makeWorkflow(WF.intake);
-  w.sticky('## 01 – Alert Intake (owner: Vishwa)\nAlertmanager → validate → de-duplicate → respond 202 → create incident (**BLOCKED: BD-1**) → run 05 Root Cause for every new alert.\nAuth: Header Auth credential "Alertmanager Webhook Token" (Alertmanager sends `Authorization: Bearer <token>`).', 0, -2, 700, 220);
+  w.sticky('## 01 – Alert Intake (owner: Vishwa)\nAlertmanager → validate → de-duplicate → respond 202 → create incident via `POST /api/machine/incidents` (**BD-1**, idempotent on the alert fingerprint) → run 05 Root Cause for every new alert.\nAuth: Header Auth credential "Alertmanager Webhook Token" (Alertmanager sends `Authorization: Bearer <token>`).', 0, -2, 700, 220);
   w.webhook('Alertmanager webhook', 0, 0, 'alertmanager', { headerAuth: CRED.alertmanager, notes: 'POST /webhook/alertmanager (Alertmanager webhook_config, version 4 payload).' });
   w.code('Parse and validate alerts', '01-alert-intake/parse-alerts.js', 1, 0, 'Firing alerts only; resolved alerts are acknowledged.');
   w.isTrue('Valid payload?', 2, 0, '={{ $json.valid }}');
@@ -232,14 +232,16 @@ function wf01() {
   w.code('Detect duplicate alerts', '01-alert-intake/dedupe.js', 3, -1, 'fingerprint + startsAt, kept DEDUP_WINDOW_MINUTES (static data; production executions only).');
   w.set('Accepted response', 4, -1, [['http_status', '={{ 202 }}', 'number']], 'Adds the HTTP status for the response.');
   w.respond('Respond 202', 5, -1, 'Answers Alertmanager before the long investigation starts.');
-  w.code('Create incident (backend) – BLOCKED', '01-alert-intake/create-incident.js', 6, -1, 'BLOCKED (BD-1): no backend endpoint creates incidents from alerts. No URL is invented.');
+  w.code('Sign create incident request', '01-alert-intake/sign-create-incident.js', 5.5, -1, 'One signed request per new alert (BD-1).');
+  w.http('Backend: create incident', 6, -1, { method: 'POST', signed: true, notes: 'POST /api/machine/incidents (BD-1) → create_incident_from_alert; 201 created / 200 existing { incident_id, investigation_id, created }.' });
+  w.code('Incident result', '01-alert-intake/incident-result.js', 6.25, -1, 'created → 05 stores the analysis; failed → alert released for the next delivery (N-3).');
   w.code('Confirm alert processing', '01-alert-intake/confirm-processing.js', 6.5, -2, 'N-3: created/blocked → confirmed; failed → released (the next delivery is processed again).');
   w.execute('Run 05 Root Cause', 7, -1, WF.rca, 'One sub-workflow run per new alert.', 'each');
   w.code('Intake result', '01-alert-intake/intake-result.js', 8, -1);
   w.chain('Alertmanager webhook', 'Parse and validate alerts', 'Valid payload?');
   w.link('Valid payload?', 'Detect duplicate alerts', 0);
   w.link('Valid payload?', 'Respond 400', 1);
-  w.chain('Detect duplicate alerts', 'Accepted response', 'Respond 202', 'Create incident (backend) – BLOCKED', 'Confirm alert processing', 'Run 05 Root Cause', 'Intake result');
+  w.chain('Detect duplicate alerts', 'Accepted response', 'Respond 202', 'Sign create incident request', 'Backend: create incident', 'Incident result', 'Confirm alert processing', 'Run 05 Root Cause', 'Intake result');
   // AI unavailable / analysis not stored (returned by 05).
   softFailureNotify(w, 9, -1, [['Intake result']]);
   return w;
@@ -421,19 +423,32 @@ function wf07() {
 // ---------- 08 Postmortem (Tharindu) ----------
 function wf08() {
   const w = makeWorkflow(WF.postmortem);
-  w.sticky('## 08 – Postmortem (owner: Tharindu)\nUses the context passed by 07 (backend read endpoints missing: **BD-4**) → Groq → validate against `postmortem-output.schema.json` → store (**BLOCKED: BD-4**, draft returned in the execution output).', 0, -3, 800, 220);
+  w.sticky('## 08 – Postmortem (owner: Tharindu)\nRecovery result from 07 + stored context (`GET /api/machine/incidents/:id/context`, **BD-4**) → Groq → validate against `postmortem-output.schema.json` → save (`POST /api/machine/incidents/:id/postmortem`, **BD-4**).', 0, -3, 800, 220);
   w.subTrigger('When called by 07 Recovery Check', 0, 0, 'Input: recovery result (+ optional rca, incident, timeline).');
-  w.code('Collect incident context', '08-postmortem/collect-context.js', 1, 0, 'BLOCKED (BD-4): no machine endpoint to read incident/RCA/run data.');
+  w.code('Sign context request', '08-postmortem/sign-context.js', 0.5, 0, 'Signed GET of the stored incident context (BD-4).');
+  w.isTrue('Read context?', 0.75, 0, '={{ !$json.skip_context }}');
+  w.http('Backend: incident context', 0.9, -1, { method: 'GET', signed: true, notes: 'GET /api/machine/incidents/:id/context (BD-4) → get_incident_context.' });
+  w.code('Collect incident context', '08-postmortem/collect-context.js', 1, 0, 'Input from 07 wins; the stored context fills what is missing.');
   w.isTrue('Enough context?', 2, 0, '={{ $json.enough }}');
   w.code('Not enough context', '08-postmortem/not-enough.js', 3, 1);
   w.code('Build postmortem prompt', '08-postmortem/build-prompt.js', 3, -1, 'System prompt: automation/prompts/postmortem-system-prompt.txt');
   groqHttp(w, 'Groq: postmortem', 4, -1);
   w.code('Validate postmortem', '08-postmortem/validate-postmortem.js', 5, -1);
-  w.code('Store postmortem (backend) – BLOCKED', '08-postmortem/store-blocked.js', 6, -1, 'BLOCKED (BD-4): no endpoint. No URL is invented.');
-  w.chain('When called by 07 Recovery Check', 'Collect incident context', 'Enough context?');
+  w.code('Sign store postmortem request', '08-postmortem/sign-store.js', 6, -1, 'Only a valid draft with an incident id is stored.');
+  w.isTrue('Store postmortem?', 6.5, -1, '={{ !$json.skip_store }}');
+  w.http('Backend: store postmortem', 7, -2, { method: 'POST', signed: true, notes: 'POST /api/machine/incidents/:id/postmortem (BD-4) → save_postmortem; 201 { postmortem_id }.' });
+  w.code('Postmortem result', '08-postmortem/store-result.js', 8, -1);
+  w.chain('When called by 07 Recovery Check', 'Sign context request', 'Read context?');
+  w.link('Read context?', 'Backend: incident context', 0);
+  w.link('Read context?', 'Collect incident context', 1);
+  w.link('Backend: incident context', 'Collect incident context');
+  w.link('Collect incident context', 'Enough context?');
   w.link('Enough context?', 'Build postmortem prompt', 0);
   w.link('Enough context?', 'Not enough context', 1);
-  w.chain('Build postmortem prompt', 'Groq: postmortem', 'Validate postmortem', 'Store postmortem (backend) – BLOCKED');
+  w.chain('Build postmortem prompt', 'Groq: postmortem', 'Validate postmortem', 'Sign store postmortem request', 'Store postmortem?');
+  w.link('Store postmortem?', 'Backend: store postmortem', 0);
+  w.link('Store postmortem?', 'Postmortem result', 1);
+  w.link('Backend: store postmortem', 'Postmortem result');
   return w;
 }
 

@@ -1,7 +1,7 @@
 // Workflow 01 – Node: "Intake result". Summarizes what happened to each alert
 // (visible in the n8n execution log). soft_failure (N-2) is the one returned by
 // workflow 05 (AI unavailable, analysis not stored); "Soft failure?" sends it to 09.
-const alerts = $('Create incident (backend) – BLOCKED').all().map((i) => i.json);
+const alerts = $('Incident result').all().map((i) => i.json);
 return $input.all().map((item, idx) => {
   const rca = item.json || {};
   const a = alerts[idx] || {};

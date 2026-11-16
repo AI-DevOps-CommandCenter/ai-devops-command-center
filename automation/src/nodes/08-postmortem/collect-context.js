@@ -1,15 +1,21 @@
 // Workflow 08 – Postmortem (owner: Tharindu)
 // Node: "Collect incident context".
-//
-// BLOCKED (BD-4): the backend has no machine endpoint to READ an incident, its
-// AI analysis, playbook run or recovery checks, and none to STORE a postmortem.
-// So this workflow uses only the context its caller passes in:
-// { incident_id, playbook_run_id, service_name, action_type, recovery: {...},
-//   rca: {...}|null, incident: {...}|null, timeline: [...]|null }
-// It never invents missing facts: missing parts are listed as "unknown".
+// Combines the input from 07 (recovery result) with the context stored in the
+// backend (BD-4: GET /api/machine/incidents/:id/context -> incident, latest AI
+// analysis, runs, recovery checks, timeline). Values passed in by the caller
+// win; the backend fills what is missing. It never invents missing facts:
+// missing parts are listed as "unknown".
 //#include lib/common.js
 
-const j = $input.first().json;
+const signed = $('Sign context request').first().json;
+const answer = signed.skip_context ? null : $input.first().json;
+const stored = answer && classifyHttp(answer).kind === 'ok' && answer.body && answer.body.data ? answer.body.data : {};
+const j = { ...signed.input };
+if (!j.incident && stored.incident) j.incident = stored.incident;
+if (!j.rca && stored.rca) j.rca = stored.rca;
+if (!Array.isArray(j.timeline) && Array.isArray(stored.timeline)) j.timeline = stored.timeline;
+if (!j.service_name && stored.incident) j.service_name = stored.incident.service_name || null;
+
 const missing = [];
 if (!j.incident_id) missing.push('incident_id');
 if (!j.rca) missing.push('rca (AI analysis)');

@@ -86,7 +86,7 @@ test('N-2: workflow 01 intake result passes the soft failure returned by 05', as
   const created = [{ alert_name: 'A', service_name: 'svc', incident_id: null, incident_created: false }, { alert_name: 'B', service_name: 'svc2', incident_id: null, incident_created: false }];
   const out = await runCodeNode('01-alert-intake/intake-result.js', {
     items: [{ status: 'ai_unavailable', soft_failure: { kind: 'ai_unavailable', node: 'Groq: RCA', message: 'm' } }, { status: 'analysis_ready', stored: false }],
-    nodes: { 'Create incident (backend) – BLOCKED': created },
+    nodes: { 'Incident result': created },
   });
   assert.equal(out[0].soft_failure.kind, 'ai_unavailable');
   assert.equal(out[1].soft_failure, null);
