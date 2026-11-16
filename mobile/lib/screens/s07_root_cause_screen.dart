@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
 import '../services/api_service.dart';
-import 's18_approve_action_screen.dart';
+import 's17_recommended_action_screen.dart';
 
 class S07RootCauseScreen extends StatefulWidget {
   final String? incidentId;
@@ -322,7 +322,7 @@ class _S07RootCauseScreenState extends State<S07RootCauseScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => S18ApproveActionScreen(incidentId: _resolvedIncidentId),
+                    builder: (context) => S17RecommendedActionScreen(incidentId: _resolvedIncidentId),
                     settings: RouteSettings(arguments: _resolvedIncidentId),
                   ),
                 );
@@ -336,7 +336,7 @@ class _S07RootCauseScreenState extends State<S07RootCauseScreen> {
                 ),
               ),
               child: const Text(
-                'Review & Approve Action',
+                'Review recommended action',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,

@@ -1,33 +1,168 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
-import 's19_execution_progress_screen.dart';
+import '../services/api_service.dart';
+import '../models/incident_model.dart';
+import '../models/playbook_model.dart';
+import 's18_approve_action_screen.dart';
 import 's23_developer_assistant_screen.dart';
-import 's31_reject_action_screen.dart';
 
+/// S17 Recommended action.
+/// Shows the AI's recommended remediation for an incident (latest AI analysis)
+/// and the enabled playbook(s) for that action. "Request remediation" creates a
+/// playbook run + approval (POST /api/playbook-runs). Nothing runs until a
+/// DIFFERENT operator/admin approves it on S18.
 class S17RecommendedActionScreen extends StatefulWidget {
-  const S17RecommendedActionScreen({super.key});
+  final String? incidentId;
+
+  const S17RecommendedActionScreen({super.key, this.incidentId});
 
   @override
   State<S17RecommendedActionScreen> createState() => _S17RecommendedActionScreenState();
 }
 
 class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen> {
-  bool _check1 = false;
-  bool _check2 = false;
+  String? _incidentId;
+  IncidentModel? _incident;
+  Map<String, dynamic>? _analysis;
+  List<Map<String, dynamic>> _playbooks = [];
+  String? _selectedPlaybookId;
+  ApprovalModel? _pendingApproval;
 
-  bool get _ready => _check1 && _check2;
+  bool _isLoading = true;
+  bool _isSubmitting = false;
+  bool _reviewed = false;
+  String? _errorMessage;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_incidentId == null) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is String && args.isNotEmpty) {
+        _incidentId = args;
+      } else if (widget.incidentId != null && widget.incidentId!.isNotEmpty) {
+        _incidentId = widget.incidentId;
+      }
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    final id = _incidentId;
+    if (id == null || id.isEmpty) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Open this screen from an incident.';
+      });
+      return;
+    }
+    try {
+      final api = ApiService();
+      final results = await Future.wait([
+        api.fetchIncidentById(id),
+        api.fetchRecommendation(id),
+        api.fetchApprovals(status: 'pending'),
+      ]);
+      final incident = results[0] as IncidentModel;
+      final rec = results[1] as Map<String, dynamic>;
+      final approvals = results[2] as List<ApprovalModel>;
+      final playbooks = (rec['playbooks'] as List<Map<String, dynamic>>?) ?? [];
+      ApprovalModel? pending;
+      for (final a in approvals) {
+        if (a.incidentId == id) {
+          pending = a;
+          break;
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _incident = incident;
+        _analysis = rec['analysis'] as Map<String, dynamic>?;
+        _playbooks = playbooks;
+        _selectedPlaybookId = playbooks.isNotEmpty ? playbooks.first['id']?.toString() : null;
+        _pendingApproval = pending;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = e is ApiException ? e.message : e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _requestRemediation() async {
+    final id = _incidentId;
+    final playbookId = _selectedPlaybookId;
+    if (id == null || playbookId == null) return;
+    setState(() => _isSubmitting = true);
+    try {
+      await ApiService().createPlaybookRun(
+        incidentId: id,
+        playbookId: playbookId,
+        requestPayload: {
+          if (_incident != null && _incident!.serviceName.isNotEmpty) 'service_name': _incident!.serviceName,
+          if (_analysis?['id'] != null) 'ai_analysis_id': _analysis!['id'],
+        },
+        idempotencyKey: 'mobile-$id-$playbookId',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Remediation requested. Another operator must approve it.')),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      final message = e is ApiException ? e.message : e.toString();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Request failed: $message')));
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  void _openApproval() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => S18ApproveActionScreen(incidentId: _incidentId, approvalId: _pendingApproval?.id),
+        settings: RouteSettings(arguments: _incidentId),
+      ),
+    );
+  }
+
+  String _actionLabel(String? action) {
+    switch (action) {
+      case 'restart':
+        return 'Restart service';
+      case 'rollback':
+        return 'Roll back deployment';
+      case 'scale':
+        return 'Scale service';
+      case 'circuit_breaker':
+        return 'Open circuit breaker';
+      default:
+        return 'No action recommended';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final subtitle = _incident == null
+        ? 'Loading incident…'
+        : '${_incident!.title} · ${_incident!.serviceName}';
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header: padding: 14px 16px 10px, gap: 10px
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
@@ -49,11 +184,8 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
                         ),
                         const SizedBox(height: 1),
                         Text(
-                          'INC-1042 · payments-api',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: colors.muted,
-                          ),
+                          subtitle,
+                          style: TextStyle(fontSize: 13, color: colors.muted),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -63,475 +195,208 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
                 ],
               ),
             ),
+            Expanded(child: _buildBody(context)),
+          ],
+        ),
+      ),
+    );
+  }
 
-            // Content: padding: 4px 16px 24px, gap: 14px
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+  Widget _buildBody(BuildContext context) {
+    final colors = context.colors;
+    if (_isLoading) {
+      return Center(child: CircularProgressIndicator(color: colors.accent));
+    }
+    if (_errorMessage != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline, color: colors.critical, size: 32),
+              const SizedBox(height: 10),
+              Text(_errorMessage!, textAlign: TextAlign.center, style: TextStyle(color: colors.text)),
+              const SizedBox(height: 14),
+              OutlinedButton(onPressed: _load, child: const Text('Retry')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final action = _analysis?['recommended_action']?.toString();
+    final confidence = _analysis?['confidence'];
+    final confidencePct = confidence is num ? '${(confidence * 100).round()}%' : '—';
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildStepper(context, activeStage: 3),
+            const SizedBox(height: 14),
+
+            if (_analysis == null)
+              _card(
+                context,
+                child: Text(
+                  'The AI investigation has not produced a recommendation for this incident yet. Pull down to refresh.',
+                  style: TextStyle(fontSize: 14, color: colors.text, height: 1.4),
+                ),
+              )
+            else ...[
+              _card(
+                context,
+                accent: true,
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 6-Stage Stepper: Detect, Investigate, Cause, Approve (active), Recover, Report
-                    _buildStepper(context, activeStage: 3),
-                    const SizedBox(height: 14),
-
-                    // Main Action Card
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: colors.accentSoft,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                alignment: Alignment.center,
-                                child: Icon(Icons.history_rounded, size: 22, color: colors.accent),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Roll back deployment',
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w700,
-                                        color: colors.text,
-                                      ),
-                                    ),
-                                    Text(
-                                      'Playbook 2 of 4 · reviewed by admins',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: colors.muted,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                    Row(
+                      children: [
+                        Icon(Icons.auto_awesome, size: 18, color: colors.accent),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _actionLabel(action),
+                            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: colors.text),
                           ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: colors.badgeRedBg,
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  'High impact',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1.5,
-                                    color: colors.critical,
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: colors.badgeAmberBg,
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  'Approval required',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1.5,
-                                    color: colors.warning,
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: colors.badgeGreenBg,
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  'Reversible',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1.5,
-                                    color: colors.success,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          _buildDetailRow(
-                            label: 'Service',
-                            valueWidget: Text(
-                              'payments-api',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontFamily: 'JetBrains Mono',
-                                fontWeight: FontWeight.w500,
-                                color: colors.text,
-                              ),
-                            ),
-                            colors: colors,
-                          ),
-                          const SizedBox(height: 10),
-                          _buildDetailRow(
-                            label: 'Version',
-                            valueWidget: RichText(
-                              text: TextSpan(
-                                style: TextStyle(
-                                  fontFamily: 'JetBrains Mono',
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  color: colors.text,
-                                ),
+                        ),
+                        _pill(context, 'Confidence $confidencePct'),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    _labelled(context, 'Root cause', _analysis?['root_cause']?.toString() ?? '—'),
+                    const SizedBox(height: 8),
+                    _labelled(context, 'Summary', _analysis?['summary']?.toString() ?? '—'),
+                    if (_analysis?['model_name'] != null) ...[
+                      const SizedBox(height: 8),
+                      Text('Model: ${_analysis!['model_name']}', style: TextStyle(fontSize: 12, color: colors.muted)),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text('Playbook', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.muted)),
+              const SizedBox(height: 6),
+              if (_playbooks.isEmpty)
+                _card(
+                  context,
+                  child: Text(
+                    action == null
+                        ? 'No action was recommended.'
+                        : 'No enabled playbook for "$action". An admin must enable one first.',
+                    style: TextStyle(fontSize: 14, color: colors.text),
+                  ),
+                )
+              else
+                ..._playbooks.map((p) {
+                  final id = p['id']?.toString();
+                  final selected = id == _selectedPlaybookId;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: _pendingApproval == null ? () => setState(() => _selectedPlaybookId = id) : null,
+                      child: _card(
+                        context,
+                        accent: selected,
+                        child: Row(
+                          children: [
+                            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                                size: 18, color: selected ? colors.accent : colors.muted),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const TextSpan(text: 'v2.8.1'),
-                                  TextSpan(text: ' → ', style: TextStyle(color: colors.muted, fontFamily: 'sans-serif')),
-                                  const TextSpan(text: 'v2.8.0'),
+                                  Text(p['name']?.toString() ?? 'Playbook',
+                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text)),
+                                  if ((p['description']?.toString() ?? '').isNotEmpty)
+                                    Text(p['description'].toString(),
+                                        style: TextStyle(fontSize: 12, color: colors.muted)),
                                 ],
                               ),
                             ),
-                            colors: colors,
-                          ),
-                          const SizedBox(height: 10),
-                          _buildDetailRow(
-                            label: 'v2.8.0 health',
-                            valueWidget: Text(
-                              'Stable for 22 h before deploy',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: colors.text,
-                              ),
-                            ),
-                            colors: colors,
-                          ),
-                          const SizedBox(height: 10),
-                          _buildDetailRow(
-                            label: 'Expected result',
-                            valueWidget: Text(
-                              'Errors below 1% within 5 min',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: colors.text,
-                              ),
-                            ),
-                            colors: colors,
-                          ),
-                          const SizedBox(height: 10),
-                          _buildDetailRow(
-                            label: 'Side effect',
-                            valueWidget: Text(
-                              '~30 s of failed requests',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: colors.text,
-                              ),
-                            ),
-                            colors: colors,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Other playbooks
-                    Text(
-                      'Other playbooks',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.52,
-                        color: colors.muted,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          RichText(
-                            text: TextSpan(
-                              style: TextStyle(fontSize: 14, height: 1.5, color: colors.muted),
-                              children: [
-                                TextSpan(
-                                  text: 'Restart service',
-                                  style: TextStyle(fontWeight: FontWeight.bold, color: colors.text),
-                                ),
-                                const TextSpan(text: ': would not fix the timeout setting.\n'),
-                                TextSpan(
-                                  text: 'Scale service',
-                                  style: TextStyle(fontWeight: FontWeight.bold, color: colors.text),
-                                ),
-                                const TextSpan(text: ': more pods still use the 500 ms timeout.'),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Your approval
-                    Text(
-                      'Your approval',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.52,
-                        color: colors.muted,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Checkbox 1
-                    InkWell(
-                      onTap: () => setState(() => _check1 = !_check1),
-                      borderRadius: BorderRadius.circular(14),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: colors.card,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 22,
-                              height: 22,
-                              decoration: BoxDecoration(
-                                color: _check1 ? colors.accent : Colors.transparent,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: _check1 ? colors.accent : colors.border,
-                                  width: 2,
-                                ),
-                              ),
-                              alignment: Alignment.center,
-                              child: _check1
-                                  ? Icon(Icons.check, size: 14, color: colors.onAccent)
-                                  : null,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'I verified the health of v2.8.0 before approving.',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: colors.text,
-                                ),
-                              ),
-                            ),
                           ],
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-
-                    // Checkbox 2
-                    InkWell(
-                      onTap: () => setState(() => _check2 = !_check2),
-                      borderRadius: BorderRadius.circular(14),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: colors.card,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 22,
-                              height: 22,
-                              decoration: BoxDecoration(
-                                color: _check2 ? colors.accent : Colors.transparent,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: _check2 ? colors.accent : colors.border,
-                                  width: 2,
-                                ),
-                              ),
-                              alignment: Alignment.center,
-                              child: _check2
-                                  ? Icon(Icons.check, size: 14, color: colors.onAccent)
-                                  : null,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'I accept ~30 s of failed requests during the rollback.',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: colors.text,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Approve Button
-                    if (_ready)
-                      SizedBox(
-                        height: 48,
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const S19ExecutionProgressScreen(),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.play_arrow, size: 18),
-                          label: const Text(
-                            'Approve and run rollback',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: colors.accent,
-                            foregroundColor: colors.onAccent,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                      )
-                    else
-                      Container(
-                        height: 48,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: colors.surface2,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Text(
-                          'Confirm both checks to approve',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: colors.muted,
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 10),
-
-                    // Action buttons: Reject / Ask assistant
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SizedBox(
-                            height: 48,
-                            child: OutlinedButton(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const S31RejectActionScreen(),
-                                  ),
-                                );
-                              },
-                              style: OutlinedButton.styleFrom(
-                                backgroundColor: colors.card,
-                                side: BorderSide(color: colors.border),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              child: Text(
-                                'Reject',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.text,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: SizedBox(
-                            height: 48,
-                            child: OutlinedButton.icon(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const S23DeveloperAssistantScreen(),
-                                  ),
-                                );
-                              },
-                              icon: Icon(Icons.auto_awesome, size: 18, color: colors.text),
-                              label: Text(
-                                'Ask assistant',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.text,
-                                ),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                backgroundColor: colors.card,
-                                side: BorderSide(color: colors.border),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Footer
-                    Text(
-                      'Your name and the time are saved to the audit log.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: colors.muted,
+                  );
+                }),
+              const SizedBox(height: 6),
+              _card(
+                context,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.verified_user_outlined, size: 18, color: colors.warning),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Human in the loop: the request must be approved by a different operator before anything runs. The AI never runs actions itself.',
+                        style: TextStyle(fontSize: 13, color: colors.text, height: 1.4),
                       ),
                     ),
                   ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              if (_pendingApproval != null) ...[
+                _card(
+                  context,
+                  child: Row(
+                    children: [
+                      Icon(Icons.hourglass_top, size: 18, color: colors.accent),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('Remediation requested — waiting for approval.',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _primaryButton(context, 'Open approval', Icons.arrow_forward, _openApproval),
+              ] else if (_playbooks.isNotEmpty) ...[
+                CheckboxListTile(
+                  value: _reviewed,
+                  onChanged: (v) => setState(() => _reviewed = v ?? false),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  activeColor: colors.accent,
+                  title: Text('I reviewed the root cause and evidence',
+                      style: TextStyle(fontSize: 14, color: colors.text)),
+                ),
+                const SizedBox(height: 6),
+                _primaryButton(
+                  context,
+                  _isSubmitting ? 'Requesting…' : 'Request remediation',
+                  Icons.send,
+                  _reviewed && !_isSubmitting ? _requestRemediation : null,
+                ),
+              ],
+            ],
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const S23DeveloperAssistantScreen()),
+                  );
+                },
+                icon: Icon(Icons.auto_awesome, size: 18, color: colors.text),
+                label: Text('Ask assistant',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: colors.text)),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: colors.card,
+                  side: BorderSide(color: colors.border),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
             ),
@@ -541,20 +406,57 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
     );
   }
 
-  Widget _buildDetailRow({
-    required String label,
-    required Widget valueWidget,
-    required AppColorScheme colors,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _card(BuildContext context, {required Widget child, bool accent = false}) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: accent ? colors.cardAccent : colors.card,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: accent ? colors.accent : colors.border),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _pill(BuildContext context, String text) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: colors.accentSoft, borderRadius: BorderRadius.circular(999)),
+      child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: colors.accent)),
+    );
+  }
+
+  Widget _labelled(BuildContext context, String label, String value) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: TextStyle(fontSize: 14, color: colors.muted),
-        ),
-        valueWidget,
+        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: colors.muted)),
+        const SizedBox(height: 2),
+        Text(value, style: TextStyle(fontSize: 14, color: colors.text, height: 1.4)),
       ],
+    );
+  }
+
+  Widget _primaryButton(BuildContext context, String label, IconData icon, VoidCallback? onPressed) {
+    final colors = context.colors;
+    return SizedBox(
+      height: 48,
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 18),
+        label: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: colors.accent,
+          foregroundColor: colors.onAccent,
+          disabledBackgroundColor: colors.surface2,
+          disabledForegroundColor: colors.muted,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      ),
     );
   }
 
@@ -573,8 +475,6 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
         children: List.generate(stages.length, (index) {
           final isCompleted = index < activeStage;
           final isActive = index == activeStage;
-          final title = stages[index];
-
           Color textColor = colors.muted;
           FontWeight fontWeight = FontWeight.w500;
           if (isActive) {
@@ -583,7 +483,6 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
           } else if (isCompleted) {
             textColor = colors.text;
           }
-
           return Expanded(
             child: Stack(
               clipBehavior: Clip.none,
@@ -594,12 +493,8 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
                     top: 10,
                     right: 0,
                     left: -50,
-                    child: Container(
-                      height: 2,
-                      color: isCompleted || isActive ? colors.success : colors.border,
-                    ),
+                    child: Container(height: 2, color: isCompleted || isActive ? colors.success : colors.border),
                   ),
-
                 Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -607,18 +502,10 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
                       width: 22,
                       height: 22,
                       decoration: BoxDecoration(
-                        color: isCompleted
-                            ? colors.success
-                            : isActive
-                                ? colors.accentSoft
-                                : colors.card,
+                        color: isCompleted ? colors.success : isActive ? colors.accentSoft : colors.card,
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: isCompleted
-                              ? colors.success
-                              : isActive
-                                  ? colors.accent
-                                  : colors.border,
+                          color: isCompleted ? colors.success : isActive ? colors.accent : colors.border,
                           width: 2,
                         ),
                       ),
@@ -629,24 +516,15 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
                               ? Container(
                                   width: 8,
                                   height: 8,
-                                  decoration: BoxDecoration(
-                                    color: colors.accent,
-                                    shape: BoxShape.circle,
-                                  ),
+                                  decoration: BoxDecoration(color: colors.accent, shape: BoxShape.circle),
                                 )
                               : null,
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: fontWeight,
-                        color: textColor,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    Text(stages[index],
+                        style: TextStyle(fontSize: 11, fontWeight: fontWeight, color: textColor),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
                   ],
                 ),
               ],

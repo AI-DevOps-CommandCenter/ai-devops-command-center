@@ -193,6 +193,47 @@ class ApiService {
     }
   }
 
+  /// GET /api/incidents/:id/recommendation
+  /// Latest AI analysis + enabled playbooks matching its recommended_action.
+  /// Returns { 'analysis': Map?, 'playbooks': List<Map> }.
+  Future<Map<String, dynamic>> fetchRecommendation(String incidentId) async {
+    final response = await _safeGet(ApiEndpoints.incidentRecommendation(incidentId));
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final data = decoded is Map && decoded['data'] is Map ? Map<String, dynamic>.from(decoded['data']) : <String, dynamic>{};
+      return {
+        'analysis': data['analysis'] is Map ? Map<String, dynamic>.from(data['analysis']) : null,
+        'playbooks': data['playbooks'] is List
+            ? List<Map<String, dynamic>>.from((data['playbooks'] as List).whereType<Map>().map((m) => Map<String, dynamic>.from(m)))
+            : <Map<String, dynamic>>[],
+      };
+    }
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
+  }
+
+  /// GET /api/incidents/:id/recovery-checks (newest first).
+  Future<List<Map<String, dynamic>>> fetchRecoveryChecks(String incidentId) async {
+    final response = await _safeGet(ApiEndpoints.incidentRecoveryChecks(incidentId));
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final list = decoded is Map && decoded['data'] is List ? decoded['data'] as List : const [];
+      return list.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+    }
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
+  }
+
+  /// GET /api/postmortems?incident_id=... (newest first). Null when none exists yet.
+  Future<Map<String, dynamic>?> fetchLatestPostmortem(String incidentId) async {
+    final response = await _safeGet(ApiEndpoints.postmortems(incidentId: incidentId));
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final list = decoded is Map && decoded['data'] is List ? decoded['data'] as List : const [];
+      final first = list.whereType<Map>().cast<Map>().toList();
+      return first.isEmpty ? null : Map<String, dynamic>.from(first.first);
+    }
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
+  }
+
   /// Fetches live system metrics
   Future<MetricModel> fetchMetrics() async {
     return MetricModel(

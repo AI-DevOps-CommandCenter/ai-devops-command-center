@@ -38,6 +38,11 @@ class ApiEndpoints {
       ? '$baseUrl/api/investigations?incident_id=$incidentId'
       : '$baseUrl/api/investigations';
   static String investigationById(String id) => '$baseUrl/api/investigations/$id';
+  static String incidentRecommendation(String id) => '$baseUrl/api/incidents/$id/recommendation';
+  static String incidentRecoveryChecks(String id) => '$baseUrl/api/incidents/$id/recovery-checks';
+  static String postmortems({String? incidentId}) => incidentId != null && incidentId.isNotEmpty
+      ? '$baseUrl/api/postmortems?incident_id=$incidentId'
+      : '$baseUrl/api/postmortems';
 
   // GitHub & CI/CD Pipelines (Thilina's routes - M7)
   static String get githubRepositories => '$baseUrl/api/github/repositories';

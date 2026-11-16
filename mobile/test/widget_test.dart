@@ -37,17 +37,18 @@ void main() {
     expect(find.textContaining('History'), findsOneWidget);
   });
 
-  testWidgets('S21PostmortemReportScreen renders postmortem sections', (WidgetTester tester) async {
+  // S21 loads the real postmortem (GET /api/postmortems?incident_id=); without
+  // an incident it shows guidance instead of invented content.
+  testWidgets('S21PostmortemReportScreen without an incident shows guidance, no fake data', (WidgetTester tester) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: S21PostmortemReportScreen(),
       ),
     );
+    await tester.pump();
 
     expect(find.text('Postmortem'), findsOneWidget);
-    expect(find.text('Summary'), findsOneWidget);
-    expect(find.text('Timeline'), findsOneWidget);
-    expect(find.text('Root cause'), findsOneWidget);
-    expect(find.text('Evidence'), findsOneWidget);
+    expect(find.text('Open this screen from an incident.'), findsOneWidget);
+    expect(find.textContaining('payments-api'), findsNothing);
   });
 }
