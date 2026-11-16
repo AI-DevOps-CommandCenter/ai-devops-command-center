@@ -26,6 +26,7 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
   IncidentModel? _incident;
   Map<String, dynamic>? _analysis;
   List<Map<String, dynamic>> _playbooks = [];
+  List<Map<String, dynamic>> _otherPlaybooks = [];
   String? _selectedPlaybookId;
   ApprovalModel? _pendingApproval;
 
@@ -72,6 +73,7 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
       final rec = results[1] as Map<String, dynamic>;
       final approvals = results[2] as List<ApprovalModel>;
       final playbooks = (rec['playbooks'] as List<Map<String, dynamic>>?) ?? [];
+      final others = (rec['other_playbooks'] as List<Map<String, dynamic>>?) ?? [];
       ApprovalModel? pending;
       for (final a in approvals) {
         if (a.incidentId == id) {
@@ -84,6 +86,7 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
         _incident = incident;
         _analysis = rec['analysis'] as Map<String, dynamic>?;
         _playbooks = playbooks;
+        _otherPlaybooks = others;
         _selectedPlaybookId = playbooks.isNotEmpty ? playbooks.first['id']?.toString() : null;
         _pendingApproval = pending;
         _isLoading = false;
@@ -280,7 +283,7 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
                 ),
               ),
               const SizedBox(height: 14),
-              Text('Playbook', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.muted)),
+              Text('Recommended playbook', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.muted)),
               const SizedBox(height: 6),
               if (_playbooks.isEmpty)
                 _card(
@@ -288,45 +291,19 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
                   child: Text(
                     action == null
                         ? 'No action was recommended.'
-                        : 'No enabled playbook for "$action". An admin must enable one first.',
+                        : 'No enabled playbook for "$action". Choose another option below, or ask an admin to enable one.',
                     style: TextStyle(fontSize: 14, color: colors.text),
                   ),
                 )
               else
-                ..._playbooks.map((p) {
-                  final id = p['id']?.toString();
-                  final selected = id == _selectedPlaybookId;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: _pendingApproval == null ? () => setState(() => _selectedPlaybookId = id) : null,
-                      child: _card(
-                        context,
-                        accent: selected,
-                        child: Row(
-                          children: [
-                            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                                size: 18, color: selected ? colors.accent : colors.muted),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(p['name']?.toString() ?? 'Playbook',
-                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text)),
-                                  if ((p['description']?.toString() ?? '').isNotEmpty)
-                                    Text(p['description'].toString(),
-                                        style: TextStyle(fontSize: 12, color: colors.muted)),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                }),
+                ..._playbooks.map((p) => _playbookTile(context, p)),
+              if (_otherPlaybooks.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text('Other options (your decision)',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.muted)),
+                const SizedBox(height: 6),
+                ..._otherPlaybooks.map((p) => _playbookTile(context, p)),
+              ],
               const SizedBox(height: 6),
               _card(
                 context,
@@ -361,7 +338,7 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
                 ),
                 const SizedBox(height: 10),
                 _primaryButton(context, 'Open approval', Icons.arrow_forward, _openApproval),
-              ] else if (_playbooks.isNotEmpty) ...[
+              ] else if (_playbooks.isNotEmpty || _otherPlaybooks.isNotEmpty) ...[
                 CheckboxListTile(
                   value: _reviewed,
                   onChanged: (v) => setState(() => _reviewed = v ?? false),
@@ -376,7 +353,7 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
                   context,
                   _isSubmitting ? 'Requesting…' : 'Request remediation',
                   Icons.send,
-                  _reviewed && !_isSubmitting ? _requestRemediation : null,
+                  _reviewed && !_isSubmitting && _selectedPlaybookId != null ? _requestRemediation : null,
                 ),
               ],
             ],
@@ -401,6 +378,41 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _playbookTile(BuildContext context, Map<String, dynamic> p) {
+    final colors = context.colors;
+    final id = p['id']?.toString();
+    final selected = id == _selectedPlaybookId;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: _pendingApproval == null ? () => setState(() => _selectedPlaybookId = id) : null,
+        child: _card(
+          context,
+          accent: selected,
+          child: Row(
+            children: [
+              Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                  size: 18, color: selected ? colors.accent : colors.muted),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(p['name']?.toString() ?? 'Playbook',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text)),
+                    if ((p['description']?.toString() ?? '').isNotEmpty)
+                      Text(p['description'].toString(), style: TextStyle(fontSize: 12, color: colors.muted)),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

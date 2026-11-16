@@ -28,32 +28,32 @@ describe("GET /api/incidents/:id/recommendation", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns the latest analysis and the enabled playbooks for its action (user's client, RLS)", async () => {
+  it("returns the latest analysis, the playbooks for its action and the other enabled ones (user's client, RLS)", async () => {
     mockValidUser();
+    const other = { id: "p2", name: "Open breaker", description: null, action_type: "circuit_breaker" };
     const { client, calls } = createMockUserClient({
       ai_analyses: { data: [analysis] },
-      playbooks: { data: [playbook] }
+      playbooks: { data: [playbook, other] }
     });
     supabaseMocks.createUserSupabaseClient.mockReturnValue(client);
 
     const res = await request(app).get(PATH).set("Authorization", `Bearer ${TEST_TOKEN}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ analysis, playbooks: [playbook] });
+    expect(res.body.data).toEqual({ analysis, playbooks: [playbook], other_playbooks: [other] });
     const playbookFilters = callsFor(calls, "playbooks", "eq").map((c) => c.args);
-    expect(playbookFilters).toEqual([["action_type", "restart"], ["enabled", true]]);
+    expect(playbookFilters).toEqual([["enabled", true]]);
   });
 
-  it("no analysis yet -> analysis null, no playbook query", async () => {
+  it("no analysis yet -> analysis null; every enabled playbook is an option", async () => {
     mockValidUser();
-    const { client, calls } = createMockUserClient({ ai_analyses: { data: [] } });
+    const { client } = createMockUserClient({ ai_analyses: { data: [] }, playbooks: { data: [playbook] } });
     supabaseMocks.createUserSupabaseClient.mockReturnValue(client);
 
     const res = await request(app).get(PATH).set("Authorization", `Bearer ${TEST_TOKEN}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ analysis: null, playbooks: [] });
-    expect(calls.some((c) => c.table === "playbooks")).toBe(false);
+    expect(res.body.data).toEqual({ analysis: null, playbooks: [], other_playbooks: [playbook] });
   });
 
   it("invalid id -> 400", async () => {

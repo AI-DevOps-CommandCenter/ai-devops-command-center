@@ -193,9 +193,13 @@ class ApiService {
     }
   }
 
+  static List<Map<String, dynamic>> _mapList(dynamic v) => v is List
+      ? v.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList()
+      : <Map<String, dynamic>>[];
+
   /// GET /api/incidents/:id/recommendation
   /// Latest AI analysis + enabled playbooks matching its recommended_action.
-  /// Returns { 'analysis': Map?, 'playbooks': List<Map> }.
+  /// Returns { 'analysis': Map?, 'playbooks': List<Map>, 'other_playbooks': List<Map> }.
   Future<Map<String, dynamic>> fetchRecommendation(String incidentId) async {
     final response = await _safeGet(ApiEndpoints.incidentRecommendation(incidentId));
     if (response.statusCode == 200) {
@@ -203,9 +207,8 @@ class ApiService {
       final data = decoded is Map && decoded['data'] is Map ? Map<String, dynamic>.from(decoded['data']) : <String, dynamic>{};
       return {
         'analysis': data['analysis'] is Map ? Map<String, dynamic>.from(data['analysis']) : null,
-        'playbooks': data['playbooks'] is List
-            ? List<Map<String, dynamic>>.from((data['playbooks'] as List).whereType<Map>().map((m) => Map<String, dynamic>.from(m)))
-            : <Map<String, dynamic>>[],
+        'playbooks': _mapList(data['playbooks']),
+        'other_playbooks': _mapList(data['other_playbooks']),
       };
     }
     throw ApiException(_parseErrorMessage(response), response.statusCode);

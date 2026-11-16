@@ -6,7 +6,10 @@ import type { UserSupabaseClient } from "../config/supabase.js";
 
 export interface Recommendation {
   analysis: Record<string, unknown> | null;
+  // Enabled playbooks for the recommended action.
   playbooks: Record<string, unknown>[];
+  // Every other enabled playbook: the human may choose a different action.
+  other_playbooks: Record<string, unknown>[];
 }
 
 export async function getRecommendation(
@@ -23,17 +26,20 @@ export async function getRecommendation(
 
   const analysis = (analyses?.[0] as Record<string, unknown> | undefined) ?? null;
   const action = typeof analysis?.recommended_action === "string" ? analysis.recommended_action : null;
-  if (!action) return { analysis, playbooks: [] };
 
   const { data: playbooks, error: playbookError } = await client
     .from("playbooks")
     .select("id, name, description, action_type")
-    .eq("action_type", action)
     .eq("enabled", true)
     .order("name", { ascending: true });
   if (playbookError) throw playbookError;
 
-  return { analysis, playbooks: (playbooks as Record<string, unknown>[] | null) ?? [] };
+  const all = (playbooks as Record<string, unknown>[] | null) ?? [];
+  return {
+    analysis,
+    playbooks: action ? all.filter((p) => p.action_type === action) : [],
+    other_playbooks: action ? all.filter((p) => p.action_type !== action) : all
+  };
 }
 
 // Recovery checks of an incident, newest first (mobile S20). User's client: RLS.
