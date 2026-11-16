@@ -41,6 +41,71 @@ describe("Remediation webhook dispatcher", () => {
     mockGetPlaybookRunById.mockResolvedValue(runFixture as never);
   });
 
+  it("reads action_type from the run's playbook when the run row has none (real schema)", async () => {
+    const PLAYBOOK_ID = "33333333-3333-4333-8333-333333333333";
+    const { action_type: _omitted, ...realRun } = runFixture;
+
+    mockGetPlaybookRunById.mockResolvedValue({
+      ...realRun,
+      playbook_id: PLAYBOOK_ID
+    } as never);
+
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ accepted: true }), { status: 202 })
+    );
+    const log = vi.fn();
+
+    const dispatcher = createRemediationWebhookDispatcher(
+      { url: WEBHOOK_URL, signingSecret: SIGNING_SECRET },
+      {
+        fetchImpl: fetchImpl as typeof fetch,
+        sleep: vi.fn().mockResolvedValue(undefined),
+        log
+      }
+    );
+
+    const { client, calls } = createMockUserClient({
+      playbooks: { data: { action_type: "restart" } }
+    });
+
+    await dispatcher.dispatch(client as never, RUN_ID);
+
+    expect(calls).toContainEqual({
+      table: "playbooks",
+      method: "eq",
+      args: ["id", PLAYBOOK_ID]
+    });
+    expect(log).not.toHaveBeenCalledWith(RUN_ID, 1, "invalid_run_data");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    const body = JSON.parse(fetchImpl.mock.calls[0]![1]?.body as string);
+    expect(body.action_type).toBe("restart");
+  });
+
+  it("does not send when the playbook action cannot be read", async () => {
+    const { action_type: _omitted, ...realRun } = runFixture;
+
+    mockGetPlaybookRunById.mockResolvedValue({
+      ...realRun,
+      playbook_id: "33333333-3333-4333-8333-333333333333"
+    } as never);
+
+    const fetchImpl = vi.fn();
+    const log = vi.fn();
+
+    const dispatcher = createRemediationWebhookDispatcher(
+      { url: WEBHOOK_URL, signingSecret: SIGNING_SECRET },
+      { fetchImpl: fetchImpl as typeof fetch, sleep: vi.fn(), log }
+    );
+
+    const { client } = createMockUserClient({ playbooks: { data: null } });
+
+    await dispatcher.dispatch(client as never, RUN_ID);
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(RUN_ID, 1, "invalid_run_data");
+  });
+
   it("sends a correctly signed webhook and accepts HTTP 202", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(

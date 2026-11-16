@@ -43,6 +43,24 @@ function isAllowedAction(
   );
 }
 
+async function getPlaybookActionType(
+  client: UserSupabaseClient,
+  playbookId: unknown
+): Promise<string | null> {
+  if (typeof playbookId !== "string") return null;
+
+  const { data, error } = await client
+    .from("playbooks")
+    .select("action_type")
+    .eq("id", playbookId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const actionType = (data as { action_type?: unknown }).action_type;
+  return typeof actionType === "string" ? actionType : null;
+}
+
 export function createRemediationWebhookDispatcher(
   config: RemediationWebhookConfig,
   options: DispatcherOptions = {}
@@ -65,10 +83,17 @@ export function createRemediationWebhookDispatcher(
         return;
       }
 
+      // playbook_runs has no action_type column: the action belongs to the
+      // run's playbook, so read it from there when the run row lacks it.
+      const actionType =
+        typeof run.action_type === "string"
+          ? run.action_type
+          : await getPlaybookActionType(client, run.playbook_id);
+
       if (
         typeof run.incident_id !== "string" ||
-        typeof run.action_type !== "string" ||
-        !isAllowedAction(run.action_type)
+        typeof actionType !== "string" ||
+        !isAllowedAction(actionType)
       ) {
         log(runId, 1, "invalid_run_data");
         return;
@@ -77,7 +102,7 @@ export function createRemediationWebhookDispatcher(
       const body = JSON.stringify({
         playbook_run_id: run.id,
         incident_id: run.incident_id,
-        action_type: run.action_type,
+        action_type: actionType,
         request_payload: run.request_payload ?? {}
       });
 
