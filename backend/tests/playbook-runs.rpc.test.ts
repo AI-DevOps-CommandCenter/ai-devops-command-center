@@ -226,6 +226,64 @@ describe("Playbook run lifecycle through database functions", () => {
     expectNoDirectWrites(calls);
   });
 
+  // BD-5: webhook dispatch must not delay the approval response.
+  it("PATCH /:id/decision returns without waiting for webhook dispatch", async () => {
+    const { calls } = useClient({
+      approvals: {
+        data: {
+          id: APPROVAL_ID,
+          playbook_run_id: RUN_ID,
+          status: "pending"
+        }
+      },
+      "rpc:decide_approval": {
+        data: {
+          approval_id: APPROVAL_ID,
+          status: "approved",
+          playbook_run_id: RUN_ID,
+          run_status: "approved"
+        }
+      },
+      playbook_runs: {
+        data: { ...runRow, status: "approved" }
+      }
+    });
+
+    let releaseDispatch: (() => void) | undefined;
+
+    const dispatch = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseDispatch = resolve;
+        })
+    );
+
+    const appWithDispatcher = createApp(testConfig(), {
+      machine: null,
+      remediationDispatcher: { dispatch }
+    });
+
+    try {
+      const res = await request(appWithDispatcher)
+        .patch(`/api/playbook-runs/${RUN_ID}/decision`)
+        .set(auth)
+        .send({ status: "approved" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe("approved");
+
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith(
+        expect.anything(),
+        RUN_ID
+      );
+
+      expectNoDirectWrites(calls);
+    } finally {
+      releaseDispatch?.();
+    }
+  });
+
   it("PATCH /:id/decision on a legacy run without approval is 404", async () => {
     const { calls } = useClient({
       approvals: { data: null }

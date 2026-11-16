@@ -144,3 +144,51 @@ export function createAutomationClientProvider(options: {
     }
   };
 }
+
+export interface RemediationWebhookEnv {
+  url: string;
+  signingSecret: string;
+}
+
+export function loadRemediationWebhookEnv():
+  | RemediationWebhookEnv
+  | null {
+  const url = process.env.N8N_REMEDIATION_WEBHOOK_URL?.trim();
+
+  // Outgoing remediation dispatch is disabled when no URL is configured.
+  if (!url) return null;
+
+  const signingSecret = process.env.MACHINE_SIGNING_SECRET?.trim();
+
+  if (!signingSecret || signingSecret.length < MIN_SECRET_LENGTH) {
+    throw new Error(
+      "N8N_REMEDIATION_WEBHOOK_URL requires a valid MACHINE_SIGNING_SECRET."
+    );
+  }
+
+  let parsedUrl: URL;
+
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    throw new Error("N8N_REMEDIATION_WEBHOOK_URL must be a valid URL.");
+  }
+
+  if (
+    parsedUrl.protocol !== "https:" &&
+    parsedUrl.hostname !== "localhost" &&
+    parsedUrl.hostname !== "127.0.0.1"
+  ) {
+    throw new Error(
+      "N8N_REMEDIATION_WEBHOOK_URL must use HTTPS outside localhost."
+    );
+  }
+
+  if (parsedUrl.pathname !== "/webhook/remediation") {
+    throw new Error(
+      "N8N_REMEDIATION_WEBHOOK_URL must point to /webhook/remediation."
+    );
+  }
+
+  return { url, signingSecret };
+}

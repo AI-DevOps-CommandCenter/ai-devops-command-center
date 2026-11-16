@@ -1,22 +1,28 @@
 import { Router } from "express";
 import { authenticateToken } from "../middleware/auth.js";
-
 import {
   createApprovalController,
   getApprovalsController,
   getApprovalByIdController,
-  decideApprovalController,
+  createDecideApprovalController,
   cancelApprovalController
 } from "../controllers/approval.controller.js";
+import type { RemediationWebhookDispatcher } from "../services/remediation-webhook.service.js";
 
-const router = Router();
+export function createApprovalRouter(
+  dispatcher?: RemediationWebhookDispatcher
+) {
+  const router = Router();
 
-router.use(authenticateToken);
+  router.use(authenticateToken);
 
-router.post("/", createApprovalController);
-router.get("/", getApprovalsController);
-router.get("/:id", getApprovalByIdController);
-router.patch("/:id/decision", decideApprovalController);
-router.post("/:id/cancel", cancelApprovalController);
+  router.post("/", createApprovalController);
+  router.get("/", getApprovalsController);
+  router.get("/:id", getApprovalByIdController);
+  router.patch("/:id/decision", createDecideApprovalController(dispatcher));
+  router.post("/:id/cancel", cancelApprovalController);
 
-export default router;
+  return router;
+}
+
+export default createApprovalRouter();

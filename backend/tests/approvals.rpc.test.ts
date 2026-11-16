@@ -7,11 +7,13 @@ import {
   mockValidUser,
   TEST_TOKEN
 } from "./helpers/mock-supabase-module.js";
+
 import {
   createMockUserClient,
   callsFor,
   type RecordedCall
 } from "./helpers/supabase-mock.js";
+
 import { testConfig } from "./helpers/config.js";
 
 vi.mock("../src/config/supabase.js", () => supabaseModuleFactory());
@@ -248,6 +250,60 @@ describe("PATCH /api/approvals/:id/decision -> decide_approval", () => {
       });
 
     expectNoDirectWrites(calls);
+  });
+
+  it("returns the approval response without waiting for webhook dispatch", async () => {
+    const decided = {
+      ...approvalRow,
+      status: "approved"
+    };
+
+    useClient({
+      "rpc:decide_approval": {
+        data: {
+          approval_id: APPROVAL_ID,
+          status: "approved",
+          playbook_run_id: RUN_ID,
+          run_status: "approved"
+        }
+      },
+      approvals: { data: decided }
+    });
+
+    let releaseDispatch: (() => void) | undefined;
+
+    const dispatch = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseDispatch = resolve;
+        })
+    );
+
+    const appWithDispatcher = createApp(testConfig(), {
+      machine: null,
+      remediationDispatcher: { dispatch }
+    });
+
+    try {
+      const res = await request(appWithDispatcher)
+        .patch(`/api/approvals/${APPROVAL_ID}/decision`)
+        .set("Authorization", `Bearer ${TEST_TOKEN}`)
+        .send({
+          status: "approved",
+          comments: "Safe to restart"
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe("approved");
+
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith(
+        expect.anything(),
+        RUN_ID
+      );
+    } finally {
+      releaseDispatch?.();
+    }
   });
 
   it("UNAUTHORIZED: deciding one's own request is 403", async () => {
