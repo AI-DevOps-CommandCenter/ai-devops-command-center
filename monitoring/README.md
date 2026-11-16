@@ -22,7 +22,7 @@ Needs Docker with Compose. From `monitoring/`:
 scripts/create-n8n-token.sh          # alertmanager/secrets/n8n-token (gitignored)
 scripts/create-executor-secret.sh    # EXECUTOR_SIGNING_SECRET in .env (gitignored)
 docker compose up -d --build
-python scripts/check_stack.py        # PASS/FAIL per check; wait 1 to 2 minutes after start
+python scripts/check_stack.py        # PASS/FAIL per check; wait about 2 minutes after start (Loki reports 503 until then)
 ```
 
 Then, in n8n (`automation/`):
@@ -73,4 +73,4 @@ docker stop dc-sample-app        # for ServiceDown; docker start dc-sample-app
 
 ## Status
 
-Built and verified locally on 13 Nov 2026 (Docker Desktop for Windows): real alerts reached n8n workflow 01; workflows 02, 03 and 07 ran against this stack; the executor restarted the sample app from a signed n8n request and workflow 07 confirmed recovery. Not done: running on Linux (see D-MON-3), Grafana dashboards, the full remediation loop (blocked on BD-1, BD-5, BD-6 and wiring 06 to the executor).
+Built and verified locally on 13 Nov 2026 (Docker Desktop for Windows): real alerts reached n8n workflow 01; workflows 02, 03 and 07 ran against this stack; the executor restarted the sample app from a signed n8n request and workflow 07 confirmed recovery. Workflow 06 calls the executor since 14 Nov (n8n side). Re-checked 16 Nov: all tests pass, `check_stack.py` 18 of 18. Not done: running on Linux (see D-MON-3), Grafana dashboards, the full loop from an approval (needs BD-1, BD-5 and BD-6 on the backend side).
