@@ -7,6 +7,7 @@ import {
 } from "../services/approval.service.js";
 import { requestPlaybookRun } from "../services/playbook-run.service.js";
 import { sendDbError } from "../lib/db-errors.js";
+import type { RemediationWebhookDispatcher } from "../services/remediation-webhook.service.js";
 
 // Approval writes use the database workflow functions (decisions A2/A3).
 // The functions enforce who may decide (admin or operator, never their own
@@ -98,7 +99,6 @@ export async function createApprovalController(
         status: "pending"
       }
     });
-
   } catch (error) {
     return sendDbError(
       res,
@@ -109,7 +109,7 @@ export async function createApprovalController(
   }
 }
 
-// Get all approval requests
+// Get all approval requests.
 export async function getApprovalsController(
   req: Request,
   res: Response
@@ -140,7 +140,6 @@ export async function getApprovalsController(
       count: approvals.length,
       data: approvals
     });
-
   } catch (error) {
     console.error("Get approvals error:", error);
 
@@ -151,7 +150,7 @@ export async function getApprovalsController(
   }
 }
 
-// Get a single approval request
+// Get a single approval request.
 export async function getApprovalByIdController(
   req: Request,
   res: Response
@@ -188,7 +187,6 @@ export async function getApprovalByIdController(
       success: true,
       data: approval
     });
-
   } catch (error) {
     console.error("Get approval error:", error);
 
@@ -203,64 +201,87 @@ export async function getApprovalByIdController(
 // The database decides who is allowed (decide_approval); its message is
 // returned with the matching status (403 own request / role, 409 already
 // decided, 404 not found).
-export async function decideApprovalController(
-  req: Request,
-  res: Response
+export function createDecideApprovalController(
+  dispatcher?: RemediationWebhookDispatcher
 ) {
-  try {
-    const client = req.userSupabase;
-    const userId = req.user?.id;
+  return async function decideApprovalController(
+    req: Request,
+    res: Response
+  ) {
+    try {
+      const client = req.userSupabase;
+      const userId = req.user?.id;
 
-    if (!client || !userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required."
+      if (!client || !userId) {
+        return res.status(401).json({
+          success: false,
+          message: "Authentication required."
+        });
+      }
+
+      const { id } = req.params;
+
+      if (typeof id !== "string" || !uuidRegex.test(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid approval ID."
+        });
+      }
+
+      const { status, comments } = req.body ?? {};
+
+      if (status !== "approved" && status !== "rejected") {
+        return res.status(400).json({
+          success: false,
+          message: "Status must be approved or rejected."
+        });
+      }
+
+      if (!isOptionalText(comments)) {
+        return res.status(400).json({
+          success: false,
+          message: "Comments must be a string."
+        });
+      }
+
+      // The database function makes the approval decision atomically.
+      const decision = await decideApproval(client, id, {
+        status,
+        comments
       });
-    }
 
-    const { id } = req.params;
+      // Dispatch approved runs in the background.
+      // Do not make the API response wait for the webhook.
+      if (
+        status === "approved" &&
+        decision.status === "approved" &&
+        decision.playbook_run_id &&
+        dispatcher
+      ) {
+        void dispatcher
+          .dispatch(client, decision.playbook_run_id)
+          .catch(() => {
+            // The dispatcher handles safe attempt logging.
+            // Never log secrets, headers or error details here.
+          });
+      }
 
-    if (typeof id !== "string" || !uuidRegex.test(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid approval ID."
+      const approval = await getApprovalById(client, id);
+
+      return res.status(200).json({
+        success: true,
+        message: `Approval request ${status} successfully.`,
+        data: approval
       });
+    } catch (error) {
+      return sendDbError(
+        res,
+        error,
+        "Decide approval error:",
+        "Failed to decide approval request."
+      );
     }
-
-    const { status, comments } = req.body ?? {};
-
-    if (status !== "approved" && status !== "rejected") {
-      return res.status(400).json({
-        success: false,
-        message: "Status must be approved or rejected."
-      });
-    }
-
-    if (!isOptionalText(comments)) {
-      return res.status(400).json({
-        success: false,
-        message: "Comments must be a string."
-      });
-    }
-
-    await decideApproval(client, id, { status, comments });
-
-    const approval = await getApprovalById(client, id);
-
-    return res.status(200).json({
-      success: true,
-      message: `Approval request ${status} successfully.`,
-      data: approval
-    });
-
-  } catch (error) {
-    return sendDbError(
-      res,
-      error,
-      "Decide approval error:",
-      "Failed to decide approval request."
-    );
-  }
+  };
 }
 
 // The requester withdraws a pending request (its run is cancelled too).
@@ -306,7 +327,6 @@ export async function cancelApprovalController(
       message: "Approval request cancelled successfully.",
       data: approval
     });
-
   } catch (error) {
     return sendDbError(
       res,

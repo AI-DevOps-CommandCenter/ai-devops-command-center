@@ -5,33 +5,31 @@ import {
   createPlaybookRunController,
   getPlaybookRunsController,
   getPlaybookRunByIdController,
-  decidePlaybookRunController,
+  createDecidePlaybookRunController,
   cancelPlaybookRunController,
   completePlaybookRunController
 } from "../controllers/playbook-run.controller.js";
 
-const router = Router();
+import type { RemediationWebhookDispatcher } from "../services/remediation-webhook.service.js";
 
-// All playbook run endpoints require authentication
-router.use(authenticateToken);
+export function createPlaybookRunRouter(
+  dispatcher?: RemediationWebhookDispatcher
+) {
+  const router = Router();
 
-// Create a playbook execution request (creates its pending approval)
-router.post("/", createPlaybookRunController);
+  router.use(authenticateToken);
 
-// Get all accessible playbook runs
-router.get("/", getPlaybookRunsController);
+  router.post("/", createPlaybookRunController);
+  router.get("/", getPlaybookRunsController);
+  router.get("/:id", getPlaybookRunByIdController);
+  router.patch(
+    "/:id/decision",
+    createDecidePlaybookRunController(dispatcher)
+  );
+  router.post("/:id/cancel", cancelPlaybookRunController);
+  router.post("/:id/complete", completePlaybookRunController);
 
-// Get a specific playbook run
-router.get("/:id", getPlaybookRunByIdController);
+  return router;
+}
 
-// Approve or reject a playbook request (admin/operator, never own request)
-router.patch("/:id/decision", decidePlaybookRunController);
-
-// Cancel a request (requester while pending; admin/operator with a reason later)
-router.post("/:id/cancel", cancelPlaybookRunController);
-
-// Manual completion of a running run (admin/operator, reason required).
-// Starting runs and normal completion are n8n machine endpoints (/api/machine).
-router.post("/:id/complete", completePlaybookRunController);
-
-export default router;
+export default createPlaybookRunRouter();

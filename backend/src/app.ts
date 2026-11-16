@@ -2,29 +2,48 @@ import express from "express";
 
 import { loadServerConfig, type ServerConfig } from "./config/env.js";
 import { authenticateToken } from "./middleware/auth.js";
+
 import {
   securityHeaders,
   restrictedCors,
   apiRateLimiter
 } from "./middleware/security.js";
-import { notFoundHandler, errorHandler } from "./middleware/error-handlers.js";
+
+import {
+  notFoundHandler,
+  errorHandler
+} from "./middleware/error-handlers.js";
+
 import incidentRoutes from "./routes/incident.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import investigationRoutes from "./routes/investigation.routes.js";
-import approvalRoutes from "./routes/approval.routes.js";
+import { createApprovalRouter } from "./routes/approval.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
-import playbookRunRoutes from "./routes/playbook-run.routes.js";
+import { createPlaybookRunRouter } from "./routes/playbook-run.routes.js";
 import postmortemRoutes from "./routes/postmortem.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import adminPlaybookRoutes from "./routes/admin-playbook.routes.js";
 import adminIntegrationRoutes from "./routes/admin-integration.routes.js";
 import remediationExecutionRoutes from "./routes/remediation-execution.routes.js";
-import { createMachineRouter, type MachineDeps } from "./routes/machine.routes.js";
+
+import {
+  createMachineRouter,
+  type MachineDeps
+} from "./routes/machine.routes.js";
+
 import { loadSupabaseEnv } from "./config/env.js";
+
 import {
   loadMachineEnv,
+  loadRemediationWebhookEnv,
   createAutomationClientProvider
 } from "./config/machine.js";
+
+import {
+  createRemediationWebhookDispatcher,
+  type RemediationWebhookDispatcher
+} from "./services/remediation-webhook.service.js";
+
 import notificationRoutes from "./routes/notification.routes.js";
 import deviceTokenRoutes from "./routes/device-token.routes.js";
 
@@ -32,6 +51,11 @@ export interface AppOptions {
   // Machine endpoint dependencies. undefined = read from the environment;
   // null = disabled (the endpoints answer 503).
   machine?: MachineDeps | null;
+
+  // Outgoing remediation webhook dispatcher.
+  // undefined = read from the environment;
+  // null = disabled.
+  remediationDispatcher?: RemediationWebhookDispatcher | null;
 }
 
 // n8n machine endpoints are enabled only when MACHINE_SIGNING_SECRET,
@@ -52,6 +76,20 @@ function machineDepsFromEnv(): MachineDeps | null {
       password: machineEnv.automationPassword
     })
   };
+}
+
+// Creates the outgoing remediation webhook dispatcher when configured.
+function remediationDispatcherFromEnv():
+  | RemediationWebhookDispatcher
+  | undefined {
+  const webhookEnv = loadRemediationWebhookEnv();
+
+  if (!webhookEnv) return undefined;
+
+  return createRemediationWebhookDispatcher({
+    url: webhookEnv.url,
+    signingSecret: webhookEnv.signingSecret
+  });
 }
 
 // Builds the Express application without starting a listener, so it can be
@@ -79,6 +117,13 @@ export function createApp(
     )
   );
 
+  // Resolve the outgoing webhook dispatcher once and share it between
+  // approval decisions made through either API endpoint.
+  const remediationDispatcher =
+    options.remediationDispatcher === undefined
+      ? remediationDispatcherFromEnv()
+      : options.remediationDispatcher ?? undefined;
+
   // Body parsing
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
@@ -87,9 +132,19 @@ export function createApp(
   app.use("/api/incidents", incidentRoutes);
   app.use("/api/dashboard", dashboardRoutes);
   app.use("/api/investigations", investigationRoutes);
-  app.use("/api/approvals", approvalRoutes);
+
+  app.use(
+    "/api/approvals",
+    createApprovalRouter(remediationDispatcher)
+  );
+
   app.use("/api/audit-logs", auditRoutes);
-  app.use("/api/playbook-runs", playbookRunRoutes);
+
+  app.use(
+    "/api/playbook-runs",
+    createPlaybookRunRouter(remediationDispatcher)
+  );
+
   app.use("/api/postmortems", postmortemRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/admin/playbooks", adminPlaybookRoutes);

@@ -13,6 +13,8 @@ import {
   decideApproval
 } from "../services/approval.service.js";
 
+import type { RemediationWebhookDispatcher } from "../services/remediation-webhook.service.js";
+
 import { sendDbError } from "../lib/db-errors.js";
 
 // Playbook run writes use the database workflow functions (decisions
@@ -118,7 +120,6 @@ export async function createPlaybookRunController(
         approval_id: result.approval_id
       }
     });
-
   } catch (error) {
     return sendDbError(
       res,
@@ -146,10 +147,7 @@ export async function getPlaybookRunsController(
 
     const { status, incident_id } = req.query;
 
-    if (
-      status &&
-      !validStatuses.includes(status as string)
-    ) {
+    if (status && !validStatuses.includes(status as string)) {
       return res.status(400).json({
         success: false,
         message: "Invalid playbook run status."
@@ -179,7 +177,6 @@ export async function getPlaybookRunsController(
       count: runs.length,
       data: runs
     });
-
   } catch (error) {
     console.error("Get playbook runs error:", error);
 
@@ -227,7 +224,6 @@ export async function getPlaybookRunByIdController(
       success: true,
       data: run
     });
-
   } catch (error) {
     console.error("Get playbook run error:", error);
 
@@ -240,73 +236,96 @@ export async function getPlaybookRunByIdController(
 
 // Admins and operators approve or reject requests (never their own).
 // A run is decided through its linked approval: one approval path (A3).
-export async function decidePlaybookRunController(
-  req: Request,
-  res: Response
+export function createDecidePlaybookRunController(
+  dispatcher?: RemediationWebhookDispatcher
 ) {
-  try {
-    const client = req.userSupabase;
-    const userId = req.user?.id;
+  return async function decidePlaybookRunController(
+    req: Request,
+    res: Response
+  ) {
+    try {
+      const client = req.userSupabase;
+      const userId = req.user?.id;
 
-    if (!client || !userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required."
+      if (!client || !userId) {
+        return res.status(401).json({
+          success: false,
+          message: "Authentication required."
+        });
+      }
+
+      const id = readRunId(req);
+
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid playbook run ID."
+        });
+      }
+
+      const { status, comments } = req.body ?? {};
+
+      if (status !== "approved" && status !== "rejected") {
+        return res.status(400).json({
+          success: false,
+          message: "Status must be approved or rejected."
+        });
+      }
+
+      if (!isOptionalText(comments)) {
+        return res.status(400).json({
+          success: false,
+          message: "Comments must be a string."
+        });
+      }
+
+      const approval = await getApprovalByRunId(client, id);
+
+      if (!approval) {
+        return res.status(404).json({
+          success: false,
+          message: "No approval request found for this playbook run."
+        });
+      }
+
+      // The database function makes the approval decision atomically.
+      const decision = await decideApproval(client, approval.id, {
+        status,
+        comments
       });
-    }
 
-    const id = readRunId(req);
+      // Dispatch approved runs in the background.
+      // Do not make the API response wait for the webhook.
+      if (
+        status === "approved" &&
+        decision.status === "approved" &&
+        decision.playbook_run_id &&
+        dispatcher
+      ) {
+        void dispatcher
+          .dispatch(client, decision.playbook_run_id)
+          .catch(() => {
+            // The dispatcher handles safe attempt logging.
+            // Never log secrets, headers or error details here.
+          });
+      }
 
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid playbook run ID."
+      const run = await getPlaybookRunById(client, id);
+
+      return res.status(200).json({
+        success: true,
+        message: `Playbook request ${status} successfully.`,
+        data: run
       });
+    } catch (error) {
+      return sendDbError(
+        res,
+        error,
+        "Decide playbook run error:",
+        "Failed to decide playbook request."
+      );
     }
-
-    const { status, comments } = req.body ?? {};
-
-    if (status !== "approved" && status !== "rejected") {
-      return res.status(400).json({
-        success: false,
-        message: "Status must be approved or rejected."
-      });
-    }
-
-    if (!isOptionalText(comments)) {
-      return res.status(400).json({
-        success: false,
-        message: "Comments must be a string."
-      });
-    }
-
-    const approval = await getApprovalByRunId(client, id);
-
-    if (!approval) {
-      return res.status(404).json({
-        success: false,
-        message: "No approval request found for this playbook run."
-      });
-    }
-
-    await decideApproval(client, approval.id, { status, comments });
-
-    const run = await getPlaybookRunById(client, id);
-
-    return res.status(200).json({
-      success: true,
-      message: `Playbook request ${status} successfully.`,
-      data: run
-    });
-
-  } catch (error) {
-    return sendDbError(
-      res,
-      error,
-      "Decide playbook run error:",
-      "Failed to decide playbook request."
-    );
-  }
+  };
 }
 
 // Cancel a run: the requester while it waits for approval; admins and
@@ -353,7 +372,6 @@ export async function cancelPlaybookRunController(
       message: "Playbook execution request cancelled successfully.",
       data: run
     });
-
   } catch (error) {
     return sendDbError(
       res,
@@ -427,7 +445,6 @@ export async function completePlaybookRunController(
       message: "Playbook execution completed manually.",
       data: run
     });
-
   } catch (error) {
     return sendDbError(
       res,
