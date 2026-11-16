@@ -370,9 +370,7 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
                       radius: 18,
                       backgroundColor: colors.accent,
                       child: Text(
-                        approval.requestedBy.isNotEmpty
-                            ? approval.requestedBy.substring(0, 1).toUpperCase()
-                            : 'O',
+                        (approval.requestedByName ?? 'O').substring(0, 1).toUpperCase(),
                         style: TextStyle(
                           color: colors.onAccent,
                           fontWeight: FontWeight.bold,
@@ -381,22 +379,28 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          approval.requestedBy,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: colors.text,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            approval.playbookName ?? 'Remediation request',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: colors.text,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        Text(
-                          'Requested remediation action',
-                          style: TextStyle(fontSize: 12, color: colors.muted),
-                        ),
-                      ],
+                          Text(
+                            'Requested by ${approval.requestedByName ?? 'an operator'}',
+                            style: TextStyle(fontSize: 12, color: colors.muted),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -413,7 +417,7 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${approval.serviceName} (${approval.environment})',
+                  approval.environment.isEmpty ? approval.serviceName : '${approval.serviceName} (${approval.environment})',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.bold,

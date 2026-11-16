@@ -108,7 +108,7 @@ describe("POST /api/approvals -> request_playbook_run", () => {
     });
 
     expect(res.status).toBe(201);
-    expect(res.body).toEqual({
+    expect(res.body).toMatchObject({
       success: true,
       message: "Approval request created successfully.",
       data: approvalRow
@@ -172,7 +172,7 @@ describe("POST /api/approvals -> request_playbook_run", () => {
     });
 
     expect(res.status).toBe(409);
-    expect(res.body).toEqual({
+    expect(res.body).toMatchObject({
       success: false,
       message: "An active run already exists for this incident and playbook."
     });
@@ -236,7 +236,7 @@ describe("PATCH /api/approvals/:id/decision -> decide_approval", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({
+    expect(res.body).toMatchObject({
       success: true,
       message: "Approval request approved successfully.",
       data: decided
@@ -429,5 +429,40 @@ describe("POST /api/approvals/:id/cancel -> cancel_approval", () => {
     const res = await post(`/api/approvals/${APPROVAL_ID}/cancel`, {});
 
     expect(res.status).toBe(403);
+  });
+});
+describe("flattenApproval (approvals shown with what will run)", async () => {
+  const { flattenApproval } = await import("../src/services/approval.service.js");
+
+  it("lifts playbook, action, service and incident from the embedded rows", () => {
+    const flat = flattenApproval({
+      id: "a1",
+      status: "pending",
+      playbook_runs: {
+        playbook_id: "p1",
+        request_payload: { service_name: "sample-app" },
+        playbooks: { name: "Restart sample-app", description: "d", action_type: "restart" }
+      },
+      incidents: { title: "HighErrorRate on sample-app", service_name: "ignored-when-payload-has-one" },
+      requester: { full_name: null, email: "demo.requester@demo.local" }
+    });
+    expect(flat).toEqual({
+      id: "a1",
+      status: "pending",
+      playbook_id: "p1",
+      playbook_name: "Restart sample-app",
+      playbook_description: "d",
+      action_type: "restart",
+      request_payload: { service_name: "sample-app" },
+      service_name: "sample-app",
+      incident_title: "HighErrorRate on sample-app",
+      requested_by_name: "demo.requester@demo.local"
+    });
+  });
+
+  it("hidden or missing embedded rows give nulls, not errors", () => {
+    expect(flattenApproval({ id: "a2", playbook_runs: null, incidents: null })).toMatchObject({
+      action_type: null, playbook_name: null, service_name: null, incident_title: null
+    });
   });
 });

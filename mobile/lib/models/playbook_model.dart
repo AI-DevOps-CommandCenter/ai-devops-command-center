@@ -270,7 +270,7 @@ class PlaybookRunModel {
 
     return PlaybookRunModel(
       id: json['id'] as String? ?? json['playbook_run_id'] as String? ?? '',
-      incidentId: json['incident_id'] as String? ?? 'INC-1042',
+      incidentId: json['incident_id'] as String? ?? '',
       playbookId: json['playbook_id'] as String? ?? '',
       approvalId: json['approval_id'] as String?,
       actionType: PlaybookActionType.fromString(
@@ -278,11 +278,11 @@ class PlaybookRunModel {
       ),
       status: PlaybookRunStatus.fromString(json['status'] as String?),
       requestPayload: payload,
-      serviceName: payload['service'] as String? ?? json['service_name'] as String? ?? 'payments-api',
-      environment: payload['environment'] as String? ?? json['environment'] as String? ?? 'Production',
-      fromVersion: payload['from_version'] as String? ?? 'v2.8.1',
-      toVersion: payload['to_version'] as String? ?? 'v2.8.0',
-      requestedBy: json['requested_by'] as String? ?? 'Alex Morgan',
+      serviceName: json['service_name'] as String? ?? payload['service_name'] as String? ?? payload['service'] as String? ?? 'service',
+      environment: payload['environment'] as String? ?? json['environment'] as String? ?? '',
+      fromVersion: payload['from_version'] as String? ?? '',
+      toVersion: payload['to_version'] as String? ?? '',
+      requestedBy: json['requested_by'] as String? ?? '',
       decidedBy: json['decided_by'] as String?,
       comments: json['comments'] as String?,
       cancellationReason: json['cancellation_reason'] as String?,
@@ -341,6 +341,9 @@ class ApprovalModel {
   final DateTime? decidedAt;
   final String? decidedBy;
   final String? comments;
+  final String? playbookName;
+  final String? incidentTitle;
+  final String? requestedByName;
 
   ApprovalModel({
     required this.id,
@@ -360,32 +363,56 @@ class ApprovalModel {
     this.decidedAt,
     this.decidedBy,
     this.comments,
+    this.playbookName,
+    this.incidentTitle,
+    this.requestedByName,
   });
 
+  /// What the action does, for the approver (no invented numbers).
+  static String impactFor(PlaybookActionType action, String service) {
+    switch (action) {
+      case PlaybookActionType.restart:
+        return 'Restarts $service. Requests fail for a few seconds while it starts again. Nothing runs until you approve.';
+      case PlaybookActionType.circuitBreaker:
+        return 'Opens the circuit breaker on $service: calls to the failing dependency stop and responses are served degraded instead of failing. Nothing runs until you approve.';
+      case PlaybookActionType.rollback:
+        return 'Rolls $service back to the previous deployment. Nothing runs until you approve.';
+      case PlaybookActionType.scale:
+        return 'Changes the number of $service replicas. Nothing runs until you approve.';
+    }
+  }
+
   factory ApprovalModel.fromJson(Map<String, dynamic> json) {
-    final payload = json['request_payload'] as Map<String, dynamic>? ?? {};
+    final payload = json['request_payload'] is Map ? Map<String, dynamic>.from(json['request_payload'] as Map) : <String, dynamic>{};
+    final action = PlaybookActionType.fromString(
+      json['action_type'] as String? ?? payload['action'] as String?,
+    );
+    final service = json['service_name'] as String? ?? payload['service_name'] as String? ?? payload['service'] as String? ?? 'service';
 
     return ApprovalModel(
       id: json['id'] as String? ?? json['approval_id'] as String? ?? '',
       playbookRunId: json['playbook_run_id'] as String? ?? json['run_id'] as String? ?? '',
-      incidentId: json['incident_id'] as String? ?? 'INC-1042',
+      incidentId: json['incident_id'] as String? ?? '',
       playbookId: json['playbook_id'] as String? ?? '',
-      actionType: PlaybookActionType.fromString(
-        json['action_type'] as String? ?? payload['action'] as String?,
-      ),
+      actionType: action,
       status: json['status'] as String? ?? 'pending',
-      requestedBy: json['requested_by'] as String? ?? 'Alex Morgan',
-      serviceName: payload['service'] as String? ?? json['service_name'] as String? ?? 'payments-api',
-      environment: payload['environment'] as String? ?? json['environment'] as String? ?? 'Production',
-      fromVersion: payload['from_version'] as String? ?? 'v2.8.1',
-      toVersion: payload['to_version'] as String? ?? 'v2.8.0',
-      impactDescription: json['impact_description'] as String? ??
-          'Impact: brief request failures during switchover (about 30 s). Nothing runs until you confirm.',
+      requestedBy: json['requested_by'] as String? ?? '',
+      requestedByName: json['requested_by_name'] as String?,
+      playbookName: json['playbook_name'] as String?,
+      incidentTitle: json['incident_title'] as String?,
+      serviceName: service,
+      environment: payload['environment'] as String? ?? json['environment'] as String? ?? '',
+      fromVersion: payload['from_version'] as String? ?? '',
+      toVersion: payload['to_version'] as String? ?? '',
+      impactDescription: json['impact_description'] as String? ?? impactFor(action, service),
       requestPayload: payload,
-      createdAt: json['created_at'] != null ? DateTime.tryParse(json['created_at'].toString()) : null,
+      createdAt: json['requested_at'] != null
+          ? DateTime.tryParse(json['requested_at'].toString())
+          : (json['created_at'] != null ? DateTime.tryParse(json['created_at'].toString()) : null),
       decidedAt: json['decided_at'] != null ? DateTime.tryParse(json['decided_at'].toString()) : null,
-      decidedBy: json['decided_by'] as String?,
+      decidedBy: json['decided_by'] as String? ?? json['approver_id'] as String?,
       comments: json['comments'] as String?,
     );
   }
+
 }

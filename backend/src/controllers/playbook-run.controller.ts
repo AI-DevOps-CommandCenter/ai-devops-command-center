@@ -289,7 +289,7 @@ export function createDecidePlaybookRunController(
       }
 
       // The database function makes the approval decision atomically.
-      const decision = await decideApproval(client, approval.id, {
+      const decision = await decideApproval(client, String(approval.id), {
         status,
         comments
       });

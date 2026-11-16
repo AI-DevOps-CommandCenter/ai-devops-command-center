@@ -246,7 +246,7 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
       statusIcon = Icons.error_outline;
     } else if (status == PlaybookRunStatus.approved) {
       statusTitle = 'Approved — Dispatching to runner';
-      statusSubtitle = 'Preparing container rollback execution pipeline...';
+      statusSubtitle = 'Sending the signed request to the n8n remediation workflow...';
     }
 
     return SingleChildScrollView(
@@ -331,9 +331,9 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                 const SizedBox(height: 12),
                 _buildInfoRow('Playbook ID', run?.playbookId ?? '--', colors),
                 const SizedBox(height: 8),
-                _buildInfoRow('Service', run?.serviceName ?? 'payments-api', colors),
+                _buildInfoRow('Service', run?.serviceName ?? '—', colors),
                 const SizedBox(height: 8),
-                _buildInfoRow('Action', run?.actionType.displayName ?? 'Rollback', colors),
+                _buildInfoRow('Action', run?.actionType.displayName ?? '—', colors),
                 const SizedBox(height: 8),
                 _buildInfoRow('Status', status.slug.toUpperCase(), colors, highlightColor: statusColor),
                 if (run?.startedAt != null) ...[
@@ -373,16 +373,16 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
           ),
           const SizedBox(height: 8),
           _buildPhaseCard(
-            title: '3. Traffic Routing & Pod Deployment',
-            subtitle: 'Drain traffic from failing version to rollback revision',
+            title: '3. Playbook executor',
+            subtitle: 'Runs the approved action on the allow-listed service only',
             isComplete: isSuccess,
             isRunning: status == PlaybookRunStatus.running,
             colors: colors,
           ),
           const SizedBox(height: 8),
           _buildPhaseCard(
-            title: '4. Health Verification & Telemetry',
-            subtitle: 'Automated 5-minute error rate check window',
+            title: '4. Recovery check',
+            subtitle: 'Prometheus health and error-rate checks after the action',
             isComplete: isSuccess,
             isRunning: false,
             colors: colors,

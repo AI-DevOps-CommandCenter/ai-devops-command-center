@@ -20,6 +20,23 @@ export interface PlaybookRunFilters {
   incident_id?: string;
 }
 
+// Runs are returned with their playbook's name and action_type, and the
+// service_name from the request payload (the mobile app shows what ran).
+const RUN_SELECT = "*, playbooks!playbook_runs_playbook_id_fkey(name, action_type)";
+
+function flattenRun(row: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!row) return row;
+  const { playbooks, ...run } = row;
+  const playbook = (Array.isArray(playbooks) ? playbooks[0] : playbooks) as Record<string, unknown> | null | undefined;
+  const payload = (run.request_payload && typeof run.request_payload === "object" ? run.request_payload : {}) as Record<string, unknown>;
+  return {
+    ...run,
+    playbook_name: playbook?.name ?? null,
+    action_type: playbook?.action_type ?? null,
+    service_name: typeof payload.service_name === "string" ? payload.service_name : null
+  };
+}
+
 // Get accessible playbook runs
 export async function getPlaybookRuns(
   client: UserSupabaseClient,
@@ -27,7 +44,7 @@ export async function getPlaybookRuns(
 ) {
   let query = client
     .from("playbook_runs")
-    .select("*")
+    .select(RUN_SELECT)
     .order("requested_at", { ascending: false });
 
   if (filters.status) {
@@ -42,7 +59,7 @@ export async function getPlaybookRuns(
 
   if (error) throw error;
 
-  return data;
+  return ((data as Record<string, unknown>[] | null) ?? []).map((row) => flattenRun(row));
 }
 
 // Get one playbook run by ID
@@ -52,13 +69,13 @@ export async function getPlaybookRunById(
 ) {
   const { data, error } = await client
     .from("playbook_runs")
-    .select("*")
+    .select(RUN_SELECT)
     .eq("id", id)
     .maybeSingle();
 
   if (error) throw error;
 
-  return data;
+  return flattenRun(data as Record<string, unknown> | null);
 }
 
 export interface RequestPlaybookRunInput {
