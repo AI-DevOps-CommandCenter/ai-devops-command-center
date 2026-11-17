@@ -25,6 +25,7 @@ class ApiEndpoints {
   // Authentication & User Profile
   static String get me => '$baseUrl/api/me';
   static String get forgotPassword => '$baseUrl/api/auth/forgot-password';
+  static String get resetPassword => '$baseUrl/api/auth/reset-password';
   static String get authConfig => '$baseUrl/api/auth/config';
 
   // Services Management (Vinuka's routes)

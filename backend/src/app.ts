@@ -48,6 +48,12 @@ import {
 } from "./services/remediation-webhook.service.js";
 
 import notificationRoutes from "./routes/notification.routes.js";
+import { createAuthRouter } from "./routes/auth.routes.js";
+import {
+  createSupabasePasswordResetClient,
+  passwordResetRedirectFromEnv,
+  type PasswordResetClient
+} from "./services/password-reset.service.js";
 import deviceTokenRoutes from "./routes/device-token.routes.js";
 import { createMetricsRouter } from "./routes/metrics.routes.js";
 import { createLogsRouter } from "./routes/logs.routes.js";
@@ -75,6 +81,19 @@ export interface AppOptions {
   // Read-only GitHub integration. undefined = read from the environment;
   // null = disabled (the endpoints answer 503).
   github?: GitHubService | null;
+  // Password reset (Supabase Auth). undefined = from SUPABASE_URL and the
+  // publishable key; null = disabled (the endpoints answer 503).
+  passwordReset?: PasswordResetClient | null;
+  // Where the reset email link leads. undefined = PASSWORD_RESET_REDIRECT_URL.
+  passwordResetRedirectUrl?: string;
+}
+
+// The server itself never starts without the Supabase settings (config/supabase.ts);
+// null only happens when the app is built without them, e.g. in tests.
+function passwordResetFromEnv(): PasswordResetClient | null {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_PUBLISHABLE_KEY) return null;
+  const env = loadSupabaseEnv();
+  return createSupabasePasswordResetClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY);
 }
 
 function prometheusFromEnv(): PrometheusClient | null {
@@ -167,6 +186,15 @@ export function createApp(
   // Body parsing
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  // Public password reset (S29)
+  app.use(
+    "/api/auth",
+    createAuthRouter(
+      options.passwordReset === undefined ? passwordResetFromEnv() : options.passwordReset,
+      { redirectTo: options.passwordResetRedirectUrl ?? passwordResetRedirectFromEnv() }
+    )
+  );
 
   // Incident management routes
   app.use("/api/incidents", incidentRoutes);
