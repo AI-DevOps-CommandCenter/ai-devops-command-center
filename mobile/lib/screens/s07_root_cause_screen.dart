@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
 import '../services/api_service.dart';
+import 's08_evidence_details_screen.dart';
 import 's17_recommended_action_screen.dart';
 
 class S07RootCauseScreen extends StatefulWidget {
@@ -182,11 +183,9 @@ class _S07RootCauseScreenState extends State<S07RootCauseScreen> {
       );
     }
 
-    final rootCause = inv?['root_cause']?.toString() ??
-        'Database connection pool reached capacity after deployment.';
-    final summary = inv?['summary']?.toString() ??
-        'Elevated error rates detected. AI investigation analyzed logs, metrics, and deployments.';
-    final aiModel = inv?['ai_model']?.toString() ?? 'Groq / LLaMA 3.3 70B';
+    final rootCause = inv?['root_cause']?.toString() ?? 'No probable cause has been stored yet.';
+    final summary = inv?['summary']?.toString() ?? 'The AI investigation has not finished for this incident.';
+    final aiModel = inv?['ai_model']?.toString() ?? '—';
     final evidence = (inv?['evidence'] is List) ? (inv!['evidence'] as List) : [];
 
     return SingleChildScrollView(
@@ -307,12 +306,26 @@ class _S07RootCauseScreenState extends State<S07RootCauseScreen> {
                 border: Border.all(color: colors.border),
               ),
               child: Text(
-                'Logs confirm connection pool starvation and timeout errors across worker pods.',
+                'No evidence has been stored for this incident yet.',
                 style: TextStyle(fontSize: 13, color: colors.text, height: 1.4),
               ),
             ),
 
-          const SizedBox(height: 20),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => S08EvidenceDetailsScreen(incidentId: _resolvedIncidentId),
+                  settings: RouteSettings(arguments: _resolvedIncidentId),
+                ),
+              ),
+              child: const Text('View all evidence'),
+            ),
+          ),
+
+          const SizedBox(height: 12),
 
           // Primary Button: Proceed to Approve
           SizedBox(

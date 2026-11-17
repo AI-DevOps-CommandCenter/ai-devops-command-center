@@ -1,354 +1,170 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/flow_widgets.dart';
 
-class S08EvidenceDetailsScreen extends StatelessWidget {
-  const S08EvidenceDetailsScreen({super.key});
+/// S08 – the evidence behind the latest AI analysis of an incident
+/// (GET /api/incidents/:id/recommendation → analysis).
+class S08EvidenceDetailsScreen extends StatefulWidget {
+  final String? incidentId;
+
+  const S08EvidenceDetailsScreen({super.key, this.incidentId});
+
+  @override
+  State<S08EvidenceDetailsScreen> createState() => _S08EvidenceDetailsScreenState();
+}
+
+class _S08EvidenceDetailsScreenState extends State<S08EvidenceDetailsScreen> {
+  String? _incidentId;
+  Map<String, dynamic>? _analysis;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_incidentId == null) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      _incidentId = (args is String && args.isNotEmpty) ? args : widget.incidentId;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final id = _incidentId;
+    if (id == null || id.isEmpty) {
+      setState(() {
+        _loading = false;
+        _error = 'Open this screen from an incident.';
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final rec = await ApiService().fetchRecommendation(id);
+      if (!mounted) return;
+      setState(() {
+        _analysis = rec['analysis'] as Map<String, dynamic>?;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e is ApiException ? e.message : 'Could not load the evidence.';
+      });
+    }
+  }
+
+  /// Groups evidence lines by the data source they mention.
+  String _sourceOf(String line) {
+    final l = line.toLowerCase();
+    if (l.contains('log') || l.contains('traceback') || l.contains('loki')) return 'Logs';
+    if (l.contains('metric') || l.contains('prometheus') || l.contains('cpu') || l.contains('latency') || l.contains('rate')) {
+      return 'Metrics';
+    }
+    if (l.contains('commit') || l.contains('deploy') || l.contains('github')) return 'Deployments';
+    return 'Other';
+  }
+
+  IconData _iconOf(String source) => switch (source) {
+        'Logs' => Icons.receipt_long_outlined,
+        'Metrics' => Icons.show_chart,
+        'Deployments' => Icons.rocket_launch_outlined,
+        _ => Icons.info_outline,
+      };
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: colors.text, size: 20),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Evidence',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: colors.text,
-                          ),
-                        ),
-                        Text(
-                          'INC-1042',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: colors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Content
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Section 1: Log excerpts
-                    Text(
-                      'Log excerpts',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: colors.text,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Log Item 1: 14:07:11 ERROR payments-api connection timeout after 500ms
-                    _buildLogItem(
-                      colors: colors,
-                      timestamp: '14:07:11',
-                      level: 'ERROR',
-                      levelColor: colors.red,
-                      levelBg: colors.badgeRedBg,
-                      prefix: 'payments-api ',
-                      highlight: 'connection timeout',
-                      suffix: ' after 500ms',
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Log Item 2: 14:07:14 WARN pool exhausted (20/20)
-                    _buildLogItem(
-                      colors: colors,
-                      timestamp: '14:07:14',
-                      level: 'WARN',
-                      levelColor: colors.amber,
-                      levelBg: colors.badgeAmberBg,
-                      prefix: 'pool exhausted (20/20)',
-                      highlight: null,
-                      suffix: '',
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Section 2: Metric changes
-                    Text(
-                      'Metric changes',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: colors.text,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    _buildCard(
-                      colors: colors,
-                      child: Column(
-                        children: [
-                          _buildRow(colors, 'Error rate', '0.3% → 12.4%'),
-                          Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
-                          _buildRow(colors, 'P95 latency', '180 ms → 2.4 s'),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Section 3: Deployment timing
-                    Text(
-                      'Deployment timing',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: colors.text,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    _buildCard(
-                      colors: colors,
-                      child: Column(
-                        children: [
-                          _buildRow(colors, 'v2.8.1 deployed', '14:05'),
-                          Divider(height: 14, color: colors.cardBorder, thickness: 0.5),
-                          _buildRow(colors, 'First timeout', '14:07'),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Buttons: Logs & Metrics (Grid 2 cols)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SizedBox(
-                            height: 48,
-                            child: OutlinedButton(
-                              onPressed: () {
-                                Navigator.pushNamed(context, '/logs');
-                              },
-                              style: OutlinedButton.styleFrom(
-                                backgroundColor: colors.cardAccent,
-                                foregroundColor: colors.text,
-                                side: BorderSide(color: colors.border),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              child: Text(
-                                'Logs',
-                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: SizedBox(
-                            height: 48,
-                            child: OutlinedButton(
-                              onPressed: () {
-                                Navigator.pushNamed(context, '/metrics');
-                              },
-                              style: OutlinedButton.styleFrom(
-                                backgroundColor: colors.cardAccent,
-                                foregroundColor: colors.text,
-                                side: BorderSide(color: colors.border),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              child: Text(
-                                'Metrics',
-                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Full-width Button: Deployment
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.pushNamed(context, '/deployment-details');
-                        },
-                        style: OutlinedButton.styleFrom(
-                          backgroundColor: colors.cardAccent,
-                          foregroundColor: colors.text,
-                          side: BorderSide(color: colors.border),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: Text(
-                          'Deployment',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
-              ),
-            ),
+            const FlowHeader(title: 'Evidence', subtitle: 'What the AI based its conclusion on'),
+            Expanded(child: _body(colors)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCard({required AppColorScheme colors, required Widget child}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.cardBorder, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.isDark ? Colors.black.withOpacity(0.3) : const Color.fromRGBO(15, 27, 51, 0.06),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
+  Widget _body(AppColorScheme colors) {
+    if (_loading) return const FlowMessage(icon: Icons.hourglass_empty, message: 'Loading evidence…', busy: true);
+    if (_error != null) return FlowMessage(icon: Icons.error_outline, message: _error!, onRetry: _load);
+    final a = _analysis;
+    if (a == null) {
+      return FlowMessage(icon: Icons.search_off, message: 'No AI analysis has been stored for this incident yet.', onRetry: _load);
+    }
+
+    final evidence = (a['evidence'] is List ? a['evidence'] as List : const [])
+        .map((e) => e is Map ? (e['description'] ?? e['title'] ?? e.toString()).toString() : e.toString())
+        .toList();
+    final groups = <String, List<String>>{};
+    for (final line in evidence) {
+      groups.putIfAbsent(_sourceOf(line), () => []).add(line);
+    }
+    final confidence = (a['confidence'] as num?)?.toDouble();
+    final created = DateTime.tryParse(a['created_at']?.toString() ?? '')?.toLocal();
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        children: [
+          FlowSection(label: 'Probable cause', text: a['root_cause']?.toString()),
+          FlowSection(label: 'Summary', text: a['summary']?.toString()),
+          if (groups.isEmpty) const FlowSection(label: 'Evidence', text: 'The analysis did not list any evidence.'),
+          ...groups.entries.map((g) => Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: FlowCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        Icon(_iconOf(g.key), size: 18, color: colors.accent),
+                        const SizedBox(width: 8),
+                        Text(g.key.toUpperCase(),
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.52, color: colors.muted)),
+                      ]),
+                      const SizedBox(height: 8),
+                      ...g.value.map((line) => Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(line, style: TextStyle(fontSize: 13, height: 1.4, color: colors.text)),
+                          )),
+                    ],
+                  ),
+                ),
+              )),
+          FlowCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _row(colors, 'Confidence', confidence == null ? '—' : '${(confidence * 100).round()} %'),
+                _row(colors, 'Severity', a['severity']?.toString() ?? '—'),
+                _row(colors, 'Recommended action', a['recommended_action']?.toString() ?? '—'),
+                _row(colors, 'Model', a['model_name']?.toString() ?? '—'),
+                _row(colors, 'Analysed at',
+                    created == null ? '—' : '${created.year}-${_pad2(created.month)}-${_pad2(created.day)} ${_pad2(created.hour)}:${_pad2(created.minute)}'),
+              ],
+            ),
           ),
         ],
       ),
-      child: child,
     );
   }
 
-  Widget _buildRow(AppColorScheme colors, String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            color: colors.muted,
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-            color: colors.text,
-          ),
-        ),
-      ],
-    );
-  }
+  String _pad2(int v) => v.toString().padLeft(2, '0');
 
-  Widget _buildLogItem({
-    required AppColorScheme colors,
-    required String timestamp,
-    required String level,
-    required Color levelColor,
-    required Color levelBg,
-    required String prefix,
-    required String? highlight,
-    required String suffix,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: colors.logBg,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: RichText(
-        text: TextSpan(
-          style: TextStyle(
-            fontFamily: 'JetBrains Mono',
-            fontSize: 12,
-            color: colors.text,
-            height: 1.4,
-          ),
-          children: [
-            TextSpan(
-              text: '$timestamp ',
-              style: TextStyle(color: colors.muted),
-            ),
-            WidgetSpan(
-              alignment: PlaceholderAlignment.middle,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                margin: const EdgeInsets.only(right: 6),
-                decoration: BoxDecoration(
-                  color: levelBg,
-                  borderRadius: BorderRadius.circular(99),
-                ),
-                child: Text(
-                  level,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: levelColor,
-                  ),
-                ),
-              ),
-            ),
-            TextSpan(text: prefix),
-            if (highlight != null)
-              WidgetSpan(
-                alignment: PlaceholderAlignment.middle,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: colors.isDark ? const Color(0xFF4A1D27) : const Color(0xFFFDE2E2),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                  child: Text(
-                    highlight,
-                    style: TextStyle(
-                      fontFamily: 'JetBrains Mono',
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: colors.isDark ? const Color(0xFFFFB4B4) : const Color(0xFFB91C1C),
-                    ),
-                  ),
-                ),
-              ),
-            TextSpan(text: suffix),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget _row(AppColorScheme colors, String k, String v) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(children: [
+          Expanded(child: Text(k, style: TextStyle(fontSize: 13, color: colors.muted))),
+          Flexible(child: Text(v, textAlign: TextAlign.right, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.text))),
+        ]),
+      );
 }

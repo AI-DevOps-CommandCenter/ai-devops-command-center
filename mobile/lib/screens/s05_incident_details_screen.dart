@@ -4,6 +4,7 @@ import '../widgets/app_back_button.dart';
 import '../widgets/proto_icon.dart';
 import '../services/api_service.dart';
 import '../models/incident_model.dart';
+import 's06_ai_investigation_progress_screen.dart';
 import 's07_root_cause_screen.dart';
 import 's18_approve_action_screen.dart';
 import 's09_logs_explorer_screen.dart';
@@ -492,6 +493,21 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
           ),
           const SizedBox(height: 14),
 
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => S06AiInvestigationProgressScreen(incidentId: incident.id),
+                  settings: RouteSettings(arguments: incident.id),
+                ),
+              ),
+              icon: const Icon(Icons.timelapse, size: 18),
+              label: const Text('Investigation progress'),
+            ),
+          ),
+          const SizedBox(height: 6),
           // Primary Button 1: View AI Root Cause
           SizedBox(
             height: 48,

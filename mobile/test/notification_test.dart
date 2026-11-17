@@ -50,14 +50,11 @@ void main() {
       expect(NotificationCategory.recoveryResolution.targetRoute, '/recovery-verification');
     });
 
-    test('ApiService fetches notifications and updates read status', () async {
+    test('ApiService reports backend errors instead of returning a mock feed', () async {
       final api = ApiService();
-      final list = await api.fetchNotifications();
-      expect(list.isNotEmpty, true);
-      expect(list.first.incidentId, 'INC-1042');
-
-      final success = await api.markNotificationAsRead('notif-101');
-      expect(success, true);
+      // No backend runs during unit tests: the call must fail, not invent data.
+      await expectLater(api.fetchNotifications(), throwsA(isA<ApiException>()));
+      await expectLater(api.markNotificationAsRead('notif-101'), throwsA(isA<ApiException>()));
     });
 
     test('ApiService registers and unregisters FCM device tokens', () async {

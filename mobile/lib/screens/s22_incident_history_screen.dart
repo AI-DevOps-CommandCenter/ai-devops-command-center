@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../models/incident_model.dart';
+import '../services/api_service.dart';
 
 class S22IncidentHistoryScreen extends StatefulWidget {
   const S22IncidentHistoryScreen({super.key});
@@ -13,26 +15,50 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _selectedChip = '';
 
-  final List<Map<String, String>> _resolvedIncidents = const [
-    {
-      'id': 'INC-1042',
-      'title': 'Elevated errors after deployment',
-      'badge': 'Postmortem',
-      'service': 'payments-api · Production',
-    },
-    {
-      'id': 'INC-1037',
-      'title': 'Cache hit ratio dropped',
-      'badge': 'Resolved',
-      'service': 'catalog-api · Production',
-    },
-    {
-      'id': 'INC-1033',
-      'title': 'TLS cert nearing expiry',
-      'badge': 'Resolved',
-      'service': 'edge-gateway · Production',
-    },
-  ];
+  List<Map<String, String>> _resolvedIncidents = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final api = ApiService();
+      final results = await Future.wait([
+        api.fetchIncidents(status: 'resolved'),
+        api.fetchIncidents(status: 'closed'),
+      ]);
+      final all = [...results[0], ...results[1]]
+        ..sort((a, b) => b.detectedAt.compareTo(a.detectedAt));
+      if (!mounted) return;
+      setState(() {
+        _resolvedIncidents = all
+            .map((i) => {
+                  'incidentId': i.id,
+                  'id': 'INC-${i.id.substring(0, i.id.length < 8 ? i.id.length : 8).toUpperCase()}',
+                  'title': i.title,
+                  'badge': i.status == IncidentStatus.resolved ? 'Resolved' : 'Closed',
+                  'service': i.serviceName,
+                })
+            .toList();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e is ApiException ? e.message : 'Could not load incident history.';
+        _loading = false;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -52,7 +78,7 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
 
       final matchesChip = _selectedChip.isEmpty ||
           (_selectedChip == 'Resolved' && i['badge'] == 'Resolved') ||
-          i['service']!.toLowerCase().contains(_selectedChip.toLowerCase());
+          i['service'] == _selectedChip;
 
       return matchesQuery && matchesChip;
     }).toList();
@@ -142,7 +168,7 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(
-                        children: ['Resolved', 'payments-api', 'catalog-api'].map((chip) {
+                        children: ['Resolved', ..._resolvedIncidents.map((i) => i['service']!).toSet()].map((chip) {
                           final isSelected = _selectedChip == chip;
                           return Padding(
                             padding: const EdgeInsets.only(right: 8.0),
@@ -179,7 +205,22 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                     const SizedBox(height: 16),
 
                     // Resolved Incidents List
-                    if (filtered.isEmpty)
+                    if (_loading)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 40),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (_error != null)
+                      Center(
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 24),
+                            Text(_error!, style: TextStyle(color: colors.red, fontSize: 13)),
+                            TextButton(onPressed: _load, child: const Text('Retry')),
+                          ],
+                        ),
+                      )
+                    else if (filtered.isEmpty)
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(vertical: 40),
@@ -208,7 +249,7 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                           padding: const EdgeInsets.only(bottom: 10.0),
                           child: InkWell(
                             onTap: () {
-                              Navigator.pushNamed(context, '/postmortem');
+                              Navigator.pushNamed(context, '/postmortem', arguments: item['incidentId']);
                             },
                             borderRadius: BorderRadius.circular(14),
                             child: Container(

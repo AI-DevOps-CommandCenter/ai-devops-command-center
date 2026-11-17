@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../models/incident_model.dart';
 import '../services/api_service.dart';
 import '../models/playbook_model.dart';
 import '../widgets/flow_widgets.dart';
@@ -28,6 +29,8 @@ class _S20RecoveryVerificationScreenState extends State<S20RecoveryVerificationS
   bool _isLoading = true;
   Timer? _poll;
   int _polls = 0;
+  bool? _incidentResolved;
+  bool _resolving = false;
 
   static const _maxPolls = 60; // 5 minutes
 
@@ -60,6 +63,14 @@ class _S20RecoveryVerificationScreenState extends State<S20RecoveryVerificationS
       final api = ApiService();
       final run = _run ?? await api.fetchPlaybookRun(runId);
       final checks = await api.fetchRecoveryChecks(run.incidentId);
+      if (_incidentResolved == null) {
+        try {
+          final incident = await api.fetchIncidentById(run.incidentId);
+          _incidentResolved = incident.status == IncidentStatus.resolved;
+        } catch (_) {
+          // Leave unknown; the resolve button still works.
+        }
+      }
       Map<String, dynamic>? match;
       for (final c in checks) {
         if (c['playbook_run_id']?.toString() == runId) {
@@ -87,6 +98,30 @@ class _S20RecoveryVerificationScreenState extends State<S20RecoveryVerificationS
         _errorMessage = e is ApiException ? e.message : e.toString();
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _resolveIncident() async {
+    final run = _run;
+    if (run == null) return;
+    setState(() => _resolving = true);
+    try {
+      await ApiService().updateIncidentStatus(run.incidentId, 'resolved');
+      if (!mounted) return;
+      setState(() {
+        _incidentResolved = true;
+        _resolving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incident marked as resolved.')));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _resolving = false);
+      final msg = e is ApiException && e.statusCode == 403
+          ? 'Only operators and admins can resolve incidents.'
+          : e is ApiException
+              ? e.message
+              : 'Could not resolve the incident.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
@@ -213,6 +248,23 @@ class _S20RecoveryVerificationScreenState extends State<S20RecoveryVerificationS
                   return c.toString();
                 }).toList(),
               ),
+          ],
+          if (status == 'healthy' && _run != null) ...[
+            SizedBox(
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: _incidentResolved == true || _resolving ? null : _resolveIncident,
+                icon: _resolving
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Icon(_incidentResolved == true ? Icons.check : Icons.task_alt, size: 18),
+                label: Text(_incidentResolved == true ? 'Incident resolved' : 'Mark incident resolved',
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
           ],
           if (status == 'healthy' && _run != null)
             SizedBox(

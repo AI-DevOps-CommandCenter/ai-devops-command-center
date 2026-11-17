@@ -177,6 +177,17 @@ class ApiService {
     }
   }
 
+  /// PATCH /api/incidents/:id with a new status (operators and admins only).
+  Future<IncidentModel> updateIncidentStatus(String id, String status) async {
+    final response = await _safePatch(ApiEndpoints.incidentById(id), body: jsonEncode({'status': status}));
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final data = decoded is Map && decoded['data'] != null ? decoded['data'] : decoded;
+      return IncidentModel.fromJson(Map<String, dynamic>.from(data as Map));
+    }
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
+  }
+
   /// Fetches AI investigations for an incident (GET /api/investigations?incident_id=...)
   Future<List<Map<String, dynamic>>> fetchInvestigations(String incidentId) async {
     final url = ApiEndpoints.investigations(incidentId: incidentId);
@@ -737,75 +748,23 @@ class ApiService {
     int limit = 20,
     int offset = 0,
   }) async {
-    try {
-      final url = '${ApiEndpoints.notifications}?limit=$limit&offset=$offset';
-      final response = await http
-          .get(Uri.parse(url), headers: _headers())
-          .timeout(const Duration(seconds: 4));
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> body = jsonDecode(response.body);
-        if (body['data'] is List) {
-          final List list = body['data'];
-          return list.map((e) => NotificationModel.fromJson(e)).toList();
-        }
-      }
-    } catch (_) {}
-
-    // Verified mock feed matching Vinuka's exact backend schema
-    return [
-      NotificationModel(
-        id: 'notif-uuid-1042-01',
-        userId: 'usr-alex-morgan',
-        incidentId: 'INC-1042',
-        title: 'Critical Incident Detected',
-        message: 'HTTP 500 spike on payments-api. DB connection pool reached 100%.',
-        channel: NotificationChannel.push,
-        status: 'sent',
-        createdAt: DateTime.now().subtract(const Duration(minutes: 15)),
-        sentAt: DateTime.now().subtract(const Duration(minutes: 15)),
-        readAt: null, // Unread
-      ),
-      NotificationModel(
-        id: 'notif-uuid-1042-02',
-        userId: 'usr-alex-morgan',
-        incidentId: 'INC-1042',
-        title: 'Remediation Approval Required',
-        message: 'Roll back payments-api from v2.8.1 to v2.8.0 requested by Alex Morgan.',
-        channel: NotificationChannel.inApp,
-        status: 'sent',
-        createdAt: DateTime.now().subtract(const Duration(minutes: 8)),
-        sentAt: DateTime.now().subtract(const Duration(minutes: 8)),
-        readAt: null, // Unread
-      ),
-      NotificationModel(
-        id: 'notif-uuid-1042-03',
-        userId: 'usr-alex-morgan',
-        incidentId: 'INC-1042',
-        title: 'System Recovery Verified',
-        message: 'Health checks passed: error rate dropped to 0.4%, P95 latency 190ms.',
-        channel: NotificationChannel.push,
-        status: 'sent',
-        createdAt: DateTime.now().subtract(const Duration(minutes: 2)),
-        sentAt: DateTime.now().subtract(const Duration(minutes: 2)),
-        readAt: DateTime.now().subtract(const Duration(minutes: 1)), // Read
-      ),
-    ];
+    final url = '${ApiEndpoints.notifications}?limit=$limit&offset=$offset';
+    final response = await _safeGet(url);
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final List list = decoded is List
+          ? decoded
+          : (decoded['data'] is List ? decoded['data'] as List : []);
+      return list.map((e) => NotificationModel.fromJson(e as Map<String, dynamic>)).toList();
+    }
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
   }
 
   /// PATCH /api/notifications/:id/read
   Future<bool> markNotificationAsRead(String id) async {
-    try {
-      final url = ApiEndpoints.notificationRead(id);
-      final response = await http
-          .patch(Uri.parse(url), headers: _headers())
-          .timeout(const Duration(seconds: 4));
-
-      if (response.statusCode == 200) {
-        return true;
-      }
-    } catch (_) {}
-    return true;
+    final response = await _safePatch(ApiEndpoints.notificationRead(id));
+    if (response.statusCode == 200) return true;
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
   }
 
   /// POST /api/device-tokens

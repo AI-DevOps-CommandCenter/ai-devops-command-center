@@ -1,449 +1,219 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import '../models/incident_model.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart';
-import '../widgets/app_back_button.dart';
+import '../widgets/flow_widgets.dart';
 import 's07_root_cause_screen.dart';
 
-class S06AiInvestigationProgressScreen extends StatelessWidget {
-  const S06AiInvestigationProgressScreen({super.key});
+/// S06 – live progress of the n8n AI investigation for one incident.
+/// Polls GET /api/investigations?incident_id=… until the investigation is
+/// completed or failed, then offers the root-cause screen (S07).
+class S06AiInvestigationProgressScreen extends StatefulWidget {
+  final String? incidentId;
+
+  const S06AiInvestigationProgressScreen({super.key, this.incidentId});
+
+  @override
+  State<S06AiInvestigationProgressScreen> createState() => _S06AiInvestigationProgressScreenState();
+}
+
+class _S06AiInvestigationProgressScreenState extends State<S06AiInvestigationProgressScreen> {
+  String? _incidentId;
+  IncidentModel? _incident;
+  Map<String, dynamic>? _investigation;
+  String? _error;
+  bool _loading = true;
+  Timer? _poll;
+  int _polls = 0;
+  static const _maxPolls = 60; // 5 minutes at 5 s
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_incidentId == null) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      _incidentId = (args is String && args.isNotEmpty) ? args : widget.incidentId;
+      _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  String get _status => _investigation?['status']?.toString() ?? 'pending';
+  bool get _finished => _status == 'completed' || _status == 'failed';
+
+  Future<void> _load() async {
+    final id = _incidentId;
+    if (id == null || id.isEmpty) {
+      setState(() {
+        _loading = false;
+        _error = 'Open this screen from an incident.';
+      });
+      return;
+    }
+    try {
+      final api = ApiService();
+      final incident = _incident ?? await api.fetchIncidentById(id);
+      final list = await api.fetchInvestigations(id);
+      list.sort((a, b) => (b['created_at'] ?? '').toString().compareTo((a['created_at'] ?? '').toString()));
+      if (!mounted) return;
+      setState(() {
+        _incident = incident;
+        _investigation = list.isEmpty ? null : list.first;
+        _loading = false;
+        _error = null;
+      });
+      _schedule();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e is ApiException ? e.message : 'Could not load the investigation.';
+      });
+    }
+  }
+
+  void _schedule() {
+    _poll?.cancel();
+    if (_finished || _polls >= _maxPolls) return;
+    _polls++;
+    _poll = Timer(const Duration(seconds: 5), _load);
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final subtitle = _incident == null
+        ? 'Loading…'
+        : 'INC-${_incident!.id.substring(0, _incident!.id.length < 8 ? _incident!.id.length : 8).toUpperCase()} · ${_incident!.serviceName}';
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header: padding: 14px 16px 10px, gap: 10px
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-              child: Row(
-                children: [
-                  const AppBackButton(),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'AI investigation',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.2,
-                            color: colors.text,
-                          ),
-                        ),
-                        const SizedBox(height: 1),
-                        Text(
-                          'INC-1042 · payments-api',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: colors.muted,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Content: padding: 4px 16px 24px, gap: 14px
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // 6-Stage Stepper: Detect (done), Investigate (active), Cause, Approve, Recover, Report
-                    _buildStepper(context, activeStage: 1),
-                    const SizedBox(height: 14),
-
-                    // Progress Header: AI INVESTIGATION / Started 14:13
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'AI INVESTIGATION',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.52,
-                            color: colors.muted,
-                          ),
-                        ),
-                        Text(
-                          'Started 14:13',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: colors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Progress Summary Card: 3 of 4 checks complete (75%)
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '3 of 4 checks complete',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.text,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Correlating logs with recent commit',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: colors.muted,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Text(
-                            '75%',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: colors.accent,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Check 1: Collect logs (Done)
-                    _buildCheckCard(
-                      context,
-                      title: 'Collect logs',
-                      status: 'Done',
-                      isDone: true,
-                      description: '212 “connection timeout” errors since 14:07',
-                      source: 'Source: Loki',
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Check 2: Check metrics (Done)
-                    _buildCheckCard(
-                      context,
-                      title: 'Check metrics',
-                      status: 'Done',
-                      isDone: true,
-                      description: 'Error rate and P95 latency jumped at 14:07',
-                      source: 'Source: Prometheus',
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Check 3: Review deployments (Done)
-                    _buildCheckCard(
-                      context,
-                      title: 'Review deployments',
-                      status: 'Done',
-                      isDone: true,
-                      description: 'v2.8.1 went live at 14:05 · PR #214 changed the DB pool timeout',
-                      source: 'Source: GitHub',
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Check 4: Correlate and explain (Running)
-                    _buildCheckCard(
-                      context,
-                      title: 'Correlate and explain',
-                      status: 'Running',
-                      isDone: false,
-                      description: 'Combining the three results into one probable cause',
-                      source: 'Source: Groq via n8n',
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Guardrail Blue Card
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: colors.info.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(Icons.shield_outlined, color: colors.info, size: 18),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'The AI only reads data and suggests. It can recommend one of 4 reviewed playbooks, but it cannot run anything on its own.',
-                              style: TextStyle(
-                                fontSize: 14,
-                                height: 1.45,
-                                color: colors.text,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Primary Button: See root cause
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const S07RootCauseScreen(),
-                            ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: colors.accent,
-                          foregroundColor: colors.onAccent,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text(
-                          'See root cause',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            FlowHeader(title: 'AI investigation', subtitle: subtitle),
+            Expanded(child: _body(colors)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCheckCard(
-    BuildContext context, {
-    required String title,
-    required String status,
-    required bool isDone,
-    required String description,
-    required String source,
-  }) {
-    final colors = context.colors;
+  Widget _body(AppColorScheme colors) {
+    if (_loading) return const FlowMessage(icon: Icons.hourglass_empty, message: 'Loading investigation…', busy: true);
+    if (_error != null) return FlowMessage(icon: Icons.error_outline, message: _error!, onRetry: _load);
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final status = _status;
+    final completed = status == 'completed';
+    final failed = status == 'failed';
+    // The four n8n stages; the investigation row only records the overall status,
+    // so while it runs the first three are shown as in progress together.
+    final steps = <(String, String, String)>[
+      ('Read logs', 'Recent error lines for this service', 'Source: Loki'),
+      ('Check metrics', 'Error rate, latency and resource use around the alert', 'Source: Prometheus'),
+      ('Review deployments', 'Commits and deployments in the last 24 h', 'Source: GitHub'),
+      ('Correlate and explain', 'Combine the three results into one probable cause', 'Source: Groq via n8n'),
+    ];
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (isDone)
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: colors.badgeGreenBg,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.check, size: 16, color: colors.success),
-            )
-          else
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: colors.accentSoft, width: 3),
-              ),
-              alignment: Alignment.center,
-              child: SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(
-                  strokeWidth: 3,
-                  valueColor: AlwaysStoppedAnimation<Color>(colors.accent),
-                ),
-              ),
-            ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          FlowStepper(activeStage: completed ? 2 : 1),
+          const SizedBox(height: 14),
+          FlowCard(
+            child: Row(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: colors.text,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: isDone ? colors.badgeGreenBg : colors.accentSoft,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        status,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          height: 1.5,
-                          color: isDone ? colors.success : colors.accent,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  description,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: colors.muted,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  source,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colors.muted,
+                if (!completed && !failed)
+                  SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.4, color: colors.accent))
+                else
+                  Icon(completed ? Icons.check_circle : Icons.error, color: completed ? colors.success : colors.critical),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    completed
+                        ? 'Investigation complete'
+                        : failed
+                            ? 'Investigation failed – check the n8n error log'
+                            : _investigation == null
+                                ? 'Waiting for n8n to start the investigation'
+                                : 'Investigating…',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: colors.text),
                   ),
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStepper(BuildContext context, {required int activeStage}) {
-    final colors = context.colors;
-    final stages = ['Detect', 'Investigate', 'Cause', 'Approve', 'Recover', 'Report'];
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        children: List.generate(stages.length, (index) {
-          final isCompleted = index < activeStage;
-          final isActive = index == activeStage;
-          final title = stages[index];
-
-          Color textColor = colors.muted;
-          FontWeight fontWeight = FontWeight.w500;
-          if (isActive) {
-            textColor = colors.accent;
-            fontWeight = FontWeight.w600;
-          } else if (isCompleted) {
-            textColor = colors.text;
-          }
-
-          return Expanded(
-            child: Stack(
-              clipBehavior: Clip.none,
-              alignment: Alignment.center,
-              children: [
-                if (index > 0)
-                  Positioned(
-                    top: 10,
-                    right: 0,
-                    left: -50,
-                    child: Container(
-                      height: 2,
-                      color: isCompleted || isActive ? colors.success : colors.border,
-                    ),
-                  ),
-
-                Column(
-                  mainAxisSize: MainAxisSize.min,
+          const SizedBox(height: 14),
+          ...List.generate(steps.length, (i) {
+            final (title, desc, source) = steps[i];
+            final done = completed;
+            final running = !completed && !failed && _investigation != null;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: FlowCard(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: isCompleted
-                            ? colors.success
-                            : isActive
-                                ? colors.accentSoft
-                                : colors.card,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isCompleted
-                              ? colors.success
-                              : isActive
-                                  ? colors.accent
-                                  : colors.border,
-                          width: 2,
-                        ),
-                      ),
-                      alignment: Alignment.center,
-                      child: isCompleted
-                          ? Icon(Icons.check, size: 13, color: colors.card)
-                          : isActive
-                              ? Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: colors.accent,
-                                    shape: BoxShape.circle,
-                                  ),
-                                )
-                              : null,
+                    Icon(
+                      done ? Icons.check_circle_outline : running ? Icons.timelapse : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: done ? colors.success : running ? colors.accent : colors.muted,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: fontWeight,
-                        color: textColor,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text)),
+                          const SizedBox(height: 3),
+                          Text(desc, style: TextStyle(fontSize: 13, color: colors.muted)),
+                          const SizedBox(height: 3),
+                          Text(source, style: TextStyle(fontSize: 11, color: colors.muted)),
+                        ],
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
-              ],
+              ),
+            );
+          }),
+          const SizedBox(height: 4),
+          Text(
+            'The AI only reads data and suggests. It can recommend a reviewed playbook, but it cannot run anything on its own.',
+            style: TextStyle(fontSize: 12, color: colors.muted, height: 1.4),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            height: 48,
+            child: ElevatedButton(
+              onPressed: completed
+                  ? () => Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => S07RootCauseScreen(incidentId: _incidentId),
+                          settings: RouteSettings(arguments: _incidentId),
+                        ),
+                      )
+                  : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: colors.accent,
+                foregroundColor: colors.onAccent,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('View probable cause', style: TextStyle(fontWeight: FontWeight.w600)),
             ),
-          );
-        }),
+          ),
+        ],
       ),
     );
   }

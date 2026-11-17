@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
+import '../models/notification_model.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
-import 's05_incident_details_screen.dart';
-import 's07_root_cause_screen.dart';
-import 's17_recommended_action_screen.dart';
-import 's32_inc_1041_screen.dart';
-import 's34_pm_1037_screen.dart';
 
+/// S25 – in-app notification feed from GET /api/notifications.
 class S25NotificationsScreen extends StatefulWidget {
   const S25NotificationsScreen({super.key});
 
@@ -15,20 +13,94 @@ class S25NotificationsScreen extends StatefulWidget {
 }
 
 class _S25NotificationsScreenState extends State<S25NotificationsScreen> {
-  bool _allRead = false;
+  List<NotificationModel> _items = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final items = await ApiService().fetchNotifications(limit: 50);
+      items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e is ApiException ? e.message : 'Could not load notifications.';
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _markRead(NotificationModel n) async {
+    if (n.isRead) return;
+    try {
+      await ApiService().markNotificationAsRead(n.id);
+      if (!mounted) return;
+      setState(() {
+        _items = _items.map((i) => i.id == n.id ? i.copyWith(readAt: DateTime.now()) : i).toList();
+      });
+    } catch (_) {
+      // Leave it unread; the next refresh shows the server state.
+    }
+  }
+
+  Future<void> _markAllRead() async {
+    for (final n in _items.where((i) => !i.isRead).toList()) {
+      await _markRead(n);
+    }
+  }
+
+  void _open(NotificationModel n) {
+    _markRead(n);
+    if (n.incidentId == null || n.incidentId!.isEmpty) return;
+    Navigator.pushNamed(context, n.category.targetRoute, arguments: n.incidentId);
+  }
+
+  String _ago(DateTime t) {
+    final d = DateTime.now().difference(t.toLocal());
+    if (d.inMinutes < 1) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+    if (d.inHours < 24) return '${d.inHours} h ago';
+    return '${d.inDays} d ago';
+  }
+
+  bool _isToday(DateTime t) {
+    final now = DateTime.now();
+    final l = t.toLocal();
+    return l.year == now.year && l.month == now.month && l.day == now.day;
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final unreadCount = _allRead ? 0 : 2;
-    final countLabel = unreadCount > 0 ? '$unreadCount unread · 6 total' : 'All caught up · 6 total';
+    final unread = _items.where((i) => !i.isRead).length;
+    final countLabel = _loading
+        ? 'Loading…'
+        : unread > 0
+            ? '$unread unread · ${_items.length} total'
+            : 'All caught up · ${_items.length} total';
+    final today = _items.where((i) => _isToday(i.createdAt)).toList();
+    final earlier = _items.where((i) => !_isToday(i.createdAt)).toList();
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header: padding: 14px 16px 10px, gap: 10px
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
@@ -39,566 +111,123 @@ class _S25NotificationsScreenState extends State<S25NotificationsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Notifications',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.2,
-                            color: colors.text,
-                          ),
-                        ),
+                        Text('Notifications',
+                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.2, color: colors.text)),
                         const SizedBox(height: 1),
-                        Text(
-                          countLabel,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: colors.muted,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        Text(countLabel,
+                            style: TextStyle(fontSize: 13, color: colors.muted), maxLines: 1, overflow: TextOverflow.ellipsis),
                       ],
                     ),
                   ),
                   TextButton(
-                    onPressed: () => setState(() => _allRead = true),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      foregroundColor: colors.accent,
-                    ),
-                    child: const Text(
-                      'Mark all read',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    onPressed: unread > 0 ? _markAllRead : null,
+                    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10), foregroundColor: colors.accent),
+                    child: const Text('Mark all read', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                   ),
                 ],
               ),
             ),
-
-            // Content: padding: 4px 16px 24px, gap: 14px
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Section: Today
-                    Text(
-                      'Today',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.52,
-                        color: colors.muted,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Notification 1: Approval needed
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: colors.badgeAmberBg,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(Icons.lock_outline, size: 18, color: colors.warning),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Approval needed',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                    color: colors.text,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Roll back payments-api to v2.8.0 for INC-1042',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: colors.muted,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  '14:16 · Push · Slack · Email',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: colors.muted,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: SizedBox(
-                                        height: 48,
-                                        child: ElevatedButton(
-                                          onPressed: () {
-                                            Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (context) => const S17RecommendedActionScreen(),
-                                              ),
-                                            );
-                                          },
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: colors.accent,
-                                            foregroundColor: colors.onAccent,
-                                            elevation: 0,
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(12),
-                                            ),
-                                          ),
-                                          child: const Text(
-                                            'Review',
-                                            style: TextStyle(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: SizedBox(
-                                        height: 48,
-                                        child: OutlinedButton(
-                                          onPressed: () => Navigator.pop(context),
-                                          style: OutlinedButton.styleFrom(
-                                            backgroundColor: colors.card,
-                                            side: BorderSide(color: colors.border),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(12),
-                                            ),
-                                          ),
-                                          child: Text(
-                                            'Later',
-                                            style: TextStyle(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w600,
-                                              color: colors.text,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (!_allRead) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              width: 8,
-                              height: 8,
-                              margin: const EdgeInsets.only(top: 6),
-                              decoration: BoxDecoration(
-                                color: colors.accent,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Notification 2: Investigation complete
-                    InkWell(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const S07RootCauseScreen(),
-                          ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: colors.card,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 36,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: colors.accentSoft,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              alignment: Alignment.center,
-                              child: Icon(Icons.auto_awesome, size: 18, color: colors.accent),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Investigation complete',
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.text,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'Probable cause found for INC-1042 (moderate confidence)',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: colors.muted,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '14:15 · Push · Slack',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: colors.muted,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (!_allRead) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                width: 8,
-                                height: 8,
-                                margin: const EdgeInsets.only(top: 6),
-                                decoration: BoxDecoration(
-                                  color: colors.accent,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Notification 3: Incident detected INC-1042
-                    InkWell(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const S05IncidentDetailsScreen(),
-                          ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: colors.card,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 36,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: colors.badgeRedBg,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              alignment: Alignment.center,
-                              child: Icon(Icons.warning_amber_rounded, size: 18, color: colors.critical),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Incident detected',
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.text,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'INC-1042 · Error rate above 5% on payments-api',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: colors.muted,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '14:12 · Push · Slack',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: colors.muted,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Notification 4: Incident detected INC-1041
-                    InkWell(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const S32Inc1041Screen(),
-                          ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: colors.card,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 36,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: colors.badgeAmberBg,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              alignment: Alignment.center,
-                              child: Icon(Icons.warning_amber_rounded, size: 18, color: colors.warning),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Incident detected',
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.text,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'INC-1041 · Queue backlog growing on orders-worker',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: colors.muted,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '13:40 · Push',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: colors.muted,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Section: Yesterday
-                    Text(
-                      'Yesterday',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.52,
-                        color: colors.muted,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Notification 5: Recovery verified
-                    InkWell(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const S34Pm1037Screen(),
-                          ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: colors.card,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 36,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: colors.badgeGreenBg,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              alignment: Alignment.center,
-                              child: Icon(Icons.check, size: 18, color: colors.success),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Recovery verified',
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.text,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'INC-1037 · Cache hit ratio back to normal',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: colors.muted,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '17:02 · Push · Discord',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: colors.muted,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Notification 6: Postmortem ready
-                    InkWell(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const S34Pm1037Screen(),
-                          ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: colors.card,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 36,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: colors.info.withValues(alpha: 0.10),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              alignment: Alignment.center,
-                              child: Icon(Icons.description_outlined, size: 18, color: colors.info),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Postmortem ready',
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.text,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'INC-1037 report saved to history',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: colors.muted,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '17:05 · Email',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: colors.muted,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              child: RefreshIndicator(
+                onRefresh: _load,
+                child: _buildBody(colors, today, earlier),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody(AppColorScheme colors, List<NotificationModel> today, List<NotificationModel> earlier) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) {
+      return ListView(children: [
+        const SizedBox(height: 60),
+        Center(child: Text(_error!, style: TextStyle(color: colors.red, fontSize: 13))),
+        Center(child: TextButton(onPressed: _load, child: const Text('Retry'))),
+      ]);
+    }
+    if (_items.isEmpty) {
+      return ListView(children: [
+        const SizedBox(height: 60),
+        Icon(Icons.notifications_none_rounded, size: 40, color: colors.muted),
+        const SizedBox(height: 8),
+        Center(child: Text('No notifications yet.', style: TextStyle(fontWeight: FontWeight.bold, color: colors.text))),
+        const SizedBox(height: 4),
+        Center(child: Text('Approval requests and incident updates appear here.', style: TextStyle(color: colors.muted, fontSize: 13))),
+      ]);
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      children: [
+        if (today.isNotEmpty) ...[_section(colors, 'Today'), ...today.map((n) => _card(colors, n))],
+        if (earlier.isNotEmpty) ...[
+          if (today.isNotEmpty) const SizedBox(height: 8),
+          _section(colors, 'Earlier'),
+          ...earlier.map((n) => _card(colors, n)),
+        ],
+      ],
+    );
+  }
+
+  Widget _section(AppColorScheme colors, String label) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 0.52, color: colors.muted)),
+      );
+
+  Widget _card(AppColorScheme colors, NotificationModel n) {
+    final cat = n.category;
+    final (Color bg, Color fg) = switch (cat) {
+      NotificationCategory.approvalRequest => (colors.badgeAmberBg, colors.warning),
+      NotificationCategory.incidentAlert => (colors.badgeRedBg, colors.red),
+      NotificationCategory.recoveryResolution => (colors.badgeGreenBg, colors.green),
+      _ => (colors.badgeTealBg, colors.accent),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        onTap: () => _open(n),
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: colors.card,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: n.isRead ? colors.border : colors.accent.withOpacity(0.5)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+                alignment: Alignment.center,
+                child: Icon(cat.icon, size: 18, color: fg),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Expanded(
+                        child: Text(n.title,
+                            style: TextStyle(fontSize: 14, fontWeight: n.isRead ? FontWeight.w500 : FontWeight.w700, color: colors.text)),
+                      ),
+                      if (!n.isRead)
+                        Container(width: 8, height: 8, decoration: BoxDecoration(color: colors.accent, shape: BoxShape.circle)),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text(n.message, style: TextStyle(fontSize: 13, color: colors.muted, height: 1.35)),
+                    const SizedBox(height: 6),
+                    Text('${cat.displayName} · ${_ago(n.createdAt)}', style: TextStyle(fontSize: 11, color: colors.muted)),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
