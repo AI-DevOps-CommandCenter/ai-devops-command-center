@@ -46,17 +46,21 @@ class ApiEndpoints {
   static String get githubRepositories => '$baseUrl/api/github/repositories';
   static String githubRepo(String owner, String repo) =>
       '$baseUrl/api/github/repositories/$owner/$repo';
-  static String githubCommits(String owner, String repo,
-          {String? branch, int limit = 10}) =>
-      '$baseUrl/api/github/repositories/$owner/$repo/commits?branch=${branch ?? ''}&limit=$limit';
-  static String githubPulls(String owner, String repo,
-          {String state = 'open', int limit = 10}) =>
-      '$baseUrl/api/github/repositories/$owner/$repo/pulls?state=$state&limit=$limit';
+  static String _query(Map<String, Object?> params) {
+    final parts = params.entries
+        .where((e) => e.value != null && e.value.toString().isNotEmpty)
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value.toString())}');
+    return parts.isEmpty ? '' : '?${parts.join('&')}';
+  }
+
+  static String githubCommits(String owner, String repo, {String? branch, int limit = 10}) =>
+      '$baseUrl/api/github/repositories/$owner/$repo/commits${_query({'branch': branch, 'limit': limit})}';
+  static String githubPulls(String owner, String repo, {String state = 'open', int limit = 10}) =>
+      '$baseUrl/api/github/repositories/$owner/$repo/pulls${_query({'state': state, 'limit': limit})}';
   static String githubPullDetail(String owner, String repo, int number) =>
       '$baseUrl/api/github/repositories/$owner/$repo/pulls/$number';
-  static String githubWorkflowRuns(String owner, String repo,
-          {String? branch, String? status, int limit = 10}) =>
-      '$baseUrl/api/github/repositories/$owner/$repo/workflow-runs?branch=${branch ?? ''}&status=${status ?? ''}&limit=$limit';
+  static String githubWorkflowRuns(String owner, String repo, {String? branch, String? status, int limit = 10}) =>
+      '$baseUrl/api/github/repositories/$owner/$repo/workflow-runs${_query({'branch': branch, 'status': status, 'limit': limit})}';
   static String githubWorkflowRunJobs(String owner, String repo, int runId) =>
       '$baseUrl/api/github/repositories/$owner/$repo/workflow-runs/$runId/jobs';
 
