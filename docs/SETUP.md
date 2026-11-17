@@ -139,7 +139,15 @@ docker compose up -d --build
 cd ..
 ```
 
-This starts Prometheus (:9090), Alertmanager (:9093), Loki (:3100), Promtail, `sample-app`, the load generator and the playbook executor (:9095). All ports are bound to 127.0.0.1 only.
+This starts Prometheus (:9090), Alertmanager (:9093), Loki (:3100), Promtail, `sample-app`, its load balancer `sample-lb`, the load generator and the playbook executor (:9095). All ports are bound to 127.0.0.1 only.
+
+Then build the two sample-app releases that the **rollback** playbook needs:
+
+```bash
+bash monitoring/scripts/release.sh build    # dc-sample-app:stable (v1) and dc-sample-app:v2-bad
+```
+
+Without `dc-sample-app:stable`, a rollback fails safely with "Rollback image … does not exist" and changes nothing.
 
 ## 8. Start n8n and import the workflows
 
@@ -218,9 +226,15 @@ bash monitoring/scripts/fault.sh errors 0.5    # sample-app now fails half its r
    - workflow 08 drafts the postmortem.
 5. Mark the incident resolved and open the postmortem.
 
+**Rollback and scale demos:**
+- Rollback: `bash monitoring/scripts/release.sh deploy-bad` deploys v2, which fails half its requests from startup. A restart does not help; the **rollback** playbook recreates the container from `dc-sample-app:stable`.
+- Scale: the **scale** playbook adds 2 replicas (3 instances in total) behind `sample-lb`. Use it with `fault.sh latency 0.5`.
+- Check with `bash monitoring/scripts/release.sh status`.
+
 Afterwards:
 
 ```bash
+bash monitoring/scripts/release.sh reset      # compose image again, replicas removed
 bash monitoring/scripts/fault.sh off
 bash monitoring/scripts/fault.sh breaker closed   # only if the circuit-breaker playbook was used
 ```

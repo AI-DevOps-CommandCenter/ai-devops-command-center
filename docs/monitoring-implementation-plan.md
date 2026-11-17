@@ -261,7 +261,7 @@ Location: `infrastructure/playbooks/executor/`, Python.
 - Live: signed `restart` against the running sample app, confirm the container restarted (`docker inspect` start time changed) and `/health` is back. Then `circuit_breaker` with a fault active, confirm error rate drops.
 - Recovery check: after a real action, workflow 07 queries `up` and the error rate and returns `recovered`.
 
-**Status:** Phase A done; Phase B (`rollback`, `scale`) not built and answers 422 (D-MON-6 open).
+**Status:** Phase A done. Phase B (`rollback`, `scale`) built 17 Nov 2026 against the sample app (real Docker: rollback recreates from `dc-sample-app:stable`, scale adds replicas behind `sample-lb`); see the executor README.
 
 - pytest: 32 pass, including a signature vector produced by `automation/src/lib/hmac.js`.
 - Live, signed by `signedBackendRequest()` from `hmac.js` inside the n8n container, over `host.docker.internal:9095`: `restart` 200 and the container really restarted (`StartedAt` changed, healthy after 2 s); same run re-signed 200 with `repeated: true` and no second restart; exact replay 409; forged signature 401; `rollback` 422; `circuit_breaker` 200 and the app reported `breaker_open: true`.
@@ -354,6 +354,6 @@ All results are from a local Docker Desktop (Windows) run, not a shared or hoste
 | Alertmanager config and availability | ready | Config and rule tests pass; 3 notifications (firing, resolved, ServiceDown) delivered, 0 failures (step 4, 5) |
 | Alert reaches n8n | yes | Workflow 01 accepted real `HighErrorRate`, resolved and `ServiceDown` alerts (step 5) |
 | Playbook executor: restart, circuit_breaker | ready | Live signed calls from the n8n container; real restart; recovery confirmed by workflow 07 (step 7) |
-| Playbook executor: rollback, scale | not built | 422 until D-MON-6 is decided |
+| Playbook executor: rollback, scale | built 17 Nov 2026 (Phase B) | live-tested with signed calls; full n8n/app flow pending |
 | Executor integration endpoint | `POST http://host.docker.internal:9095/v1/execute`, HMAC with `EXECUTOR_SIGNING_SECRET` | `infrastructure/playbooks/executor/README.md` |
 | Ready for real-service testing | **monitoring and executor: yes** | 06 is wired to the executor (14 Nov). The full loop from an approval still needs BD-5 and BD-6 (Vinuka) and BD-1 (backend + database); step 8 |

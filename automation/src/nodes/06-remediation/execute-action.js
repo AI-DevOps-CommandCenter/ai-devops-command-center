@@ -34,8 +34,9 @@ if (d.execution_mode === 'executor') {
     'POST', '/v1/execute',
     { action: ACTION, service_name: serviceName, playbook_run_id: d.playbook_run_id },
   );
-  // A restart waits up to 10 s for the stop and 60 s for /health (executor README).
-  req.timeout_ms = envInt(env, 'EXECUTOR_TIMEOUT_MS', 90000, 10000, 300000);
+  // Per instance: up to 10 s for the stop and 60 s for /health (executor README);
+  // restart and rollback act on every instance, so allow for 3 instances.
+  req.timeout_ms = envInt(env, 'EXECUTOR_TIMEOUT_MS', 240000, 10000, 300000);
   return [{ json: { ...d, execute_via_executor: true, request: req } }];
 }
 

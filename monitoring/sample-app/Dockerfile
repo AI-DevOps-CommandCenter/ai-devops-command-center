@@ -5,6 +5,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HOST=0.0.0.0 \
     PORT=8000
 
+# Release identity. scripts/release.sh builds a "bad release" with
+# APP_VERSION=v2 RELEASE_FAULT=errors:0.5 to demonstrate the rollback playbook.
+ARG APP_VERSION=v1
+ARG RELEASE_FAULT=
+ENV APP_VERSION=${APP_VERSION}     RELEASE_FAULT=${RELEASE_FAULT}
+
 WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

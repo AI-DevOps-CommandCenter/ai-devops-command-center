@@ -130,7 +130,7 @@ def test_circuit_breaker_opens(client):
     response = post(client, request_body(action="circuit_breaker"))
 
     assert response.status_code == 200
-    assert response.json()["detail"] == {"breaker_open": True, "attempts": 1}
+    assert response.json()["detail"] == {"breaker_open": True, "attempts": 1, "instances": 1}
 
 
 def test_circuit_breaker_gives_up_after_three_server_errors():
