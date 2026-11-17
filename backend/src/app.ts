@@ -200,14 +200,34 @@ export function createApp(
   });
 
   // Authentication test endpoint
-  app.get("/api/me", authenticateToken, (req, res) => {
+  // Also returns the caller's application role and name from public.profiles
+  // (read through the caller's own client, so RLS applies). Missing profile
+  // data is simply left out.
+  app.get("/api/me", authenticateToken, async (req, res) => {
+    const user: Record<string, unknown> = {
+      id: req.user?.id,
+      email: req.user?.email
+    };
+
+    try {
+      const result = await req.userSupabase
+        ?.from("profiles")
+        .select("role, full_name")
+        .eq("id", req.user?.id ?? "")
+        .maybeSingle();
+      const profile = result?.data as { role?: unknown; full_name?: unknown } | null | undefined;
+      if (typeof profile?.role === "string") user.role = profile.role;
+      if (typeof profile?.full_name === "string" && profile.full_name.trim()) {
+        user.full_name = profile.full_name.trim();
+      }
+    } catch {
+      // Profile lookup is best-effort; authentication already succeeded.
+    }
+
     res.json({
       success: true,
       message: "Authentication successful!",
-      user: {
-        id: req.user?.id,
-        email: req.user?.email
-      }
+      user
     });
   });
 

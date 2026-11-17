@@ -198,4 +198,26 @@ describe("requireRole (role read through the user's JWT client)", () => {
 
     expect(res.status).toBe(401);
   });
+
+  it("adds the application role and name from the caller's profile", async () => {
+    const app = createApp(testConfig());
+    mockValidUser();
+    const { client, calls } = createMockUserClient({
+      profiles: { data: { role: "operator", full_name: " Demo Operator " }, error: null }
+    });
+    supabaseMocks.createUserSupabaseClient.mockReturnValue(client);
+
+    const res = await request(app)
+      .get("/api/me")
+      .set("Authorization", `Bearer ${TEST_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.user).toEqual({
+      id: TEST_USER.id,
+      email: TEST_USER.email,
+      role: "operator",
+      full_name: "Demo Operator"
+    });
+    expect(calls.some((c) => c.table === "profiles")).toBe(true);
+  });
 });
