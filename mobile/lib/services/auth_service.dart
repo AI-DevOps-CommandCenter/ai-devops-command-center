@@ -88,7 +88,7 @@ class AuthService {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $_accessToken',
           },
-        ).timeout(const Duration(seconds: 2));
+        ).timeout(const Duration(seconds: 6));
 
         if (meResponse.statusCode == 200) {
           final meData = jsonDecode(meResponse.body);

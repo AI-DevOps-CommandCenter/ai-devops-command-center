@@ -15,6 +15,17 @@ class UserModel {
     this.accessToken,
   });
 
+  /// Application roles from public.profiles (via GET /api/me).
+  bool get isAdmin => role == 'admin';
+  bool get canOperate => role == 'admin' || role == 'operator';
+  String get roleLabel => switch (role) {
+        'admin' => 'Admin',
+        'operator' => 'Operator',
+        'user' => 'Viewer',
+        'automation' => 'Automation',
+        _ => role,
+      };
+
   /// Factory from Vinuka's GET /api/me endpoint:
   /// {
   ///   "success": true,
@@ -30,7 +41,7 @@ class UserModel {
       id: userData['id']?.toString() ?? 'usr-${DateTime.now().millisecondsSinceEpoch}',
       email: email,
       role: userData['role']?.toString() ?? 'DevOps Engineer',
-      name: userData['name']?.toString() ?? _capitalize(extractedName),
+      name: userData['full_name']?.toString() ?? userData['name']?.toString() ?? _capitalize(extractedName),
       accessToken: token,
     );
   }

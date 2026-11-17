@@ -1,323 +1,150 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
-import '../widgets/proto_icon.dart';
+import '../widgets/flow_widgets.dart';
 import 's38_playbook_edit_screen.dart';
 
-class S16RemediationPlaybooksScreen extends StatelessWidget {
+/// S16 – the reviewed remediation playbooks (GET /api/admin/playbooks).
+/// Only enabled playbooks can be requested; admins can open one to edit it.
+class S16RemediationPlaybooksScreen extends StatefulWidget {
   const S16RemediationPlaybooksScreen({super.key});
+
+  @override
+  State<S16RemediationPlaybooksScreen> createState() => _S16RemediationPlaybooksScreenState();
+}
+
+class _S16RemediationPlaybooksScreenState extends State<S16RemediationPlaybooksScreen> {
+  List<Map<String, dynamic>> _playbooks = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final list = await ApiService().fetchPlaybooks();
+      list.sort((a, b) => (a['name'] ?? '').toString().compareTo((b['name'] ?? '').toString()));
+      if (!mounted) return;
+      setState(() {
+        _playbooks = list;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e is ApiException ? e.message : 'Could not load playbooks.';
+      });
+    }
+  }
+
+  IconData _icon(String? action) => switch (action) {
+        'restart' => Icons.restart_alt,
+        'circuit_breaker' => Icons.power_off_outlined,
+        'rollback' => Icons.undo,
+        'scale' => Icons.open_in_full,
+        _ => Icons.playlist_play,
+      };
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-
+    final isAdmin = AuthService().currentUser?.isAdmin ?? false;
+    final enabled = _playbooks.where((p) => p['enabled'] == true).length;
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header: Playbooks · Admins review and edit · 4 active
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-              child: Row(
-                children: [
-                  InkWell(
-                    onTap: () => Navigator.pop(context),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(Icons.chevron_left, size: 20, color: colors.text),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Playbooks',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.2,
-                            color: colors.text,
-                          ),
-                        ),
-                        const SizedBox(height: 1),
-                        Text(
-                          'Admins review and edit · 4 active',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: colors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+            FlowHeader(
+              title: 'Playbooks',
+              subtitle: _loading ? 'Loading…' : '$enabled of ${_playbooks.length} enabled',
             ),
-
-            // Content
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                children: [
-                  // Info banner
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: colors.info.withOpacity(0.14),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ProtoIcon(ProtoIcons.shieldCheck,
-                            size: 18, color: colors.info),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'The AI can only recommend these playbooks. Anything else must be done outside the app.',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: colors.text,
-                              height: 1.45,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // 1. Restart service
-                  _buildPlaybookCard(
-                    context,
-                    icon: Icons.refresh,
-                    svg: ProtoIcons.restart,
-                    title: 'Restart service',
-                    desc: 'Restarts pods one at a time.',
-                    impactLabel: 'Medium impact',
-                    impactBg: colors.warning.withOpacity(0.14),
-                    impactFg: colors.warning,
-                    approvalLabel: 'Approval: tech lead',
-                    hasApproval: true,
-                    lastRun: 'Last run 3 days ago',
-                    colors: colors,
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // 2. Roll back deployment
-                  _buildPlaybookCard(
-                    context,
-                    icon: Icons.layers_outlined,
-                    svg: ProtoIcons.layers,
-                    title: 'Roll back deployment',
-                    desc: 'Redeploys the last healthy version.',
-                    impactLabel: 'High impact',
-                    impactBg: colors.critical.withOpacity(0.14),
-                    impactFg: colors.critical,
-                    approvalLabel: 'Approval: tech lead',
-                    hasApproval: true,
-                    lastRun: 'Last run today 14:24',
-                    colors: colors,
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // 3. Scale service
-                  _buildPlaybookCard(
-                    context,
-                    icon: Icons.scale_outlined,
-                    svg: ProtoIcons.scale,
-                    title: 'Scale service',
-                    desc: 'Adds replicas, up to a set limit.',
-                    impactLabel: 'Low impact',
-                    impactBg: colors.ok.withOpacity(0.13),
-                    impactFg: colors.ok,
-                    approvalLabel: 'Runs without approval',
-                    hasApproval: false,
-                    lastRun: 'Last run 6 days ago',
-                    colors: colors,
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // 4. Enable circuit breaker
-                  _buildPlaybookCard(
-                    context,
-                    icon: Icons.power_settings_new_outlined,
-                    svg: ProtoIcons.circuitBreaker,
-                    title: 'Enable circuit breaker',
-                    desc: 'Stops calls to a failing dependency.',
-                    impactLabel: 'Medium impact',
-                    impactBg: colors.warning.withOpacity(0.14),
-                    impactFg: colors.warning,
-                    approvalLabel: 'Approval: tech lead',
-                    hasApproval: true,
-                    lastRun: 'Never run',
-                    colors: colors,
-                  ),
-                ],
-              ),
-            ),
+            Expanded(child: _body(colors, isAdmin)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildPlaybookCard(
-    BuildContext context, {
-    required IconData icon,
-    String? svg,
-    required String title,
-    required String desc,
-    required String impactLabel,
-    required Color impactBg,
-    required Color impactFg,
-    required String approvalLabel,
-    required bool hasApproval,
-    required String lastRun,
-    required dynamic colors,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _body(AppColorScheme colors, bool isAdmin) {
+    if (_loading) return const FlowMessage(icon: Icons.playlist_play, message: 'Loading playbooks…', busy: true);
+    if (_error != null) return FlowMessage(icon: Icons.error_outline, message: _error!, onRetry: _load);
+    if (_playbooks.isEmpty) return FlowMessage(icon: Icons.playlist_play, message: 'No playbooks yet.', onRetry: _load);
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: colors.accent.withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                alignment: Alignment.center,
-                child: svg != null
-                    ? ProtoIcon(svg, size: 20, color: colors.accent)
-                    : Icon(icon, size: 20, color: colors.accent),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: colors.text,
-                      ),
-                    ),
-                    Text(
-                      desc,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: colors.muted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const S38PlaybookEditScreen(),
-                    ),
-                  );
-                },
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: colors.card,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: colors.border),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(Icons.edit_outlined, size: 18, color: colors.text),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                decoration: BoxDecoration(
-                  color: impactBg,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  impactLabel,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: impactFg,
-                    height: 1.5,
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                decoration: BoxDecoration(
-                  color: colors.cardSecondary,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (hasApproval) ...[
-                      Icon(Icons.lock_outline, size: 13, color: colors.muted),
-                      const SizedBox(width: 4),
-                    ],
-                    Text(
-                      approvalLabel,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: colors.muted,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
           Text(
-            lastRun,
-            style: TextStyle(
-              fontSize: 12,
-              color: colors.muted,
-            ),
+            'The AI can only recommend one of these reviewed playbooks, and each run still needs a human approval.',
+            style: TextStyle(fontSize: 13, color: colors.muted, height: 1.4),
           ),
+          const SizedBox(height: 12),
+          ..._playbooks.map((p) {
+            final on = p['enabled'] == true;
+            final action = p['action_type']?.toString();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: !isAdmin
+                    ? null
+                    : () async {
+                        final changed = await Navigator.push<bool>(
+                          context,
+                          MaterialPageRoute(builder: (_) => S38PlaybookEditScreen(playbook: p)),
+                        );
+                        if (changed == true) _load();
+                      },
+                child: FlowCard(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(_icon(action), color: on ? colors.accent : colors.muted),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(p['name']?.toString() ?? '—',
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: colors.text)),
+                            const SizedBox(height: 3),
+                            Text(p['description']?.toString() ?? '',
+                                style: TextStyle(fontSize: 13, color: colors.muted, height: 1.35)),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${action ?? '—'} · ${p['requires_approval'] == false ? 'no approval' : 'approval required'}',
+                              style: TextStyle(fontSize: 11, color: colors.muted),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: (on ? colors.success : colors.muted).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                        child: Text(on ? 'enabled' : 'disabled',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: on ? colors.success : colors.muted)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
         ],
       ),
     );

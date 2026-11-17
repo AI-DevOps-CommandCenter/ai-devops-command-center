@@ -1,422 +1,143 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/flow_widgets.dart';
 
+/// S38 – edit a playbook (admins; PATCH /api/admin/playbooks/:id).
+/// The action type is fixed: the executor only runs allow-listed actions.
+/// Pops with `true` when something was saved.
 class S38PlaybookEditScreen extends StatefulWidget {
-  const S38PlaybookEditScreen({super.key});
+  final Map<String, dynamic>? playbook;
+
+  const S38PlaybookEditScreen({super.key, this.playbook});
 
   @override
   State<S38PlaybookEditScreen> createState() => _S38PlaybookEditScreenState();
 }
 
 class _S38PlaybookEditScreenState extends State<S38PlaybookEditScreen> {
-  int _reps = 6;
-  bool _approvalOn = false;
-  bool _saved = false;
+  late final TextEditingController _name;
+  late final TextEditingController _description;
+  late bool _enabled;
+  late bool _requiresApproval;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final p = widget.playbook ?? const {};
+    _name = TextEditingController(text: p['name']?.toString() ?? '');
+    _description = TextEditingController(text: p['description']?.toString() ?? '');
+    _enabled = p['enabled'] == true;
+    _requiresApproval = p['requires_approval'] != false;
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _description.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final id = widget.playbook?['id']?.toString();
+    if (id == null) return;
+    if (_name.text.trim().isEmpty) {
+      setState(() => _error = 'Name is required.');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ApiService().updatePlaybook(id, {
+        'name': _name.text.trim(),
+        'description': _description.text.trim(),
+        'enabled': _enabled,
+        'requires_approval': _requiresApproval,
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Playbook saved.')));
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = e is ApiException && e.statusCode == 403
+            ? 'Only admins can change playbooks.'
+            : e is ApiException
+                ? e.message
+                : 'Could not save the playbook.';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-
+    final p = widget.playbook;
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header: Scale service · Playbook · edited by admins only
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-              child: Row(
-                children: [
-                  InkWell(
-                    onTap: () => Navigator.pop(context),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(Icons.chevron_left, size: 20, color: colors.text),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Scale service',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.2,
-                            color: colors.text,
-                          ),
-                        ),
-                        const SizedBox(height: 1),
-                        Text(
-                          'Playbook · edited by admins only',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: colors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Content
+            FlowHeader(title: 'Edit playbook', subtitle: p?['action_type']?.toString() ?? ''),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                children: [
-                  // Description & Impact card
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              child: p == null
+                  ? const FlowMessage(icon: Icons.playlist_play, message: 'Open a playbook from the Playbooks screen.')
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                       children: [
-                        Text(
-                          'Adds replicas to absorb load. The AI can recommend it; limits below cannot be exceeded.',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: colors.muted,
-                            height: 1.45,
-                          ),
+                        TextField(controller: _name, decoration: const InputDecoration(labelText: 'Name')),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _description,
+                          minLines: 2,
+                          maxLines: 5,
+                          decoration: const InputDecoration(labelText: 'Description'),
+                        ),
+                        const SizedBox(height: 12),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('Enabled', style: TextStyle(color: colors.text)),
+                          subtitle: Text('Operators can request it', style: TextStyle(color: colors.muted)),
+                          value: _enabled,
+                          onChanged: (v) => setState(() => _enabled = v),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('Requires approval', style: TextStyle(color: colors.text)),
+                          subtitle: Text('A second person must approve every run', style: TextStyle(color: colors.muted)),
+                          value: _requiresApproval,
+                          onChanged: (v) => setState(() => _requiresApproval = v),
                         ),
                         const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 9, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: colors.ok.withOpacity(0.13),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            'Low impact',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: colors.ok,
-                              height: 1.5,
-                            ),
-                          ),
+                        FlowSection(
+                          label: 'Action',
+                          text: '${p['action_type']} – fixed. The executor only runs allow-listed actions on allow-listed services.',
                         ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Limits Header
-                  Text(
-                    'LIMITS',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.52,
-                      color: colors.muted,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Max replicas counter card
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Max replicas',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.text,
-                                ),
-                              ),
-                              Text(
-                                'Per service',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: colors.muted,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        InkWell(
-                          onTap: () {
-                            if (_reps > 2) {
-                              setState(() {
-                                _reps--;
-                              });
-                            }
-                          },
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: colors.cardSecondary,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: colors.border),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '−',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w600,
-                                color: colors.text,
-                              ),
-                            ),
-                          ),
-                        ),
+                        if (_error != null) Text(_error!, style: TextStyle(color: colors.critical)),
+                        const SizedBox(height: 12),
                         SizedBox(
-                          width: 32,
-                          child: Text(
-                            '$_reps',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: colors.text,
+                          height: 48,
+                          child: ElevatedButton(
+                            onPressed: _saving ? null : _save,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: colors.accent,
+                              foregroundColor: colors.onAccent,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
-                          ),
-                        ),
-                        InkWell(
-                          onTap: () {
-                            if (_reps < 12) {
-                              setState(() {
-                                _reps++;
-                              });
-                            }
-                          },
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: colors.cardSecondary,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: colors.border),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '+',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w600,
-                                color: colors.text,
-                              ),
-                            ),
+                            child: Text(_saving ? 'Saving…' : 'Save', style: const TextStyle(fontWeight: FontWeight.w600)),
                           ),
                         ),
                       ],
                     ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // Metadata list card
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Column(
-                      children: [
-                        _buildMetaRow(
-                            'Allowed services',
-                            'orders-worker, media-service, catalog-api',
-                            colors),
-                        const SizedBox(height: 10),
-                        _buildMetaRow(
-                            'Environments', 'Staging, Production', colors),
-                        const SizedBox(height: 10),
-                        _buildMetaRow(
-                            'Cooldown', '10 min between runs', colors),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Approval Header
-                  Text(
-                    'APPROVAL',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.52,
-                      color: colors.muted,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Require approval Switch Card
-                  InkWell(
-                    onTap: () {
-                      setState(() {
-                        _approvalOn = !_approvalOn;
-                      });
-                    },
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Require approval',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                    color: colors.text,
-                                  ),
-                                ),
-                                Text(
-                                  _approvalOn
-                                      ? 'Approval required by tech lead'
-                                      : 'Currently runs without approval',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: colors.muted,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            width: 46,
-                            height: 28,
-                            padding: const EdgeInsets.all(3),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(999),
-                              color: _approvalOn
-                                  ? colors.accent
-                                  : colors.cardSecondary,
-                            ),
-                            alignment: _approvalOn
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: Container(
-                              width: 22,
-                              height: 22,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  if (_saved) ...[
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: colors.ok.withOpacity(0.13),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        'Saved. Change recorded in the audit log.',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: colors.text,
-                        ),
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 20),
-
-                  // Save changes Button
-                  SizedBox(
-                    height: 48,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          _saved = true;
-                        });
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: colors.accent,
-                        foregroundColor: colors.onAccent,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text(
-                        'Save changes',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildMetaRow(String label, String value, dynamic colors) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(fontSize: 14, color: colors.muted),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: colors.text,
-          ),
-        ),
-      ],
     );
   }
 }

@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
+import '../models/incident_model.dart';
+import '../models/service_metrics_model.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart';
-import '../widgets/app_back_button.dart';
+import '../widgets/flow_widgets.dart';
 import 's05_incident_details_screen.dart';
 import 's12_service_details_screen.dart';
-import 's14_deployment_details_screen.dart';
-import 's15_failed_pipeline_job_screen.dart';
-import 's24_pull_request_summary_screen.dart';
-import 's32_inc_1041_screen.dart';
-import 's34_pm_1037_screen.dart';
+import 's16_remediation_playbooks_screen.dart';
 
+/// S30 – search across incidents, services and playbooks. The data is loaded
+/// once from the backend and filtered on the device.
 class S30SearchScreen extends StatefulWidget {
   const S30SearchScreen({super.key});
 
@@ -17,269 +18,164 @@ class S30SearchScreen extends StatefulWidget {
 }
 
 class _S30SearchScreenState extends State<S30SearchScreen> {
-  final TextEditingController _searchController = TextEditingController(text: 'pay');
-  String _query = 'pay';
+  final _controller = TextEditingController();
+  List<IncidentModel> _incidents = [];
+  List<ServiceHealth> _services = [];
+  List<Map<String, dynamic>> _playbooks = [];
+  bool _loading = true;
+  String? _error;
 
-  final List<Map<String, String>> _allResults = [
-    {
-      'kind': 'Incident',
-      'title': 'INC-1042 · Elevated errors after deployment',
-      'route': 'incident_1042',
-    },
-    {
-      'kind': 'Service',
-      'title': 'payments-api · Degraded',
-      'route': 'service_detail',
-    },
-    {
-      'kind': 'Deployment',
-      'title': 'payments-api v2.8.1',
-      'route': 'deployment_detail',
-    },
-    {
-      'kind': 'Pull request',
-      'title': 'PR #214 · Tune DB pool settings',
-      'route': 'pr_summary',
-    },
-    {
-      'kind': 'Pipeline',
-      'title': '#319 · integration-tests failed',
-      'route': 'pipeline_job',
-    },
-    {
-      'kind': 'Incident',
-      'title': 'INC-1037 · Cache hit ratio dropped',
-      'route': 'pm_1037',
-    },
-    {
-      'kind': 'Service',
-      'title': 'orders-worker · Warning',
-      'route': 'inc_1041',
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
-  void _navigateToRoute(String route) {
-    switch (route) {
-      case 'incident_1042':
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const S05IncidentDetailsScreen()),
-        );
-        break;
-      case 'service_detail':
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const S12ServiceDetailsScreen()),
-        );
-        break;
-      case 'deployment_detail':
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const S14DeploymentDetailsScreen()),
-        );
-        break;
-      case 'pr_summary':
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const S24PullRequestSummaryScreen()),
-        );
-        break;
-      case 'pipeline_job':
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const S15FailedPipelineJobScreen()),
-        );
-        break;
-      case 'pm_1037':
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const S34Pm1037Screen()),
-        );
-        break;
-      case 'inc_1041':
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const S32Inc1041Screen()),
-        );
-        break;
+  Future<void> _load() async {
+    final api = ApiService();
+    try {
+      _incidents = await api.fetchIncidents();
+    } catch (e) {
+      _error = e is ApiException ? e.message : 'Could not load incidents.';
     }
+    // Services and playbooks are optional extras for the search.
+    try {
+      _services = await api.fetchServiceHealth();
+    } catch (_) {
+      _services = [];
+    }
+    try {
+      _playbooks = await api.fetchPlaybooks();
+    } catch (_) {
+      _playbooks = [];
+    }
+    if (mounted) setState(() => _loading = false);
   }
+
+  bool _match(String q, Iterable<String?> fields) => fields.any((f) => f != null && f.toLowerCase().contains(q));
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final q = _controller.text.trim().toLowerCase();
+    final incidents = q.isEmpty ? <IncidentModel>[] : _incidents.where((i) => _match(q, [i.title, i.serviceName, i.id, i.summary])).toList();
+    final services = q.isEmpty ? <ServiceHealth>[] : _services.where((s) => _match(q, [s.service])).toList();
+    final playbooks = q.isEmpty
+        ? <Map<String, dynamic>>[]
+        : _playbooks.where((p) => _match(q, [p['name']?.toString(), p['description']?.toString(), p['action_type']?.toString()])).toList();
+    final total = incidents.length + services.length + playbooks.length;
 
-    final q = _query.toLowerCase();
-    final results = _allResults.where((r) {
-      if (q.isEmpty) return true;
-      final k = r['kind']!.toLowerCase();
-      final t = r['title']!.toLowerCase();
-      return k.contains(q) || t.contains(q);
-    }).toList();
+    Widget row(IconData icon, String title, String sub, VoidCallback onTap) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: onTap,
+            child: FlowCard(
+              child: Row(children: [
+                Icon(icon, color: colors.accent, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text)),
+                    Text(sub, style: TextStyle(fontSize: 12, color: colors.muted), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ]),
+                ),
+                Icon(Icons.chevron_right, color: colors.muted),
+              ]),
+            ),
+          ),
+        );
+
+    Widget label(String t) => Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 8),
+          child: Text(t, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.52, color: colors.muted)),
+        );
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header: padding: 14px 16px 10px, gap: 10px
+            const FlowHeader(title: 'Search', subtitle: 'Incidents, services and playbooks'),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-              child: Row(
-                children: [
-                  const AppBackButton(),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Search',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                        color: colors.text,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Content: padding: 4px 16px 24px, gap: 14px
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Search Input Box
-                    Container(
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.accent, width: 2),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: Row(
-                        children: [
-                          Icon(Icons.search, size: 18, color: colors.muted),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextField(
-                              controller: _searchController,
-                              onChanged: (val) {
-                                setState(() {
-                                  _query = val.trim();
-                                });
-                              },
-                              style: TextStyle(fontSize: 15, color: colors.text),
-                              decoration: InputDecoration(
-                                isDense: true,
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.zero,
-                                hintText: 'Incidents, services, PRs, pipelines',
-                                hintStyle: TextStyle(fontSize: 15, color: colors.muted),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Section: RESULTS
-                    Text(
-                      'RESULTS',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.52,
-                        color: colors.muted,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-
-                    if (results.isNotEmpty)
-                      Container(
-                        decoration: BoxDecoration(
-                          color: colors.card,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: colors.border),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
+                controller: _controller,
+                autofocus: true,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Search…',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _controller.text.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () => setState(_controller.clear),
                         ),
-                        clipBehavior: Clip.antiAlias,
-                        child: Column(
-                          children: List.generate(results.length, (index) {
-                            final r = results[index];
-                            final hasBorder = index < results.length - 1;
-                            return InkWell(
-                              onTap: () => _navigateToRoute(r['route']!),
-                              child: Container(
-                                constraints: const BoxConstraints(minHeight: 58),
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                decoration: BoxDecoration(
-                                  border: hasBorder
-                                      ? Border(bottom: BorderSide(color: colors.border))
-                                      : null,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            r['kind']!,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                              color: colors.muted,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 1),
-                                          Text(
-                                            r['title']!,
-                                            style: TextStyle(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w500,
-                                              color: colors.text,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Icon(
-                                      Icons.chevron_right,
-                                      size: 18,
-                                      color: colors.muted,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }),
-                        ),
-                      )
-                    else
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 24.0),
-                        child: Text(
-                          'No results. Try a service name or an incident ID.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: colors.muted,
-                          ),
-                        ),
-                      ),
-                  ],
                 ),
               ),
+            ),
+            Expanded(
+              child: _loading
+                  ? const FlowMessage(icon: Icons.search, message: 'Loading…', busy: true)
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                      children: [
+                        if (_error != null) Text(_error!, style: TextStyle(fontSize: 12, color: colors.critical)),
+                        if (q.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 40),
+                            child: Center(
+                              child: Text('Type to search ${_incidents.length} incidents, ${_services.length} services and ${_playbooks.length} playbooks.',
+                                  textAlign: TextAlign.center, style: TextStyle(color: colors.muted)),
+                            ),
+                          )
+                        else if (total == 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 40),
+                            child: Center(child: Text('No results for "${_controller.text.trim()}".', style: TextStyle(color: colors.muted))),
+                          ),
+                        if (incidents.isNotEmpty) label('INCIDENTS'),
+                        ...incidents.map((i) => row(
+                              Icons.warning_amber_rounded,
+                              i.title,
+                              '${i.serviceName} · ${i.status.name} · ${i.severity.name}',
+                              () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => S05IncidentDetailsScreen(incidentId: i.id),
+                                  settings: RouteSettings(arguments: i.id),
+                                ),
+                              ),
+                            )),
+                        if (services.isNotEmpty) label('SERVICES'),
+                        ...services.map((s) => row(
+                              Icons.dns_outlined,
+                              s.service,
+                              s.status,
+                              () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => S12ServiceDetailsScreen(service: s.service),
+                                  settings: RouteSettings(arguments: s.service),
+                                ),
+                              ),
+                            )),
+                        if (playbooks.isNotEmpty) label('PLAYBOOKS'),
+                        ...playbooks.map((p) => row(
+                              Icons.playlist_play,
+                              p['name']?.toString() ?? '—',
+                              p['action_type']?.toString() ?? '',
+                              () => Navigator.push(context, MaterialPageRoute(builder: (_) => const S16RemediationPlaybooksScreen())),
+                            )),
+                      ],
+                    ),
             ),
           ],
         ),

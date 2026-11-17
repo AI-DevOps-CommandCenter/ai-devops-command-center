@@ -57,23 +57,11 @@ void main() {
       await expectLater(api.markNotificationAsRead('notif-101'), throwsA(isA<ApiException>()));
     });
 
-    test('ApiService registers and unregisters FCM device tokens', () async {
+    test('Device token calls report failure when the backend is unreachable', () async {
       final api = ApiService();
-      final regSuccess = await api.registerDeviceToken('test-fcm-token-123', platform: 'android');
-      expect(regSuccess, true);
-
-      final unregSuccess = await api.unregisterDeviceToken('test-fcm-token-123');
-      expect(unregSuccess, true);
-    });
-
-    test('ApiService loads and saves notification preferences', () async {
-      final api = ApiService();
-      final prefs = await api.fetchNotificationPreferences();
-      expect(prefs.containsKey('Push-Detection'), true);
-      expect(prefs['Push-Detection'], true);
-
-      final saved = await api.saveNotificationPreferences(prefs);
-      expect(saved, true);
+      // No backend in unit tests: registration must not pretend to succeed.
+      expect(await api.registerDeviceToken('test-fcm-token-123', platform: 'android'), false);
+      expect(await api.unregisterDeviceToken('test-fcm-token-123'), false);
     });
   });
 }

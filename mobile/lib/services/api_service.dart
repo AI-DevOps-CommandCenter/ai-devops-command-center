@@ -232,6 +232,46 @@ class ApiService {
     throw ApiException(_parseErrorMessage(response), response.statusCode);
   }
 
+  // ==========================================
+  // ADMIN: PLAYBOOKS, AUDIT LOG, TEAM, INTEGRATIONS
+  // (access is enforced by the database: RLS + role checks)
+  // ==========================================
+
+  Future<List<Map<String, dynamic>>> _getList(String path) async {
+    final response = await _safeGet('${ApiEndpoints.baseUrl}$path');
+    if (response.statusCode == 200) return _dataList(response);
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
+  }
+
+  Future<Map<String, dynamic>> _patchMap(String path, Map<String, dynamic> body) async {
+    final response = await _safePatch('${ApiEndpoints.baseUrl}$path', body: jsonEncode(body));
+    if (response.statusCode == 200) return _dataMap(response);
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
+  }
+
+  /// GET /api/admin/playbooks
+  Future<List<Map<String, dynamic>>> fetchPlaybooks() => _getList('/api/admin/playbooks');
+
+  /// PATCH /api/admin/playbooks/:id (admins only). Fields: name, description, enabled, requires_approval.
+  Future<Map<String, dynamic>> updatePlaybook(String id, Map<String, dynamic> fields) =>
+      _patchMap('/api/admin/playbooks/${Uri.encodeComponent(id)}', fields);
+
+  /// GET /api/audit-logs
+  Future<List<Map<String, dynamic>>> fetchAuditLogs({String? entityType, int limit = 50}) {
+    final q = <String>['limit=$limit', if (entityType != null && entityType.isNotEmpty) 'entity_type=$entityType'];
+    return _getList('/api/audit-logs?${q.join('&')}');
+  }
+
+  /// GET /api/admin/users (admins only)
+  Future<List<Map<String, dynamic>>> fetchUsers() => _getList('/api/admin/users?limit=100');
+
+  /// PATCH /api/admin/users/:id/role (admins only). role: admin | operator | user
+  Future<Map<String, dynamic>> updateUserRole(String id, String role) =>
+      _patchMap('/api/admin/users/${Uri.encodeComponent(id)}/role', {'role': role});
+
+  /// GET /api/admin/integrations
+  Future<List<Map<String, dynamic>>> fetchIntegrations() => _getList('/api/admin/integrations');
+
   /// GET /api/metrics/services – health of every service Prometheus scrapes.
   Future<List<ServiceHealth>> fetchServiceHealth() async {
     final response = await _safeGet('${ApiEndpoints.baseUrl}/api/metrics/services');
@@ -582,7 +622,7 @@ class ApiService {
 
       return response.statusCode == 200 || response.statusCode == 201;
     } catch (_) {
-      return true; // Graceful mock fallback
+      return false; // backend not reachable: not registered
     }
   }
 
@@ -604,49 +644,8 @@ class ApiService {
 
       return response.statusCode == 200;
     } catch (_) {
-      return true;
+      return false;
     }
   }
 
-  /// Load persistent user notification channel preferences
-  Future<Map<String, bool>> fetchNotificationPreferences() async {
-    // Default channels agreed with team: in_app, push, email, slack, discord
-    return {
-      'Push-Detection': true,
-      'Push-Approval requests': true,
-      'Push-Action results': true,
-      'Push-Resolution': true,
-      'Email-Detection': true,
-      'Email-Approval requests': true,
-      'Email-Action results': false,
-      'Email-Resolution': true,
-      'Slack-Detection': true,
-      'Slack-Approval requests': true,
-      'Slack-Action results': true,
-      'Slack-Resolution': true,
-      'Discord-Detection': false,
-      'Discord-Approval requests': false,
-      'Discord-Action results': false,
-      'Discord-Resolution': false,
-    };
-  }
-
-  /// Save user notification channel preferences
-  Future<bool> saveNotificationPreferences(Map<String, bool> preferences) async {
-    try {
-      final body = jsonEncode(preferences);
-      final response = await http
-          .put(
-            Uri.parse(ApiEndpoints.notificationPreferences),
-            headers: _headers(),
-            body: body,
-          )
-          .timeout(const Duration(seconds: 3));
-
-      if (response.statusCode == 200) {
-        return true;
-      }
-    } catch (_) {}
-    return true; // Local success fallback
-  }
 }

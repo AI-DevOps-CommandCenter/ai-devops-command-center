@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
-import 's27_notification_preferences_screen.dart';
+import '../widgets/flow_widgets.dart';
 
+/// S26 – live status of the services the command center depends on, checked
+/// through the backend, plus integration records stored by admins
+/// (GET /api/admin/integrations).
 class S26IntegrationsScreen extends StatefulWidget {
   const S26IntegrationsScreen({super.key});
 
@@ -9,480 +14,154 @@ class S26IntegrationsScreen extends StatefulWidget {
   State<S26IntegrationsScreen> createState() => _S26IntegrationsScreenState();
 }
 
-class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
-  String _lokiStatus = 'fail'; // 'fail', 'busy', 'ok'
+class _Check {
+  final String name;
+  final String purpose;
+  final IconData icon;
+  bool? ok;
+  String detail = 'Checking…';
+  _Check(this.name, this.purpose, this.icon);
+}
 
-  void _retryLoki() {
-    setState(() {
-      _lokiStatus = 'busy';
-    });
-    Future.delayed(const Duration(milliseconds: 1200), () {
-      if (mounted) {
-        setState(() {
-          _lokiStatus = 'ok';
-        });
-      }
-    });
+class _S26IntegrationsScreenState extends State<S26IntegrationsScreen> {
+  final _checks = [
+    _Check('Supabase', 'Sign-in, database and audit trail', Icons.storage_outlined),
+    _Check('Prometheus', 'Metrics, alerts and recovery checks', Icons.show_chart),
+    _Check('GitHub', 'Commits, pull requests and pipelines', Icons.code),
+  ];
+  List<Map<String, dynamic>> _records = [];
+  String? _recordsError;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    for (final c in _checks) {
+      c.ok = null;
+      c.detail = 'Checking…';
+    }
+    setState(() {});
+    final api = ApiService();
+
+    final supa = _checks[0];
+    final user = AuthService().currentUser;
+    supa.ok = user != null;
+    supa.detail = user == null ? 'Not signed in' : 'Signed in as ${user.email} (${user.roleLabel})';
+
+    await Future.wait([
+      () async {
+        final c = _checks[1];
+        try {
+          final services = await api.fetchServiceHealth();
+          final up = services.where((s) => s.up).length;
+          c.ok = true;
+          c.detail = '$up of ${services.length} scraped services up';
+        } catch (e) {
+          c.ok = false;
+          c.detail = e is ApiException ? e.message : 'Not reachable';
+        }
+      }(),
+      () async {
+        final c = _checks[2];
+        try {
+          final repos = await api.fetchRepositories();
+          c.ok = true;
+          c.detail = repos.isEmpty ? 'Connected, no repositories' : repos.map((r) => r.fullName).join(', ');
+        } catch (e) {
+          c.ok = false;
+          c.detail = e is ApiException && (e.statusCode == 503 || e.statusCode == 502)
+              ? 'Not connected – set GITHUB_TOKEN in backend/.env'
+              : e is ApiException
+                  ? e.message
+                  : 'Not reachable';
+        }
+      }(),
+      () async {
+        try {
+          _records = await api.fetchIntegrations();
+          _recordsError = null;
+        } catch (e) {
+          _records = [];
+          _recordsError = e is ApiException ? e.message : 'Could not load integration records.';
+        }
+      }(),
+    ]);
+    if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final summary =
-        _lokiStatus == 'ok' ? 'All 8 healthy' : '7 of 8 healthy';
-
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header: Integrations · summary
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-              child: Row(
-                children: [
-                  InkWell(
-                    onTap: () => Navigator.pop(context),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: colors.border),
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(Icons.chevron_left, size: 20, color: colors.text),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Integrations',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.2,
-                            color: colors.text,
-                          ),
-                        ),
-                        const SizedBox(height: 1),
-                        Text(
-                          summary,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: colors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Content
+            const FlowHeader(title: 'Integrations', subtitle: 'Checked live through the backend'),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                children: [
-                  // Core Integrations List Card
-                  Container(
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: colors.border),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        _buildIntegrationRow(
-                          name: 'GitHub',
-                          desc: 'Commits, PRs, pipelines',
-                          isGood: true,
-                          colors: colors,
+              child: RefreshIndicator(
+                onRefresh: _run,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                  children: [
+                    ..._checks.map((c) {
+                      final tone = c.ok == null ? colors.muted : c.ok! ? colors.success : colors.critical;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: FlowCard(
+                          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Icon(c.icon, color: colors.accent),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(c.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: colors.text)),
+                                Text(c.purpose, style: TextStyle(fontSize: 12, color: colors.muted)),
+                                const SizedBox(height: 6),
+                                Text(c.detail, style: TextStyle(fontSize: 13, color: colors.text)),
+                              ]),
+                            ),
+                            Icon(
+                              c.ok == null ? Icons.more_horiz : c.ok! ? Icons.check_circle : Icons.error_outline,
+                              color: tone,
+                            ),
+                          ]),
                         ),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            indent: 46,
-                            color: colors.border),
-                        _buildIntegrationRow(
-                          name: 'GitLab',
-                          desc: 'orders-worker repo',
-                          isGood: true,
-                          colors: colors,
-                        ),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            indent: 46,
-                            color: colors.border),
-                        _buildIntegrationRow(
-                          name: 'Prometheus',
-                          desc: 'Metrics · 30 s scrape',
-                          isGood: true,
-                          colors: colors,
-                        ),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            indent: 46,
-                            color: colors.border),
-                        _buildLokiRow(colors),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            indent: 46,
-                            color: colors.border),
-                        _buildIntegrationRow(
-                          name: 'n8n',
-                          desc: '3 investigation workflows',
-                          isGood: true,
-                          colors: colors,
-                        ),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            indent: 46,
-                            color: colors.border),
-                        _buildIntegrationRow(
-                          name: 'Groq API',
-                          desc: 'Log and root-cause analysis',
-                          isGood: true,
-                          colors: colors,
-                        ),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            indent: 46,
-                            color: colors.border),
-                        _buildIntegrationRow(
-                          name: 'Supabase',
-                          desc: 'Incidents and audit data',
-                          isGood: true,
-                          colors: colors,
-                        ),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            indent: 46,
-                            color: colors.border),
-                        _buildIntegrationRow(
-                          name: 'Firebase (FCM)',
-                          desc: 'Push notifications',
-                          isGood: true,
-                          colors: colors,
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Notification channels Header
-                  Text(
-                    'NOTIFICATION CHANNELS',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.52,
-                      color: colors.muted,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Notification Channels Card
-                  Container(
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: colors.border),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        InkWell(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const S27NotificationPreferencesScreen(),
-                              ),
-                            );
-                          },
-                          child: _buildChannelRow(
-                            icon: Icons.chat_bubble_outline,
-                            name: 'Slack',
-                            desc: '#payments-oncall · webhook',
-                            badgeText: 'Connected',
-                            badgeColor: colors.ok,
-                            badgeBg: colors.ok.withOpacity(0.13),
-                            colors: colors,
-                          ),
-                        ),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            indent: 46,
-                            color: colors.border),
-                        InkWell(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const S27NotificationPreferencesScreen(),
-                              ),
-                            );
-                          },
-                          child: _buildChannelRow(
-                            icon: Icons.chat_bubble_outline,
-                            name: 'Discord',
-                            desc: 'Not connected',
-                            badgeText: 'Connect',
-                            badgeColor: colors.accent,
-                            badgeBg: colors.accent.withOpacity(0.16),
-                            colors: colors,
-                          ),
-                        ),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            indent: 46,
-                            color: colors.border),
-                        InkWell(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const S27NotificationPreferencesScreen(),
-                              ),
-                            );
-                          },
-                          child: _buildChannelRow(
-                            icon: Icons.mail_outline,
-                            name: 'Email',
-                            desc: 'alex.morgan@demo.dev',
-                            badgeText: 'Connected',
-                            badgeColor: colors.ok,
-                            badgeBg: colors.ok.withOpacity(0.13),
-                            colors: colors,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                      );
+                    }),
+                    const SizedBox(height: 6),
+                    Text('n8n automation is called by the backend over signed webhooks; its status is in the health check script (scripts/check-project.mjs).',
+                        style: TextStyle(fontSize: 12, color: colors.muted, height: 1.4)),
+                    const SizedBox(height: 16),
+                    Text('STORED INTEGRATIONS',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.52, color: colors.muted)),
+                    const SizedBox(height: 8),
+                    if (_recordsError != null)
+                      FlowCard(child: Text(_recordsError!, style: TextStyle(fontSize: 13, color: colors.muted)))
+                    else if (_records.isEmpty)
+                      FlowCard(child: Text('None stored yet.', style: TextStyle(fontSize: 13, color: colors.muted)))
+                    else
+                      ..._records.map((r) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: FlowCard(
+                              child: Row(children: [
+                                Expanded(
+                                  child: Text('${r['name'] ?? r['type'] ?? 'Integration'}',
+                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text)),
+                                ),
+                                Text(r['enabled'] == false ? 'disabled' : 'enabled',
+                                    style: TextStyle(fontSize: 12, color: colors.muted)),
+                              ]),
+                            ),
+                          )),
+                  ],
+                ),
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildIntegrationRow({
-    required String name,
-    required String desc,
-    required bool isGood,
-    required dynamic colors,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Row(
-        children: [
-          Icon(Icons.power_outlined, size: 20, color: colors.muted),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: colors.text,
-                  ),
-                ),
-                Text(
-                  desc,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: colors.muted,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (isGood)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-              decoration: BoxDecoration(
-                color: colors.ok.withOpacity(0.13),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                'Connected',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: colors.ok,
-                  height: 1.5,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLokiRow(dynamic colors) {
-    String desc;
-    if (_lokiStatus == 'ok') {
-      desc = 'Synced just now';
-    } else if (_lokiStatus == 'busy') {
-      desc = 'Retrying…';
-    } else {
-      desc = 'Last sync 2 h ago · check credentials';
-    }
-
-    final isGood = _lokiStatus == 'ok';
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Row(
-        children: [
-          Icon(Icons.power_outlined, size: 20, color: colors.muted),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Loki',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: colors.text,
-                  ),
-                ),
-                Text(
-                  desc,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: colors.muted,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (isGood)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-              decoration: BoxDecoration(
-                color: colors.ok.withOpacity(0.13),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                'Connected',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: colors.ok,
-                  height: 1.5,
-                ),
-              ),
-            )
-          else
-            SizedBox(
-              height: 36,
-              child: ElevatedButton(
-                onPressed: _lokiStatus == 'busy' ? null : _retryLoki,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: colors.critical,
-                  foregroundColor: colors.card,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: Text(
-                  _lokiStatus == 'busy' ? 'Retrying…' : 'Retry',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildChannelRow({
-    required IconData icon,
-    required String name,
-    required String desc,
-    required String badgeText,
-    required Color badgeColor,
-    required Color badgeBg,
-    required dynamic colors,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: colors.muted),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: colors.text,
-                  ),
-                ),
-                Text(
-                  desc,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: colors.muted,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-            decoration: BoxDecoration(
-              color: badgeBg,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              badgeText,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: badgeColor,
-                height: 1.5,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
