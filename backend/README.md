@@ -84,7 +84,7 @@ npm install
 
 Create a `.env` file inside the backend directory (or use the repository-root `.env`).
 
-Add the following variables:
+Copy `backend/.env.example` to `backend/.env` and fill it in. The minimum is:
 
 ```env
 SUPABASE_URL=your_supabase_project_url
@@ -114,6 +114,11 @@ Variables already set in the environment always win, and the first file that def
 | `MACHINE_SIGNING_SECRET` | for n8n | – | Shared HMAC secret for n8n requests (at least 32 characters). Same value in n8n's credential store. |
 | `AUTOMATION_EMAIL` | for n8n | – | Sign-in email of the dedicated automation user (profile role `automation`, set by the database owner). |
 | `AUTOMATION_PASSWORD` | for n8n | – | Its password. Backend secret store only, never in n8n or Flutter. |
+| `N8N_REMEDIATION_WEBHOOK_URL` | for remediation | – | n8n workflow 06 webhook, called after an approval (BD-5). HTTPS outside localhost, path `/webhook/remediation`. |
+| `PROMETHEUS_URL` | for `/api/metrics` | – | Prometheus base URL. Unset = 503. |
+| `LOKI_URL` | for `/api/logs` | – | Loki base URL. Unset = 503. |
+| `GITHUB_TOKEN`, `GITHUB_REPOSITORIES` | for `/api/github` | – | Read-only fine-grained token and the `owner/repo` allow-list. Unset = 503. |
+| `SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`, `SMTP_*`, `EMAIL_FROM` | for the notification worker | – | Optional channels for `npm run worker:notifications:dev`. |
 
 The three n8n variables enable `/api/machine/*`. All three must be set together, otherwise startup fails with the name of the missing variable. Without them the machine endpoints answer 503. How the automation user is provisioned and rotated is still open (decision A5-Q2).
 
@@ -192,7 +197,7 @@ The backend validates the token with Supabase Auth (publishable key only) and cr
 GET /api/me
 ```
 
-Requires a valid access token.
+Requires a valid access token. Returns `user: { id, email, role?, full_name? }`; `role` and `full_name` come from the caller's `profiles` row (read with the caller's JWT).
 
 ## 10. API Route Groups
 
@@ -211,6 +216,10 @@ Requires a valid access token.
 | `/api/admin/playbooks` | Playbook administration |
 | `/api/admin/integrations` | Integration administration |
 | `/api/machine` | n8n machine endpoints (signed requests, automation identity) |
+| `/api/metrics` | Read-only service health and metric series from Prometheus (`/services`, `/services/:service?window=`) |
+| `/api/logs` | Read-only service logs from Loki (`/services/:service?minutes=&level=errors\|all&limit=`) |
+| `/api/github` | Read-only GitHub data for allow-listed repositories: repositories, commits, pull requests, workflow runs and jobs |
+| `/api/notifications`, `/api/device-tokens` | In-app notification feed, read state, push device tokens |
 
 Protected routes require authentication. Individual endpoints enforce authorization and database Row Level Security policies.
 
@@ -293,7 +302,8 @@ A contract guard (`tests/rpc-contract.test.ts`) fails if any code writes `approv
 ### Integration status
 
 - **Database-function switch: done.** Approval and playbook-run writes use the database functions. Remediation executions are read-only (410 on write), and the backend writes no audit entries: the database functions and triggers write exactly one entry per action (database test suite 14).
-- **n8n machine endpoints: implemented, not yet enabled.** They need the automation user and the three variables from section 6 (decision A5-Q2: who provisions and rotates them).
+- **n8n machine endpoints: enabled and tested end to end (17 Nov 2026).** Incident intake (BD-1), AI analysis (BD-2), recovery checks (BD-3), incident context and postmortems (BD-4), run start/complete, and the outgoing remediation webhook (BD-5) all run against the staging database.
+- `PATCH /api/incidents/:id` sets `resolved_at` when the status becomes `resolved` or `closed` and clears it when the incident is reopened.
 - Existing controllers keep their inline role checks and manual validation; moving them to `requireRole()` and the Zod schemas is a later clean-up.
 - Requests under `/api/admin/playbooks` and `/api/admin/integrations` are authenticated twice (the `/api/admin` router also runs `authenticateToken`). Responses are correct; fix it when the routes are consolidated.
 - Password reset is not yet ported.
