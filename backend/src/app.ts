@@ -50,6 +50,8 @@ import {
 import notificationRoutes from "./routes/notification.routes.js";
 import deviceTokenRoutes from "./routes/device-token.routes.js";
 import { createMetricsRouter } from "./routes/metrics.routes.js";
+import { createLogsRouter } from "./routes/logs.routes.js";
+import { createLokiClient, type LokiClient } from "./services/logs.service.js";
 import {
   createPrometheusClient,
   type PrometheusClient
@@ -67,6 +69,9 @@ export interface AppOptions {
   // Prometheus client for /api/metrics. undefined = PROMETHEUS_URL from the
   // environment; null = disabled (the endpoints answer 503).
   prometheus?: PrometheusClient | null;
+  // Loki client for /api/logs. undefined = LOKI_URL from the environment;
+  // null = disabled (the endpoints answer 503).
+  loki?: LokiClient | null;
   // Read-only GitHub integration. undefined = read from the environment;
   // null = disabled (the endpoints answer 503).
   github?: GitHubService | null;
@@ -77,6 +82,13 @@ function prometheusFromEnv(): PrometheusClient | null {
   if (!url) return null;
   if (!/^https?:\/\//.test(url)) throw new Error("PROMETHEUS_URL must be an http(s) URL.");
   return createPrometheusClient(url);
+}
+
+function lokiFromEnv(): LokiClient | null {
+  const url = process.env.LOKI_URL?.trim();
+  if (!url) return null;
+  if (!/^https?:\/\//.test(url)) throw new Error("LOKI_URL must be an http(s) URL.");
+  return createLokiClient(url);
 }
 
 // GitHub endpoints are enabled only when GITHUB_TOKEN and
@@ -185,6 +197,10 @@ export function createApp(
     createMetricsRouter(
       options.prometheus === undefined ? prometheusFromEnv() : options.prometheus
     )
+  );
+  app.use(
+    "/api/logs",
+    createLogsRouter(options.loki === undefined ? lokiFromEnv() : options.loki)
   );
   app.use(
     "/api/github",
