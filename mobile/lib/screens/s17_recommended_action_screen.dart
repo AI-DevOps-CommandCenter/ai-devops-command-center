@@ -368,7 +368,7 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
                   );
                 },
                 icon: Icon(Icons.auto_awesome, size: 18, color: colors.text),
-                label: Text('Ask assistant',
+                label: Text('All AI analyses',
                     style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: colors.text)),
                 style: OutlinedButton.styleFrom(
                   backgroundColor: colors.card,

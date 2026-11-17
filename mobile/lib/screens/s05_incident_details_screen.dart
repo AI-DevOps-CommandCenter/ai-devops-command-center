@@ -388,7 +388,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const S09LogsExplorerScreen(),
+                        builder: (context) => S09LogsExplorerScreen(service: incident.serviceName),
                       ),
                     );
                   },

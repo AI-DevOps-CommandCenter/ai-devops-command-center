@@ -112,7 +112,11 @@ class NotificationService {
   /// Deep Link Navigator: Navigates to target screen based on Notification category
   void handleDeepLink(BuildContext context, NotificationModel notification) {
     final category = notification.category;
-    final incidentId = notification.incidentId ?? 'INC-1042';
+    final incidentId = notification.incidentId;
+    if (incidentId == null || incidentId.isEmpty) {
+      Navigator.pushNamed(context, '/notifications');
+      return;
+    }
 
     switch (category) {
       case NotificationCategory.incidentAlert:

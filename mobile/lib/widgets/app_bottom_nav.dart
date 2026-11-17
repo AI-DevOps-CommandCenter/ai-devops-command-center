@@ -3,7 +3,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../theme/app_colors.dart';
 
 /// Bottom navigation — exact copy of the prototype's <nav aria-label="Main">:
-/// Home · Incidents · Monitor · CI/CD · Assistant
+/// Home · Incidents · Monitor · CI/CD · AI
 /// (padding 6/6/18, pill 56x30, label 12px, icons 20px / stroke 2)
 class AppBottomNav extends StatelessWidget {
   final int? currentIndex;
@@ -25,7 +25,7 @@ class AppBottomNav extends StatelessWidget {
     '/assistant',
   ];
 
-  static const _labels = ['Home', 'Incidents', 'Monitor', 'CI/CD', 'Assistant'];
+  static const _labels = ['Home', 'Incidents', 'Monitor', 'CI/CD', 'AI'];
 
   // Inner SVG paths copied 1:1 from the prototype (24x24 viewBox).
   static const _icons = [

@@ -272,6 +272,15 @@ class ApiService {
   /// GET /api/admin/integrations
   Future<List<Map<String, dynamic>>> fetchIntegrations() => _getList('/api/admin/integrations');
 
+  /// GET /api/logs/services/:service – recent log lines from Loki (newest first).
+  Future<List<LogLineModel>> fetchServiceLogs(String service,
+      {int minutes = 15, bool errorsOnly = true, int limit = 100}) async {
+    final response = await _safeGet('${ApiEndpoints.baseUrl}/api/logs/services/${Uri.encodeComponent(service)}'
+        '?minutes=$minutes&level=${errorsOnly ? 'errors' : 'all'}&limit=$limit');
+    if (response.statusCode == 200) return _dataList(response).map(LogLineModel.fromJson).toList();
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
+  }
+
   /// GET /api/metrics/services – health of every service Prometheus scrapes.
   Future<List<ServiceHealth>> fetchServiceHealth() async {
     final response = await _safeGet('${ApiEndpoints.baseUrl}/api/metrics/services');
@@ -554,25 +563,15 @@ class ApiService {
     required String runId,
     required String reason,
   }) async {
-    final payload = jsonEncode({
-      'reason': reason,
-    });
-
-    try {
-      final url = ApiEndpoints.playbookRunCancel(runId);
-      final response = await http
-          .post(Uri.parse(url), headers: _headers(), body: payload)
-          .timeout(const Duration(seconds: 4));
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      }
-    } catch (_) {}
-
-    return {
-      'success': true,
-      'message': 'Playbook run cancelled.',
-    };
+    final response = await _safePost(
+      ApiEndpoints.playbookRunCancel(runId),
+      body: jsonEncode({'reason': reason}),
+    );
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      return decoded is Map<String, dynamic> ? decoded : {'success': true};
+    }
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
   }
 
   // ==========================================

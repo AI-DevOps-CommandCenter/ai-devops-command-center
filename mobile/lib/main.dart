@@ -32,19 +32,11 @@ import 'screens/s28_profile_screen.dart';
 import 'screens/s29_forgot_password_screen.dart';
 import 'screens/s30_search_screen.dart';
 import 'screens/s31_reject_action_screen.dart';
-import 'screens/s32_inc_1041_screen.dart';
-import 'screens/s33_inc_1040_screen.dart';
-import 'screens/s34_pm_1037_screen.dart';
-import 'screens/s35_pm_1033_screen.dart';
-import 'screens/s36_pm_1029_screen.dart';
 import 'screens/s37_team_screen.dart';
 import 'screens/s38_playbook_edit_screen.dart';
 import 'screens/s39_audit_log_screen.dart';
 import 'screens/s40_loading_screen.dart';
 import 'screens/s41_all_clear_screen.dart';
-import 'screens/s42_logs_error_screen.dart';
-import 'screens/s43_offline_screen.dart';
-import 'screens/s44_rollback_failed_screen.dart';
 import 'screens/s45_brand_screen.dart';
 import 'services/notification_service.dart';
 
@@ -166,15 +158,7 @@ class DevOpsCommandCenterApp extends StatelessWidget {
             '/audit-log': (context) => const S39AuditLogScreen(),
             '/loading': (context) => const S40LoadingScreen(),
             '/all-clear': (context) => const S41AllClearScreen(),
-            '/logs-error': (context) => const S42LogsErrorScreen(),
-            '/offline': (context) => const S43OfflineScreen(),
-            '/rollback-failed': (context) => const S44RollbackFailedScreen(),
             '/brand': (context) => const S45BrandScreen(),
-            '/inc-1041': (context) => const S32Inc1041Screen(),
-            '/inc-1040': (context) => const S33Inc1040Screen(),
-            '/pm-1037': (context) => const S34Pm1037Screen(),
-            '/pm-1033': (context) => const S35Pm1033Screen(),
-            '/pm-1029': (context) => const S36Pm1029Screen(),
           },
         );
       },

@@ -1,457 +1,202 @@
 import 'package:flutter/material.dart';
+import '../models/service_metrics_model.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
-import 's23_developer_assistant_screen.dart';
+import '../widgets/flow_widgets.dart';
 
+/// S09 – recent log lines of a service from Loki (GET /api/logs/services/:service).
+/// "Errors" uses the same filter as the n8n log analysis (workflow 02).
 class S09LogsExplorerScreen extends StatefulWidget {
-  const S09LogsExplorerScreen({super.key});
+  final String? service;
+
+  const S09LogsExplorerScreen({super.key, this.service});
 
   @override
   State<S09LogsExplorerScreen> createState() => _S09LogsExplorerScreenState();
 }
 
 class _S09LogsExplorerScreenState extends State<S09LogsExplorerScreen> {
-  final TextEditingController _searchController =
-      TextEditingController(text: 'connection timeout');
-  String _selectedLevel = 'All';
+  static const _windows = [15, 60, 360];
 
-  final List<Map<String, dynamic>> _allLogs = const [
-    {
-      't': '14:07:11.402',
-      'lvl': 'ERROR',
-      'msg': 'connection timeout after 500ms (db-primary)',
-      'hit': true,
-    },
-    {
-      't': '14:07:14.119',
-      'lvl': 'WARN',
-      'msg': 'pool exhausted 20/20, waiting for free connection',
-      'hit': false,
-    },
-    {
-      't': '14:07:15.880',
-      'lvl': 'ERROR',
-      'msg': 'POST /charge 500 · connection timeout',
-      'hit': true,
-    },
-    {
-      't': '14:06:58.824',
-      'lvl': 'INFO',
-      'msg': 'POST /charge 200 · 190ms',
-      'hit': false,
-    },
-    {
-      't': '14:05:30.012',
-      'lvl': 'INFO',
-      'msg': 'service started v2.8.1 on :8080',
-      'hit': false,
-    },
-    {
-      't': '14:05:28.980',
-      'lvl': 'INFO',
-      'msg': 'loaded config DB_POOL_TIMEOUT=500',
-      'hit': true,
-    },
-  ];
+  String? _service;
+  List<String> _services = [];
+  int _minutes = 60;
+  bool _errorsOnly = true;
+  List<LogLineModel> _lines = [];
+  bool _loading = true;
+  String? _error;
+  bool _started = false;
+  final Set<int> _expanded = {};
 
   @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_started) {
+      _started = true;
+      final args = ModalRoute.of(context)?.settings.arguments;
+      _service = (args is String && args.isNotEmpty) ? args : widget.service;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      _expanded.clear();
+    });
+    final api = ApiService();
+    try {
+      if (_services.isEmpty) {
+        try {
+          _services = (await api.fetchServiceHealth()).map((s) => s.service).toList();
+        } catch (_) {
+          _services = [];
+        }
+      }
+      _service ??= _services.contains('sample-app') ? 'sample-app' : (_services.isNotEmpty ? _services.first : 'sample-app');
+      final lines = await api.fetchServiceLogs(_service!, minutes: _minutes, errorsOnly: _errorsOnly, limit: 200);
+      if (!mounted) return;
+      setState(() {
+        _lines = lines;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e is ApiException ? e.message : 'Could not load logs.';
+      });
+    }
+  }
+
+  String _windowLabel(int m) => m < 60 ? '$m min' : '${m ~/ 60} h';
+
+  Color _levelColor(AppColorScheme colors, String? level) => switch (level?.toLowerCase()) {
+        'error' || 'critical' || 'fatal' => colors.critical,
+        'warning' || 'warn' => colors.warning,
+        'debug' => colors.muted,
+        _ => colors.info,
+      };
+
+  String _clock(DateTime t) {
+    final l = t.toLocal();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(l.hour)}:${two(l.minute)}:${two(l.second)}';
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final filteredLogs = _allLogs.where((r) {
-      if (_selectedLevel == 'All') return true;
-      return r['lvl'] == _selectedLevel;
-    }).toList();
+    Widget chip(String label, bool selected, VoidCallback onTap) => Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: ChoiceChip(label: Text(label), selected: selected, onSelected: (_) => onTap()),
+        );
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // Header: Monitor · payments-api · last hour · Loki · Live
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Monitor',
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.52,
-                          color: colors.text,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'payments-api · last hour · Loki',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: colors.muted,
-                        ),
-                      ),
-                    ],
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: colors.ok.withOpacity(0.13),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      'Live',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: colors.ok,
-                        height: 1.5,
-                      ),
-                    ),
-                  ),
+            FlowHeader(title: 'Logs', subtitle: '${_service ?? '…'} · Loki · last ${_windowLabel(_minutes)}'),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(children: [
+                chip('Errors', _errorsOnly, () {
+                  _errorsOnly = true;
+                  _load();
+                }),
+                chip('All', !_errorsOnly, () {
+                  _errorsOnly = false;
+                  _load();
+                }),
+                const SizedBox(width: 8),
+                ..._windows.map((w) => chip(_windowLabel(w), _minutes == w, () {
+                      _minutes = w;
+                      _load();
+                    })),
+                if (_services.length > 1) ...[
+                  const SizedBox(width: 8),
+                  ..._services.map((s) => chip(s, _service == s, () {
+                        _service = s;
+                        _load();
+                      })),
                 ],
-              ),
+              ]),
             ),
-
-            // Content
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                children: [
-                  // Sub-nav tabs: Services, Logs (active), Metrics
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: colors.cardSecondary,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: InkWell(
-                            onTap: () {
-                              Navigator.pushReplacementNamed(context, '/services');
-                            },
-                            child: Container(
-                              height: 38,
-                              alignment: Alignment.center,
-                              child: Text(
-                                'Services',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.muted,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Container(
-                            height: 38,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: colors.card,
-                              borderRadius: BorderRadius.circular(9),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Color.fromRGBO(0, 0, 0, 0.18),
-                                  blurRadius: 2,
-                                  offset: Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                            child: Text(
-                              'Logs',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: colors.text,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: InkWell(
-                            onTap: () {
-                              Navigator.pushReplacementNamed(context, '/metrics');
-                            },
-                            child: Container(
-                              height: 38,
-                              alignment: Alignment.center,
-                              child: Text(
-                                'Metrics',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.muted,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // Search bar
-                  Container(
-                    height: 48,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.search, size: 18, color: colors.muted),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: _searchController,
-                            style: TextStyle(
-                              fontFamily: 'JetBrains Mono',
-                              fontSize: 14,
-                              color: colors.text,
-                            ),
-                            decoration: const InputDecoration(
-                              hintText: 'Search logs',
-                              isDense: true,
-                              border: InputBorder.none,
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // Level filters
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        _buildLevelChip(context, 'All', '3.8k'),
-                        const SizedBox(width: 6),
-                        _buildLevelChip(context, 'ERROR', '214'),
-                        const SizedBox(width: 6),
-                        _buildLevelChip(context, 'WARN', '88'),
-                        const SizedBox(width: 6),
-                        _buildLevelChip(context, 'INFO', '3.5k'),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // Log rows list
-                  ...filteredLogs.map((r) => _buildLogRow(context, r)),
-
-                  const SizedBox(height: 6),
-
-                  // Pattern found card
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(Icons.bolt, color: colors.warning, size: 18),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: RichText(
-                                text: TextSpan(
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: colors.text,
-                                    height: 1.45,
-                                  ),
-                                  children: const [
-                                    TextSpan(
-                                      text: 'Pattern found: ',
-                                      style: TextStyle(fontWeight: FontWeight.bold),
-                                    ),
-                                    TextSpan(
-                                      text:
-                                          '“connection timeout” ×212 since 14:07, all after 500 ms.',
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          height: 48,
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const S23DeveloperAssistantScreen(),
-                                ),
-                              );
-                            },
-                            icon: Icon(Icons.auto_awesome, size: 18, color: colors.text),
-                            label: Text(
-                              'Explain with AI',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: colors.text,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: colors.card,
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                side: BorderSide(color: colors.border),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Bottom Nav
-            const AppBottomNav(currentIndex: 2),
+            const SizedBox(height: 8),
+            Expanded(child: _body(colors)),
           ],
         ),
       ),
+      bottomNavigationBar: const AppBottomNav(currentRoute: 'monitor'),
     );
   }
 
-  Widget _buildLevelChip(BuildContext context, String level, String count) {
-    final colors = context.colors;
-    final isSelected = _selectedLevel == level;
-
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _selectedLevel = level;
-        });
-      },
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: isSelected ? colors.accent : colors.card,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: isSelected ? colors.accent : colors.border,
-          ),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          '$level $count',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: isSelected ? colors.onAccent : colors.text,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLogRow(BuildContext context, Map<String, dynamic> r) {
-    final colors = context.colors;
-    final lvl = r['lvl'] as String;
-    final hit = r['hit'] as bool;
-
-    Color fg;
-    Color bg;
-    if (lvl == 'ERROR') {
-      fg = colors.critical;
-      bg = colors.critical.withOpacity(0.14);
-    } else if (lvl == 'WARN') {
-      fg = colors.warning;
-      bg = colors.warning.withOpacity(0.14);
-    } else {
-      fg = colors.info;
-      bg = colors.info.withOpacity(0.14);
+  Widget _body(AppColorScheme colors) {
+    if (_loading) return const FlowMessage(icon: Icons.receipt_long_outlined, message: 'Loading logs…', busy: true);
+    if (_error != null) return FlowMessage(icon: Icons.error_outline, message: _error!, onRetry: _load);
+    if (_lines.isEmpty) {
+      return FlowMessage(
+        icon: Icons.verified_outlined,
+        message: _errorsOnly
+            ? 'No error or warning lines in the last ${_windowLabel(_minutes)}.'
+            : 'No log lines in the last ${_windowLabel(_minutes)}.',
+        onRetry: _load,
+      );
     }
-
-    final edge = hit ? colors.warning : colors.border;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: colors.card,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: edge),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        itemCount: _lines.length,
+        itemBuilder: (_, i) {
+          final l = _lines[i];
+          final open = _expanded.contains(i);
+          final tone = _levelColor(colors, l.level);
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => setState(() => open ? _expanded.remove(i) : _expanded.add(i)),
+              child: Container(
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: bg,
-                  borderRadius: BorderRadius.circular(6),
+                  color: colors.logBg,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border(left: BorderSide(color: tone, width: 3)),
                 ),
-                child: Text(
-                  lvl,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: fg,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Text(_clock(l.time), style: TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono', color: colors.muted)),
+                      const SizedBox(width: 8),
+                      Text((l.level ?? 'log').toUpperCase(),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: tone)),
+                      if (l.logger != null) ...[
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(l.logger!,
+                              style: TextStyle(fontSize: 11, color: colors.muted), overflow: TextOverflow.ellipsis),
+                        ),
+                      ],
+                    ]),
+                    const SizedBox(height: 4),
+                    Text(
+                      open ? l.raw : l.message,
+                      maxLines: open ? null : 3,
+                      overflow: open ? null : TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, fontFamily: 'JetBrains Mono', color: colors.text, height: 1.35),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                r['t'] as String,
-                style: TextStyle(
-                  fontFamily: 'JetBrains Mono',
-                  fontSize: 12,
-                  color: colors.muted,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            r['msg'] as String,
-            style: TextStyle(
-              fontFamily: 'JetBrains Mono',
-              fontSize: 13,
-              height: 1.5,
-              color: colors.text,
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

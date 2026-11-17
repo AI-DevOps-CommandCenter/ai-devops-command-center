@@ -87,6 +87,25 @@ class ServiceMetrics {
   }
 }
 
+/// One log line from GET /api/logs/services/:service (Loki).
+class LogLineModel {
+  final DateTime time;
+  final String? level;
+  final String message;
+  final String? logger;
+  final String raw;
+
+  LogLineModel({required this.time, this.level, required this.message, this.logger, required this.raw});
+
+  factory LogLineModel.fromJson(Map<String, dynamic> json) => LogLineModel(
+        time: DateTime.tryParse(json['time']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0),
+        level: json['level']?.toString(),
+        message: json['message']?.toString() ?? '',
+        logger: json['logger']?.toString(),
+        raw: json['raw']?.toString() ?? '',
+      );
+}
+
 /// Display helpers shared by the metric screens.
 class MetricFormat {
   static String percent(double? v) => v == null ? '—' : '${(v * 100).toStringAsFixed(v < 0.1 ? 2 : 1)}%';

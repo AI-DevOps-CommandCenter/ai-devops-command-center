@@ -164,7 +164,7 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                     ),
                     const SizedBox(height: 10),
 
-                    // Filter Chips (Resolved, payments-api, catalog-api)
+                    // Filter chips: Resolved + one per service
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(
