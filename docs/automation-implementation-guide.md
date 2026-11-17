@@ -157,5 +157,5 @@ Status values separate four situations:
 
   For alerts, BD-1 must be idempotent on the fingerprint for the same reason.
 - Metric names, labels and the error-rate query must be agreed with the monitoring owner.
-- `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` is needed for the HMAC secret (decision D-N8N-1).
+- `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` is needed for the HMAC secret (decision D-N8N-1, approved 17 Nov 2026 as register D-010).
 - Sub-workflow ids are fixed (`dc33wf..`). Importing through the CLI keeps them; importing through the editor UI may give new ids, so the Execute Workflow nodes must then be re-selected.

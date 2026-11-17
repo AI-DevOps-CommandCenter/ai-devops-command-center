@@ -2,6 +2,8 @@
 
 **Status:** proposals only (12 Nov 2026), prepared on the n8n side for the owner of `database/DATABASE_DECISION_REGISTER.md`. Nothing here changes the register, the contract or the security configuration. Once the team decides, the register owner records the outcome and the n8n side follows it.
 
+**Update 17 Nov 2026:** D-N8N-1 is decided (option A, register D-010). D-N8N-6 (KI-1) is still a proposal; it is planned for 19 Nov.
+
 ---
 
 ## D-N8N-1: how n8n Code nodes get `MACHINE_SIGNING_SECRET`
@@ -32,7 +34,7 @@ With `true`, the Code nodes cannot read the secret, so no signed backend call an
 
 **Proposal:** adopt **A** for local development and the project demo, recorded as an explicit, time-limited exception to A5 with the mitigations above. Revisit B before any shared or hosted deployment. Then align the contract wording (B.3) with the decision.
 
-**Decision needed from:** the decision-register owner (database team) together with the team (A5 owner).
+**Decision (17 Nov 2026): option A approved** by the team leader. It is recorded as **D-010** in `database/DATABASE_DECISION_REGISTER.md` §2e, with the conditions, and contract B.3 now notes the exception.
 
 ---
 

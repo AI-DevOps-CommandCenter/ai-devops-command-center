@@ -149,7 +149,7 @@ receivers:
 
 | ID | Decision | Why it is open | Recommendation |
 |---|---|---|---|
-| **D-N8N-1** | `N8N_BLOCK_ENV_ACCESS_IN_NODE` | Contract B.3 (A5) says `true`. With `true`, a Code node cannot read `MACHINE_SIGNING_SECRET`, and n8n Community Edition has no other secret store a Code node can use (external secrets and `$secrets` are paid features). The workflows need `false`. | Keep `false`, pass **only** the listed variables into the container (done in `docker-compose.yml`), keep API keys in Credentials, limit who can edit workflows. Record this in the decision register. |
+| **D-N8N-1** | `N8N_BLOCK_ENV_ACCESS_IN_NODE` | Contract B.3 (A5) says `true`. With `true`, a Code node cannot read `MACHINE_SIGNING_SECRET`, and n8n Community Edition has no other secret store a Code node can use (external secrets and `$secrets` are paid features). The workflows need `false`. | **Decided 17 Nov 2026 (register D-010):** keep `false` as a time-limited exception to A5. Pass **only** the listed variables into the container (done in `docker-compose.yml`), keep API keys in Credentials, one trusted n8n owner. Revisit before a hosted deployment. |
 | D-N8N-2 | Recovery verdict → database status | `recovery_checks.status` allows `pending\|healthy\|unhealthy\|failed`. Mapping used: recovered → `healthy`, not recovered → `unhealthy`, unable to verify → `failed`. | Confirm with the database owner. |
 | D-N8N-3 | Root cause storage | `record_ai_analysis` has `p_root_cause`; the contract body (ai-output schema) has no `root_cause` (R11). 05 sends `root_cause` as an extra field. | Add `root_cause` to the contract when BD-2 is built. |
 | D-N8N-4 | Alert severity mapping | Alertmanager `warning` → incident `medium`, `page` → `critical`, unknown → `medium` | Confirm with the team. |
@@ -185,4 +185,4 @@ No run was started or completed twice. **Limits:** the backend was a mock; the p
 | KI-1 nonce race | Backend + database team | Agree and provide an atomic shared nonce store | Documented; strict failing test kept |
 | BD-1 | Backend + database team | Contract, migration and route to create an incident from an alert (idempotent on fingerprint) | 01 node "Create incident (backend) – BLOCKED" |
 | BD-2 | Backend team (contract with Vishwa) | Finalize and implement the AI-analysis storage route (`/investigations/:id/analysis` or incident-level), plus `root_cause` (D-N8N-3) | 05 already signs and sends; 404 → `not_implemented` |
-| D-N8N-1 | Decision-register owner (database team) / team | Confirm env access for `MACHINE_SIGNING_SECRET` or choose another secret-injection method | `false` in `docker-compose.yml`, pending decision |
+| D-N8N-1 | Decision-register owner (database team) / team | Confirm env access for `MACHINE_SIGNING_SECRET` or choose another secret-injection method | ✅ Decided 17 Nov 2026: `false` kept as an exception (register D-010) |

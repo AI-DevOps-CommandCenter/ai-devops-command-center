@@ -203,7 +203,7 @@ await req.userSupabase.rpc("decide_approval", { p_approval_id: "…", p_decision
 
 **Rules (A5, D-001):**
 - n8n never holds service_role, the database URL or any Supabase key.
-- `N8N_BLOCK_ENV_ACCESS_IN_NODE=true`.
+- `N8N_BLOCK_ENV_ACCESS_IN_NODE=true`. **Exception (D-010 / D-N8N-1, 2026-11-17):** `false` is approved for local development and the project demo, under the conditions in `DATABASE_DECISION_REGISTER.md` §2e. Revisit before any shared or hosted deployment.
 - HTTPS.
 - A pinned n8n image.
 

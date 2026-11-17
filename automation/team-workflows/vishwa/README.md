@@ -43,7 +43,7 @@ Details: `docs/automation-integration-requirements.md` (contracts, known issues,
 - [ ] **BD-1**: incident creation (contract + migration + route); then replace "Create incident (backend) – BLOCKED" in 01
 - [ ] **BD-2**: AI-analysis storage contract and route (05 needs no change)
 - [ ] **BD-4**: read incident data and save postmortems (with Vinuka; workflow 08 is Tharindu's)
-- [ ] **D-N8N-1**: env access for the HMAC secret, decided by the register owner (proposal in `docs/automation-decision-proposals.md`)
+- [x] **D-N8N-1**: env access for the HMAC secret: option A approved 17 Nov 2026 (register D-010, `database/DATABASE_DECISION_REGISTER.md` §2e)
 
 ## Testing responsibilities
 - [x] `cd automation && npm test` (84/84), `npm run test:interop` (incl. remediation 12/12), `npm run test:n8n` (91/91): all against mocks

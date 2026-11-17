@@ -48,6 +48,7 @@ This register records architecture and implementation decisions for the database
 | D-007 | Synthetic test data only in staging (B1-2) | **APPROVED** Batch 1b | §2a |
 | D-008 | Historical SQL preserved unchanged as reference only (B1-3) | **APPROVED** Batch 1b | §2a |
 | D-009 | Confirm staging ownership and credential management before connecting the CLI (B1-4) | **APPROVED** Batch 1b. **Ownership decided** 2026-11-07 (team leader; proposed project details). Credential storage and individual access **pending**. Project **not created**. | §2a |
+| D-010 | n8n Code nodes read `MACHINE_SIGNING_SECRET` from `$env` (`N8N_BLOCK_ENV_ACCESS_IN_NODE=false`): time-limited exception to A5 (automation decision D-N8N-1) | **APPROVED** 2026-11-17 by the team leader | §2e |
 
 ### 1.1 Definitions of A8, A9 and A10 (quoted from `A2_A7_ARCHITECTURE_DECISION_REPORT.md`, commit `030df62`)
 
@@ -264,6 +265,24 @@ Local only: a throwaway PostgreSQL 18.6 cluster on 127.0.0.1 with synthetic data
 
 ---
 
+## 2e. D-010: n8n secret access, exception to A5 (2026-11-17)
+
+Automation decision **D-N8N-1**. Proposal and options: `docs/automation-decision-proposals.md`.
+
+- **Decision:** keep `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (option A). The n8n Code nodes keep reading `MACHINE_SIGNING_SECRET` with `$env` to sign backend calls and to verify the remediation webhook. This is a recorded, **time-limited exception** to the A5 rule "`N8N_BLOCK_ENV_ACCESS_IN_NODE=true`" (`API_AND_INTEGRATION_CONTRACTS.md` B.3).
+- **Why:** with `true`, no Code node can read the secret, so no signed call works. n8n Community Edition has no other secret store a Code node can use (`$secrets` and external secrets are paid features). Option B (signing outside `$env`) means rebuilding the signing logic and its tests; that is too risky for the project deadline.
+- **Conditions (all required):**
+  1. one trusted n8n owner account per installation, and no other workflow editors;
+  2. only the variables listed in `automation/docker-compose.yml` are passed to the container;
+  3. API keys (Groq, GitHub, Alertmanager token) stay in n8n Credentials, never in `$env`;
+  4. n8n is published on `127.0.0.1` only (N-5); remote access only through an HTTPS reverse proxy with access control;
+  5. the secret is at least 32 characters, generated per installation (`scripts/setup-local.mjs`) and never shared.
+- **Scope:** local development and the project demo.
+- **Review:** revisit option B before any shared or hosted deployment.
+- **Approved by:** the team leader, 2026-11-17 (recorded by role, as in the rest of this register).
+
+---
+
 ## 3. Consistency check summary
 
 | Checked against | Result |
@@ -441,6 +460,7 @@ Each P5 item stays unimplemented until its question is answered. Recommendations
 
 | Date | Change |
 |---|---|
+| 2026-11-17 | D-010 recorded (§2e): `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` approved as a time-limited exception to A5 (automation decision D-N8N-1). Contract B.3, the automation docs and `automation/docker-compose.yml` comments updated to match. No code or database change. |
 | 2026-11-07 | Final review fixes: migration 000800 (audit coverage of direct writes; recursive payload redaction), rollback, suite 13; suite 05 count updated. 325 DB assertions, 0 failures. Not pushed. |
 | 2026-11-07 | **Decision Batch 2:** A2–A7 approved (§2c), with sub-answers A3-Q1, A3-Q3, A3-Q4 and A7-Q3. Blocker lifted for local work only. Implemented as migrations 000400–000700 with guarded rollbacks, suites 09–12 and backend `machine-auth.ts` (§2d). Local tests: 304 DB assertions and 69 backend tests, 0 failures. No remote database accessed; not pushed. |
 | 2026-11-07 | Implementation record §2b (P1 backend, baseline, additive migrations, local tests: 179 assertions passing). New open items B2-1, R13, R14 and the P5 question table §7.1. No remote database accessed. |

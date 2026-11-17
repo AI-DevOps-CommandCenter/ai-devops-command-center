@@ -4,7 +4,7 @@ This guide gets the whole system running on your own computer:
 - the monitoring stack, n8n, the backend and the app,
 - connected to the team's staging Supabase project.
 
-Nothing secret is stored in git. You get each secret one of three ways (see [section 1](#1-secrets-who-provides-what)):
+Nothing secret is stored in git. The Supabase URL and publishable key are in git on purpose: they are public by design (see [section 1a](#1a-why-the-supabase-publishable-key-is-in-git)). You get each secret one of three ways (see [section 1](#1-secrets-who-provides-what)):
 - a teammate shares it privately,
 - you create it yourself on a website,
 - a script generates it on your computer.
@@ -17,7 +17,7 @@ Time: about 30–45 minutes the first time.
 
 | Value | Where it goes | Who provides it |
 |---|---|---|
-| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | `backend/.env` | **Shared privately** by the team lead |
+| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | `backend/.env` | **Not secret.** Copy `projectUrl` and `anonKey` from `mobile/lib/services/supabase_config.dart` (see [1a](#1a-why-the-supabase-publishable-key-is-in-git)) |
 | `AUTOMATION_EMAIL`, `AUTOMATION_PASSWORD` (the Supabase account n8n acts as) | `backend/.env` | **Shared privately** by the team lead |
 | Demo account passwords (`demo.admin@demo.local`, `demo.requester@demo.local`) | You type them in the app; optionally `TEST_*_PASSWORD` in `backend/.env` | **Shared privately** by the team lead |
 | Groq API key | n8n credential **Groq API** | **You create it**: free at <https://console.groq.com/keys> |
@@ -33,6 +33,23 @@ Rules:
 - **Never share the generated secrets.** Each person's are different, and that is fine: they only protect traffic on your own computer.
 - **Never use the Supabase `service_role` / secret key.** The backend refuses to start with one. Only the publishable (anon) key is needed.
 - **If a secret leaks** (committed, pasted, screenshotted), tell the team lead so it can be rotated. A generated secret you can rotate yourself: delete the line, run the script again and restart the affected containers.
+
+### 1a. Why the Supabase publishable key is in git
+
+The Supabase **publishable key** (`sb_publishable_…`, formerly called the *anon* key) is **public by design**:
+
+- Supabase made it to be shipped inside client apps. Anyone who installs the app can read it from the APK or the web bundle, so keeping it out of git would not hide it.
+- It only identifies the project. It gives **no** access of its own: a request with it alone acts as the `anon` role.
+- The data is protected by **row-level security (RLS)** in the database, not by the key. Every public table has RLS enabled, and new tables get it automatically (`ensure_rls` event trigger; checked by `database/tests/sql/01_baseline_structure.sql`). The backend sends every database call with the signed-in user's JWT, so each user sees and changes only what the policies allow. Approvals, playbook runs and audit writes go through database functions that check the role again (two-person rule, no self-approval).
+- That is why it sits in `mobile/lib/services/supabase_config.dart` and may be copied into `backend/.env` without special care.
+
+What **is** secret, and must never be in git or in the app:
+
+- the **secret / `service_role` key**, which bypasses RLS (the backend refuses to start with one, decision D-001),
+- the database password and connection string,
+- account passwords (`AUTOMATION_PASSWORD`, demo accounts), API tokens and the generated HMAC secrets.
+
+If the publishable key is rotated in the Supabase dashboard, update `supabase_config.dart` and every `backend/.env`.
 
 ## 2. Prerequisites
 
@@ -75,11 +92,11 @@ It never prints a secret and never overwrites a value that is already set. You c
 
 ## 5. Fill in the shared values
 
-Open `backend/.env` and fill in the values the team lead sent you:
+Open `backend/.env`. Copy the Supabase URL and publishable key from `mobile/lib/services/supabase_config.dart`, and fill in the passwords the team lead sent you:
 
 ```ini
-SUPABASE_URL=...
-SUPABASE_PUBLISHABLE_KEY=...
+SUPABASE_URL=...                 # projectUrl in supabase_config.dart
+SUPABASE_PUBLISHABLE_KEY=...     # anonKey in supabase_config.dart (sb_publishable_…)
 AUTOMATION_EMAIL=automation@demo.local
 AUTOMATION_PASSWORD=...
 # optional, lets scripts/check-project.mjs log in:

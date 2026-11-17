@@ -30,8 +30,9 @@ services:
       NODE_FUNCTION_ALLOW_BUILTIN: "crypto"
       # Workflows read their configuration (and MACHINE_SIGNING_SECRET) with $env.
       # NOTE: decision A5 asked for "true". n8n Community Edition has no other
-      # place for a secret that a Code node can use, so this stays "false" until
-      # the team decides (docs/automation-integration-requirements.md, D-N8N-1).
+      # place for a secret that a Code node can use, so this is "false": an
+      # approved, time-limited exception (D-N8N-1 / register D-010, 17 Nov 2026,
+      # database/DATABASE_DECISION_REGISTER.md section 2e).
       # API keys are NOT passed here: Groq/GitHub/Alertmanager keys live in n8n
       # Credentials. Only the variables below reach the container.
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"

@@ -9,27 +9,31 @@ Owners: **Vishwa** (01, 05, 06; backend integration, about 40%) and **Tharindu**
 | File | Workflow | Trigger | Status |
 |---|---|---|---|
 | `00-groq-test.json` | Groq connection test | Manual | ✅ Works (needs the Groq credential and `GROQ_MODEL`) |
-| `01-alert-intake.json` | Alertmanager → validate → de-duplicate (pending/confirmed) → 05 → soft failures to 09 | `POST /webhook/alertmanager` | ✅ Works; ⛔ incident creation blocked (BD-1) |
-| `02-log-analysis.json` | Loki error/warning analysis | Called by 05 | ✅ Works (Loki label to confirm) |
-| `03-metrics-analysis.json` | Prometheus current vs baseline | Called by 05 | ✅ Works (metric names/queries to confirm) |
-| `04-deployment-correlation.json` | GitHub commits + Actions runs | Called by 05 | ✅ Works (needs a read-only token) |
-| `05-root-cause.json` | Combine evidence → Groq → validate → store | Called by 01 | ✅ Works; ⛔ storage blocked (BD-1/BD-2) |
-| `06-remediation.json` | Signed request → backend start → action → complete (retry-safe) → 07 → soft failures to 09 | `POST /webhook/remediation` | ✅ HMAC, approval and start/complete work; completion retried safely (N-1); ✅ real execution through the playbook executor (`REMEDIATION_EXECUTION_MODE=executor`; live test pending); ⛔ nothing calls this webhook yet (BD-5) |
-| `07-recovery-check.json` | Wait → Prometheus health → verdict → store | Called by 06 | ✅ Works; storage via `POST /api/machine/recovery-checks` (BD-3, implemented) |
-| `08-postmortem.json` | Groq postmortem draft | Called by 07 | ✅ Works; ⛔ read/store blocked (BD-4) |
+| `01-alert-intake.json` | Alertmanager → validate → de-duplicate (pending/confirmed) → create incident → 05 → soft failures to 09 | `POST /webhook/alertmanager` | ✅ Works. Creates or reuses the incident by alert fingerprint through `POST /api/machine/incidents` (BD-1) |
+| `02-log-analysis.json` | Loki error/warning analysis | Called by 05 | ✅ Works (label `service`, D-MON-1) |
+| `03-metrics-analysis.json` | Prometheus current vs baseline | Called by 05 | ✅ Works (queries from `monitoring/n8n-integration.env`) |
+| `04-deployment-correlation.json` | GitHub commits + Actions runs | Called by 05 | ✅ Works with mocks; needs a valid read-only token for real data |
+| `05-root-cause.json` | Combine evidence → Groq → validate → store | Called by 01 | ✅ Works. Stores the analysis through the backend (BD-2) |
+| `06-remediation.json` | Signed request → backend start → action → complete (retry-safe) → 07 → soft failures to 09 | `POST /webhook/remediation` | ✅ Works. Called by the backend after an approval (BD-5); real execution through the playbook executor (`REMEDIATION_EXECUTION_MODE=executor`); completion retried safely (N-1). Known issue KI-1 (nonce store) |
+| `07-recovery-check.json` | Wait → Prometheus health → verdict → store | Called by 06 | ✅ Works. Stores through `POST /api/machine/recovery-checks` (BD-3) |
+| `08-postmortem.json` | Read incident context → Groq postmortem draft → store | Called by 07 | ✅ Works. Reads `GET /api/machine/incidents/:id/context` and stores through `POST /api/machine/incidents/:id/postmortem` (BD-4) |
 | `09-error-handler.json` | Redacted failure summary → Slack/Discord | Error Trigger + called by 01/06 for soft failures | ✅ Works (optional webhook URL) |
 
-All results above are verified against **mock** services (`npm run test:n8n`) and, for the backend routes, against the real backend code (`npm run test:interop`). Nothing has been run against real Groq, Loki, Prometheus, GitHub, Alertmanager or Supabase yet.
+**How this was verified:**
+- Automated: mocks (`npm run test:n8n`) and the real backend code (`npm run test:interop`).
+- Live, 17 Nov 2026: a full real-alert run with real Prometheus, Alertmanager, Loki, Groq, the playbook executor and the staging Supabase project. The path was fault → alert → 01 → 02/03/04 → 05 → approval in the app → backend → 06 → executor → 07 → 08 postmortem.
 
-The blockers (BD-1…BD-6), credentials and open decisions are listed in [`docs/automation-integration-requirements.md`](../docs/automation-integration-requirements.md).
+The original blockers (BD-1…BD-6), the credentials and the decisions are listed in [`docs/automation-integration-requirements.md`](../docs/automation-integration-requirements.md).
 
 ## Quick start (local)
 
-1. **Configure.** Copy `automation/.env.example` to `automation/.env` and fill in your own values. Never commit `.env`. At minimum set:
-   - `N8N_ENCRYPTION_KEY`;
-   - `GROQ_MODEL`;
-   - for workflows 05–07: `BACKEND_BASE_URL` and `MACHINE_SIGNING_SECRET`.
-2. **Start n8n:** `cd automation && docker compose up -d`, then open http://localhost:5678 and create the owner account. The port is published on `127.0.0.1` only (see *Network and HTTPS*).
+For the whole system (monitoring, n8n, backend, app), follow [`docs/SETUP.md`](../docs/SETUP.md). The steps below cover n8n only.
+
+1. **Configure.** Run `node scripts/setup-local.mjs` from the repository root. It creates `automation/.env` from `.env.example` and generates `N8N_ENCRYPTION_KEY`, `MACHINE_SIGNING_SECRET` and `EXECUTOR_SIGNING_SECRET`. Never commit `.env`. Then check:
+   - `GROQ_MODEL` (a current model from <https://console.groq.com/docs/models>);
+   - `BACKEND_BASE_URL` (the backend, normally `http://host.docker.internal:3000`);
+   - `REMEDIATION_EXECUTION_MODE=executor` for real fixes (default `disabled`: 06 refuses every fix).
+2. **Start n8n:** `cd automation && docker compose -p ccdemo up -d`, then open http://localhost:5678 and create the owner account. Always use `-p ccdemo`: the n8n data lives in the `ccdemo_n8n_data` volume. The port is published on `127.0.0.1` only (see *Network and HTTPS*).
 3. **Create the credentials** (n8n → Credentials → *Header Auth*). The names must match exactly:
    - **Groq API**: Name `Authorization`, Value `Bearer <your Groq key>`.
    - **GitHub API (read-only)**: Name `Authorization`, Value `Bearer <fine-grained token>`, with read-only Contents and Actions on one repository.
@@ -100,5 +104,11 @@ Details: [`docs/automation-testing-guide.md`](../docs/automation-testing-guide.m
 - A signed request is never re-sent: the completion retry (06) signs every attempt again with a new nonce.
 - Error notifications are redacted: no tokens, no stack traces, no input data. Soft failures (failed completion, unconfirmed start, AI unavailable, result not stored) are reported too, one message per kind per execution.
 - The n8n port is published on `127.0.0.1` by default (`N8N_BIND_ADDRESS`).
-- Open decision D-N8N-1: `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` lets every Code node read `MACHINE_SIGNING_SECRET`. That is acceptable only with a single trusted n8n owner; the team must decide before staging.
+- **Decision D-N8N-1 (decided 17 Nov 2026):** `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` stays, as a recorded, time-limited exception to rule A5. It lets every Code node read `MACHINE_SIGNING_SECRET`, so it is only allowed under these conditions:
+  - one trusted n8n owner account, and no other workflow editors;
+  - only the variables listed in `docker-compose.yml` are passed to the container;
+  - API keys stay in n8n Credentials;
+  - n8n is published on `127.0.0.1` only.
+
+  Before any shared or hosted deployment, revisit option B (move signing out of `$env`). Details: `database/DATABASE_DECISION_REGISTER.md` (D-010) and `docs/automation-decision-proposals.md`.
 - When exporting from n8n, **never** use "export with credentials" / `--decrypted`.
