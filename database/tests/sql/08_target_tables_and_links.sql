@@ -15,8 +15,8 @@ SELECT tests.is(
     (SELECT string_agg(tablename || ':' || cmd, ',') FROM pg_policies WHERE schemaname = 'public'
        AND tablename IN ('automation_runs', 'incident_events', 'notification_deliveries')),
     'incident_events:SELECT', 'only policy on the new tables: timeline read (A7); the others are function-only');
-SELECT tests.is((SELECT count(*)::int FROM pg_tables WHERE schemaname = 'public'), 22,
-    '22 public tables: 18 baseline + 3 target + automation_request_nonces (A5)');
+SELECT tests.is((SELECT count(*)::int FROM pg_tables WHERE schemaname = 'public'), 23,
+    '23 public tables: 18 baseline + 3 target + automation_request_nonces (A5) + notification_preferences (S27)');
 
 -- No client privileges at all (including TRUNCATE/REFERENCES/TRIGGER/MAINTAIN)
 SELECT tests.ok(

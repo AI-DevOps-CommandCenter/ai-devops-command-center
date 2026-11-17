@@ -80,3 +80,37 @@ export async function unregisterDeviceToken(
 
   return data as boolean;
 }
+// S27: the caller's notification preferences (defaults when never saved).
+export interface NotificationPreferences {
+  push_enabled: boolean;
+  email_enabled: boolean;
+  updated_at: string | null;
+}
+
+function firstPreferencesRow(data: unknown): NotificationPreferences {
+  const row = (Array.isArray(data) ? data[0] : data) as Partial<NotificationPreferences> | undefined;
+  return {
+    push_enabled: row?.push_enabled ?? true,
+    email_enabled: row?.email_enabled ?? false,
+    updated_at: row?.updated_at ?? null
+  };
+}
+
+export async function getNotificationPreferences(client: UserSupabaseClient) {
+  const { data, error } = await client.rpc("get_notification_preferences");
+  if (error) throw error;
+  return firstPreferencesRow(data);
+}
+
+export async function setNotificationPreferences(
+  client: UserSupabaseClient,
+  pushEnabled: boolean,
+  emailEnabled: boolean
+) {
+  const { data, error } = await client.rpc("set_notification_preferences", {
+    p_push_enabled: pushEnabled,
+    p_email_enabled: emailEnabled
+  });
+  if (error) throw error;
+  return firstPreferencesRow(data);
+}

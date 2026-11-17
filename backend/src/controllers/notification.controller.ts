@@ -2,12 +2,15 @@ import type { Request, Response } from "express";
 
 import {
   getNotifications,
+  getNotificationPreferences,
+  setNotificationPreferences,
   markNotificationRead,
   registerDeviceToken,
   unregisterDeviceToken
 } from "../services/notification.service.js";
 
 import { sendDbError } from "../lib/db-errors.js";
+import { loadNotificationSenderConfig } from "../integrations/notifications/config.js";
 
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -215,5 +218,49 @@ export async function unregisterDeviceTokenController(
       "Unregister device token error:",
       "Failed to unregister device token."
     );
+  }
+}
+
+// Which server-side channels are configured, so S27 can show them truthfully.
+// Push stays false until the FCM sender is built (it then reads
+// FIREBASE_SERVICE_ACCOUNT_FILE).
+export function serverChannelStatus(env: NodeJS.ProcessEnv = process.env) {
+  try {
+    const config = loadNotificationSenderConfig(env);
+    return { push: false, email: config.email !== null, slack: config.slack !== null, discord: config.discord !== null };
+  } catch {
+    return { push: false, email: false, slack: false, discord: false };
+  }
+}
+
+// GET /api/notifications/preferences
+export async function getNotificationPreferencesController(req: Request, res: Response) {
+  try {
+    const client = req.userSupabase;
+    if (!client) {
+      return res.status(401).json({ success: false, message: "Authentication required." });
+    }
+    const data = await getNotificationPreferences(client);
+    return res.status(200).json({ success: true, data: { ...data, in_app_enabled: true, server_channels: serverChannelStatus() } });
+  } catch (error) {
+    return sendDbError(res, error, "Get notification preferences error:", "Failed to load notification preferences.");
+  }
+}
+
+// PUT /api/notifications/preferences  { push_enabled, email_enabled }
+export async function updateNotificationPreferencesController(req: Request, res: Response) {
+  try {
+    const client = req.userSupabase;
+    if (!client) {
+      return res.status(401).json({ success: false, message: "Authentication required." });
+    }
+    const { push_enabled, email_enabled } = req.body ?? {};
+    if (typeof push_enabled !== "boolean" || typeof email_enabled !== "boolean") {
+      return res.status(400).json({ success: false, message: "push_enabled and email_enabled must be true or false." });
+    }
+    const data = await setNotificationPreferences(client, push_enabled, email_enabled);
+    return res.status(200).json({ success: true, data: { ...data, in_app_enabled: true, server_channels: serverChannelStatus() } });
+  } catch (error) {
+    return sendDbError(res, error, "Update notification preferences error:", "Failed to save notification preferences.");
   }
 }
