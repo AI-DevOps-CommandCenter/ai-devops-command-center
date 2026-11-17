@@ -1,0 +1,243 @@
+
+ RUN  v5.0.5 E:/Users/user/Downloads/ai-devops-command-center/backend
+
+stderr | tests/github.integration.test.ts > GitHubClient > reports unavailable after the retry also fails
+GitHub request failed: server_error (HTTP 503).
+
+ ✓ tests/github.integration.test.ts > GitHub configuration > is disabled when nothing is set 3ms
+ ✓ tests/github.integration.test.ts > GitHub configuration > names the missing variable without printing values 2ms
+ ✓ tests/github.integration.test.ts > GitHub configuration > parses the allow-list and applies defaults 3ms
+ ✓ tests/github.integration.test.ts > GitHub configuration > rejects repository entry "acme" 1ms
+ ✓ tests/github.integration.test.ts > GitHub configuration > rejects repository entry "acme/api/extra" 0ms
+ ✓ tests/github.integration.test.ts > GitHub configuration > rejects repository entry "acme/.." 0ms
+ ✓ tests/github.integration.test.ts > GitHub configuration > rejects repository entry "ac me/api" 0ms
+ ✓ tests/github.integration.test.ts > GitHub configuration > rejects repository entry "/api" 0ms
+ ✓ tests/github.integration.test.ts > GitHub configuration > requires an https API URL 2ms
+ ✓ tests/github.integration.test.ts > GitHubClient > sends the token and GitHub's recommended headers 29ms
+ ✓ tests/github.integration.test.ts > GitHubClient > retries once on a 5xx, then succeeds 2ms
+ ✓ tests/github.integration.test.ts > GitHubClient > reports unavailable after the retry also fails 2ms
+ ✓ tests/notification-senders.test.ts > sender configuration > has no channels when nothing is set 4ms
+ ✓ tests/notification-senders.test.ts > sender configuration > loads all three channels 2ms
+ ✓ tests/notification-senders.test.ts > sender configuration > rejects {"SLACK_WEBHOOK_URL":"https://evil.example/services/x"} 1ms
+ ✓ tests/notification-senders.test.ts > sender configuration > rejects {"SLACK_WEBHOOK_URL":"http://hooks.slack.com/services/x"} 0ms
+ ✓ tests/notification-senders.test.ts > sender configuration > rejects {"DISCORD_WEBHOOK_URL":"https://discord.com/api/webhooks/abc/def"} 1ms
+ ✓ tests/notification-senders.test.ts > sender configuration > rejects {"SMTP_HOST":"smtp.example.test"} 0ms
+ ✓ tests/notification-senders.test.ts > sender configuration > rejects {"EMAIL_FROM":"a@example.test"} 0ms
+ ✓ tests/notification-senders.test.ts > sender configuration > rejects {"SMTP_HOST":"h","EMAIL_FROM":"a@example.test","SMTP_USER":"u"} 0ms
+ ✓ tests/notification-senders.test.ts > sender configuration > rejects {"SMTP_HOST":"h","EMAIL_FROM":"not-an-address"} 1ms
+ ✓ tests/notification-senders.test.ts > sender configuration > rejects {"SMTP_HOST":"h","EMAIL_FROM":"a@example.test","SMTP_PORT":"99999"} 0ms
+ ✓ tests/notification-senders.test.ts > sender configuration > rejects {"SMTP_HOST":"h","EMAIL_FROM":"a@example.test","SMTP_SECURE":"yes"} 0ms
+ ✓ tests/notification-senders.test.ts > sender configuration > rejects {"NOTIFICATION_SEND_TIMEOUT_MS":"10"} 0ms
+ ✓ tests/notification-senders.test.ts > sender configuration > never puts a configured secret into an error 0ms
+ ✓ tests/notification-senders.test.ts > sender configuration > creates senders only for configured channels 1ms
+ ✓ tests/notification-senders.test.ts > record_notification_delivery parameters > use the parameter names of the migration 1ms
+ ✓ tests/notification-senders.test.ts > record_notification_delivery parameters > match the columns returned by claim_notification_deliveries 1ms
+ ✓ tests/notification-senders.test.ts > record_notification_delivery parameters > map sent and failed results 0ms
+ ✓ tests/notification-senders.test.ts > redaction > removes webhook URLs, tokens and given secrets 1ms
+ ✓ tests/notification-senders.test.ts > redaction > truncates to the 500-character column limit 1ms
+ ✓ tests/notification-senders.test.ts > SlackSender > posts an escaped message to the webhook 6ms
+ ✓ tests/notification-senders.test.ts > SlackSender > escapes control characters 0ms
+ ✓ tests/notification-senders.test.ts > SlackSender > reports a removed webhook as permanent and keeps Slack's error code 1ms
+ ✓ tests/notification-senders.test.ts > SlackSender > classifies {"status":500,"text":"internal"} (retryable=true) 1ms
+ ✓ tests/notification-senders.test.ts > SlackSender > classifies {"status":429,"headers":{"retry-after":"7"}} (retryable=true) 1ms
+ ✓ tests/notification-senders.test.ts > SlackSender > classifies {"status":400,"text":"invalid_payload"} (retryable=false) 1ms
+ ✓ tests/notification-senders.test.ts > SlackSender > classifies {"status":403,"text":"action_prohibited"} (retryable=false) 1ms
+ ✓ tests/notification-senders.test.ts > SlackSender > classifies {"networkError":true} (retryable=true) 1ms
+ ✓ tests/e2e/notification-delivery.e2e.test.ts > E2E notification delivery (claim -> send -> record) > E2E-N01 delivers email, Slack and Discord and records each as sent 82ms
+ ✓ tests/e2e/notification-delivery.e2e.test.ts > E2E notification delivery (claim -> send -> record) > E2E-N02 records a removed Slack webhook as a permanent failure, without the webhook URL 6ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > accepts a correctly signed, fresh request 73ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > rejects a request without signature headers 8ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > rejects a wrong signature 5ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > rejects a tampered body 6ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > rejects a signature made for another endpoint 5ms
+ ✓ tests/e2e/notification-delivery.e2e.test.ts > E2E notification delivery (claim -> send -> record) > E2E-N03 keeps a transient Slack failure pending, and records it once attempts are used up 9ms
+ ✓ tests/e2e/notification-delivery.e2e.test.ts > E2E notification delivery (claim -> send -> record) > E2E-N04 passes Discord's rate-limit wait time to the worker 3ms
+ ✓ tests/e2e/notification-delivery.e2e.test.ts > E2E notification delivery (claim -> send -> record) > E2E-N05 records a bounced e-mail recipient (SMTP 550) as permanent 8ms
+ ✓ tests/e2e/notification-delivery.e2e.test.ts > E2E notification delivery (claim -> send -> record) > E2E-N06 treats a temporary SMTP rejection (451) as retryable 6ms
+ ✓ tests/e2e/notification-delivery.e2e.test.ts > E2E notification delivery (claim -> send -> record) > E2E-N07 reports wrong SMTP credentials as permanent without leaking them 4ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > rejects a signature made with another secret 7ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > rejects stale and future timestamps (5 minute window) 9ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > rejects a replayed request (same nonce twice) 10ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > rejects malformed nonces 4ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > fails closed when replay protection is unavailable 5ms
+ ✓ tests/machine-auth.test.ts > machineAuth(): n8n -> backend signed requests (A5) > refuses to start with a short secret 1ms
+ ✓ tests/machine-auth.test.ts > createDatabaseNonceStore(): consume_automation_nonce() (migration 000400) > calls the database function with the nonce and signing time 2ms
+ ✓ tests/machine-auth.test.ts > createDatabaseNonceStore(): consume_automation_nonce() (migration 000400) > maps DC409 to a replay 0ms
+ ✓ tests/machine-auth.test.ts > createDatabaseNonceStore(): consume_automation_nonce() (migration 000400) > throws on any other database error (the middleware then fails closed) 1ms
+ ✓ tests/machine-auth.test.ts > buildSignedHeaders(): backend -> n8n > produces headers that the same verifier accepts 4ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > require a signed-in user 60ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > answer 503 when the integration is not configured 9ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > are disabled by default when no GitHub variables are set 6ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > never serve a repository outside the allow-list (no GitHub call) 10ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > reject invalid input /api/github/repositories/acme/payments-api/commits?limit=0 8ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > answer 503 when not configured 59ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > reject unsigned requests, even with a valid user JWT 30ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > start -> start_playbook_run as the automation identity 11ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > POST /api/playbook-runs -> request_playbook_run (always pending approval, A4) 67ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > rejects a non-object request payload before calling the database 6ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > a disabled playbook is 409 with the database message 6ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > PATCH /:id/decision decides the run's linked approval (one approval path, A3) 5ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > PATCH /:id/decision on a legacy run without approval is 404 6ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > UNAUTHORIZED: a manager cannot approve their own run (403) 6ms
+ ✓ tests/approvals.rpc.test.ts > POST /api/approvals -> request_playbook_run > requires authentication 71ms
+ ✓ tests/approvals.rpc.test.ts > POST /api/approvals -> request_playbook_run > requires a playbook (approvals are created together with a run, A3) 9ms
+ ✓ tests/approvals.rpc.test.ts > POST /api/approvals -> request_playbook_run > creates the run and its approval through the database function 7ms
+ ✓ tests/approvals.rpc.test.ts > POST /api/approvals -> request_playbook_run > returns 200 for an idempotent retry 5ms
+ ✓ tests/approvals.rpc.test.ts > POST /api/approvals -> request_playbook_run > maps a duplicate active request to 409 with the database message 5ms
+ ✓ tests/app.test.ts > application basics > keeps the root health message 43ms
+ ✓ tests/app.test.ts > application basics > returns JSON 404 for unknown routes 10ms
+ ✓ tests/app.test.ts > application basics > returns JSON 400 for malformed JSON bodies 29ms
+ ✓ tests/app.test.ts > security headers (Helmet) > sets standard security headers and hides the framework 10ms
+ ✓ tests/app.test.ts > restricted CORS > allows an origin on the allow-list 5ms
+ ✓ tests/auth.test.ts > extractBearerToken > parses undefined as null 3ms
+ ✓ tests/auth.test.ts > extractBearerToken > parses "" as null 0ms
+ ✓ tests/auth.test.ts > extractBearerToken > parses "Basic abc" as null 0ms
+ ✓ tests/auth.test.ts > extractBearerToken > parses "Bearer" as null 0ms
+ ✓ tests/auth.test.ts > extractBearerToken > parses "Bearer    " as null 0ms
+ ✓ tests/auth.test.ts > extractBearerToken > parses "Bearer abc.def.ghi" as "abc.def.ghi" 0ms
+ ✓ tests/auth.test.ts > extractBearerToken > parses "bearer abc" as "abc" 0ms
+ ✓ tests/auth.test.ts > extractBearerToken > parses "  Bearer   abc  " as "abc" 0ms
+ ✓ tests/auth.test.ts > authenticateToken (user JWT, decision D-002) > rejects requests without a token (unchanged contract) 46ms
+ ✓ tests/auth.test.ts > authenticateToken (user JWT, decision D-002) > rejects non-Bearer schemes 6ms
+ ✓ tests/auth.test.ts > authenticateToken (user JWT, decision D-002) > rejects invalid or expired tokens (unchanged contract) 6ms
+ ✓ tests/auth.test.ts > authenticateToken (user JWT, decision D-002) > returns 500 when token verification fails unexpectedly 6ms
+ ✓ tests/auth.test.ts > authenticateToken (user JWT, decision D-002) > verifies the token and creates a per-request client with the same JWT 5ms
+ ✓ tests/auth.test.ts > requireRole (role read through the user's JWT client) > allows a permitted role and exposes it on the request 6ms
+ ✓ tests/auth.test.ts > requireRole (role read through the user's JWT client) > forbids other roles 6ms
+ ✓ tests/auth.test.ts > requireRole (role read through the user's JWT client) > forbids unknown role values 4ms
+ ✓ tests/auth.test.ts > requireRole (role read through the user's JWT client) > forbids users without a visible profile row 6ms
+ ✓ tests/auth.test.ts > requireRole (role read through the user's JWT client) > returns 500 when the profile cannot be read 6ms
+ ✓ tests/auth.test.ts > requireRole (role read through the user's JWT client) > requires authentication first 5ms
+ ✓ tests/app.test.ts > restricted CORS > sends no CORS headers to other origins 4ms
+ ✓ tests/app.test.ts > restricted CORS > does not affect requests without an Origin header (mobile/native clients) 4ms
+ ✓ tests/app.test.ts > restricted CORS > answers preflight requests for allowed origins 4ms
+ ✓ tests/app.test.ts > restricted CORS > allows no cross-origin browser access when CORS_ORIGINS is empty 8ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > POST /:id/cancel -> cancel_playbook_run 7ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > cancelling an approved run without a reason is 400 (DC422) 5ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > POST /:id/complete (manual override) requires a reason before calling the database 7ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > POST /:id/complete -> complete_playbook_run without an execution id (manual, A3-Q3) 7ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > UNAUTHORIZED: a plain user cannot complete runs (403) 4ms
+ ✓ tests/playbook-runs.rpc.test.ts > Playbook run lifecycle through database functions > there is no human endpoint to start a run (n8n only, A5) 4ms
+ ✓ tests/playbook-runs.rpc.test.ts > Remediation executions are read-only (legacy, A2/A3) > POST /api/remediation-executions is 410 and writes nothing 4ms
+ ✓ tests/playbook-runs.rpc.test.ts > Remediation executions are read-only (legacy, A2/A3) > PATCH /api/remediation-executions/:id is 410 and writes nothing 4ms
+ ✓ tests/playbook-runs.rpc.test.ts > Remediation executions are read-only (legacy, A2/A3) > still requires authentication 4ms
+ ✓ tests/playbook-runs.rpc.test.ts > Remediation executions are read-only (legacy, A2/A3) > GET still lists legacy records 9ms
+ ✓ tests/approvals.rpc.test.ts > POST /api/approvals -> request_playbook_run > maps an incident the caller cannot see to 404 9ms
+ ✓ tests/approvals.rpc.test.ts > PATCH /api/approvals/:id/decision -> decide_approval > validates the decision before calling the database 6ms
+ ✓ tests/approvals.rpc.test.ts > PATCH /api/approvals/:id/decision -> decide_approval > decides through the database function, passing comments as the reason 6ms
+ ✓ tests/approvals.rpc.test.ts > PATCH /api/approvals/:id/decision -> decide_approval > UNAUTHORIZED: deciding one's own request is 403 5ms
+ ✓ tests/approvals.rpc.test.ts > PATCH /api/approvals/:id/decision -> decide_approval > UNAUTHORIZED: a plain user cannot decide (403 from the database) 6ms
+ ✓ tests/approvals.rpc.test.ts > PATCH /api/approvals/:id/decision -> decide_approval > an already decided approval is 409 4ms
+ ✓ tests/approvals.rpc.test.ts > PATCH /api/approvals/:id/decision -> decide_approval > unknown database errors stay a generic 500 12ms
+ ✓ tests/approvals.rpc.test.ts > POST /api/approvals/:id/cancel -> cancel_approval > cancels through the database function 5ms
+ ✓ tests/approvals.rpc.test.ts > POST /api/approvals/:id/cancel -> cancel_approval > UNAUTHORIZED: only the requester may cancel (403) 4ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > a replayed signed request is rejected (409) and the run is started once 19ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > starting a run that is not approved is 409 (A4: approval first) 8ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > a reused n8n execution id is 409 (duplicate execution, 23505) 7ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > complete -> complete_playbook_run with the execution id 7ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > completing with another execution id is 403 7ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > validates the signed body 7ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > answers 503 when the automation identity cannot sign in 6ms
+ ✓ tests/machine-endpoints.test.ts > n8n machine endpoints (A5) > an expired automation session triggers a fresh sign-in next time 7ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > reject invalid input /api/github/repositories/acme/payments-api/commits?limit=101 11ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > reject invalid input /api/github/repositories/acme/payments-api/commits?branch=..%2Fsecret 11ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > reject invalid input /api/github/repositories/acme/payments-api/pulls?state=merged 7ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > reject invalid input /api/github/repositories/acme/payments-api/pulls/abc 9ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > reject invalid input /api/github/repositories/acme/payments-api/workflow-runs?status=bogus 11ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > reject invalid input /api/github/repositories/acme/payments-api/workflow-runs/-1/jobs 7ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – access > reject invalid input /api/github/repositories/ac%20me/payments-api 5ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – data > list the configured repositories 29ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – data > return recent commits with the default limit of 20 9ms
+ ✓ tests/e2e/github-api.e2e.test.ts > E2E GitHub integration (mobile -> backend -> GitHub) > E2E-G01 serves the Repositories screen flow: repos, commits, PRs, PR detail, runs, jobs 113ms
+ ✓ tests/e2e/github-api.e2e.test.ts > E2E GitHub integration (mobile -> backend -> GitHub) > E2E-G02 stops calling GitHub after a rate limit and tells the client when to retry 16ms
+ ✓ tests/e2e/github-api.e2e.test.ts > E2E GitHub integration (mobile -> backend -> GitHub) > E2E-G03 reports a revoked backend token as 502 without exposing it 11ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – data > return pull requests, a pull request, workflow runs and jobs 21ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – GitHub failures > map a GitHub 404 to 404 8ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – GitHub failures > map a rejected backend token to 502, not 401, and hide the token 8ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – GitHub failures > map a rate limit to 503 with Retry-After 8ms
+ ✓ tests/github.routes.test.ts > GitHub endpoints – GitHub failures > map outages and unexpected payloads to 502 13ms
+ ✓ tests/no-privileged-key.test.ts > no privileged Supabase key in backend source (D-001) > contains no service-role identifiers 17ms
+ ✓ tests/notification-senders.test.ts > SlackSender > times out 1006ms
+ ✓ tests/isolation.test.ts > test isolation > replaces the real Supabase config module with the mock 4ms
+ ✓ tests/isolation.test.ts > test isolation > blocks network access through fetch 1ms
+ ✓ tests/isolation.test.ts > test isolation > disables .env loading for the test run 0ms
+ ✓ tests/env.test.ts > isPrivilegedSupabaseKey (decision D-001) > accepts publishable keys 3ms
+ ✓ tests/env.test.ts > isPrivilegedSupabaseKey (decision D-001) > accepts legacy anon JWT keys 0ms
+ ✓ tests/env.test.ts > isPrivilegedSupabaseKey (decision D-001) > rejects secret keys 0ms
+ ✓ tests/env.test.ts > isPrivilegedSupabaseKey (decision D-001) > rejects legacy JWT keys with a privileged role 0ms
+ ✓ tests/env.test.ts > loadSupabaseEnv > keeps the original message when variables are missing 1ms
+ ✓ tests/env.test.ts > loadSupabaseEnv > accepts a valid URL and publishable key 2ms
+ ✓ tests/env.test.ts > loadSupabaseEnv > rejects an invalid URL 1ms
+ ✓ tests/env.test.ts > loadSupabaseEnv > refuses to start with a privileged key and never echoes the key 1ms
+ ✓ tests/env.test.ts > env file locations (load-env) > looks in backend/.env first, then the repository-root .env 20ms
+ ✓ tests/env.test.ts > loadServerConfig > uses safe defaults 2ms
+ ✓ tests/env.test.ts > loadServerConfig > treats empty values as unset (like the original PORT || 3000) 0ms
+ ✓ tests/env.test.ts > loadServerConfig > rejects TRUST_PROXY=true (would let clients spoof their IP) 1ms
+ ✓ tests/env.test.ts > loadServerConfig > parses origins, limits and proxy settings 0ms
+ ✓ tests/env.test.ts > loadServerConfig > rejects invalid values 1ms
+ ✓ tests/notification-senders.test.ts > SlackSender > refuses a delivery for another channel without sending 1ms
+ ✓ tests/notification-senders.test.ts > DiscordSender > posts an embed with mentions disabled and returns the message id 1ms
+ ✓ tests/notification-senders.test.ts > DiscordSender > keeps embeds within Discord's limits 0ms
+ ✓ tests/notification-senders.test.ts > DiscordSender > passes Discord's Retry-After on 429 1ms
+ ✓ tests/notification-senders.test.ts > DiscordSender > reports an unknown webhook (404) as permanent without leaking the URL 1ms
+ ✓ tests/notification-senders.test.ts > EmailSender > sends a plain-text e-mail to the claimed recipient 1ms
+ ✓ tests/notification-senders.test.ts > EmailSender > strips line breaks from the subject (header injection) 0ms
+ ✓ tests/notification-senders.test.ts > EmailSender > refuses a delivery without a valid recipient (permanent) 1ms
+ ✓ tests/notification-senders.test.ts > EmailSender > reports a rejected recipient as permanent 0ms
+ ✓ tests/notification-senders.test.ts > EmailSender > classifies SMTP error {"code":"EAUTH","response":"535 auth failed for smtp-user / smtp-password-123"} (retryable=false) 1ms
+ ✓ tests/notification-senders.test.ts > EmailSender > classifies SMTP error {"code":"EENVELOPE","responseCode":550,"response":"550 mailbox unavailable"} (retryable=false) 0ms
+ ✓ tests/notification-senders.test.ts > EmailSender > classifies SMTP error {"code":"EMESSAGE","responseCode":451,"response":"451 try again later"} (retryable=true) 0ms
+ ✓ tests/notification-senders.test.ts > EmailSender > classifies SMTP error {"code":"ECONNECTION"} (retryable=true) 0ms
+ ✓ tests/notification-senders.test.ts > EmailSender > classifies SMTP error {"code":"ETIMEDOUT"} (retryable=true) 0ms
+ ✓ tests/notification-senders.test.ts > EmailSender > classifies SMTP error {"code":"SOMETHING_NEW"} (retryable=false) 0ms
+ ✓ tests/e2e/notification-delivery.e2e.test.ts > E2E notification delivery (claim -> send -> record) > E2E-N08 times out a provider that never answers 1006ms
+ ✓ tests/e2e/notification-delivery.e2e.test.ts > E2E notification delivery (claim -> send -> record) > E2E-N09 handles unconfigured channels and a failed claim 1ms
+ ✓ tests/incidents.contract.test.ts > POST /api/incidents (existing contract preserved) > requires authentication 45ms
+ ✓ tests/incidents.contract.test.ts > POST /api/incidents (existing contract preserved) > keeps the existing validation message 7ms
+ ✓ tests/incidents.contract.test.ts > POST /api/incidents (existing contract preserved) > creates the incident through the user's client; the database audits it 6ms
+ ✓ tests/incidents.contract.test.ts > POST /api/incidents (existing contract preserved) > does not depend on an audit write (previously best-effort, now done by the database) 4ms
+ ✓ tests/rpc-contract.test.ts > database-function integration guards > never writes approvals, playbook_runs, remediation_executions or audit_logs directly 2ms
+ ✓ tests/rpc-contract.test.ts > database-function integration guards > has no backend audit writer left (the database audits, A7) 1ms
+ ✓ tests/rpc-contract.test.ts > database-function integration guards > uses all six workflow functions 0ms
+ ✓ tests/rpc-contract.test.ts > database-function integration guards > calls every function with exactly the parameter names defined in the migrations 2ms
+ ✓ tests/rpc-contract.test.ts > mapDbError() > passes through database function messages with their HTTP status 0ms
+ ✓ tests/rpc-contract.test.ts > mapDbError() > hides PostgreSQL details behind generic messages 0ms
+ ✓ tests/rpc-contract.test.ts > mapDbError() > returns null for unknown errors (callers answer 500) 0ms
+ ✓ tests/rpc-contract.test.ts > loadMachineEnv() > is disabled when nothing is configured 0ms
+ ✓ tests/rpc-contract.test.ts > loadMachineEnv() > requires all three variables and never echoes values 1ms
+ ✓ tests/rpc-contract.test.ts > loadMachineEnv() > rejects a short signing secret 0ms
+ ✓ tests/rpc-contract.test.ts > loadMachineEnv() > accepts a complete configuration 0ms
+ ✓ tests/validate.test.ts > validate() middleware (Zod) > passes valid input and exposes parsed values 45ms
+ ✓ tests/validate.test.ts > validate() middleware (Zod) > rejects invalid input with the standard error shape and details 5ms
+ ✓ tests/rate-limit.test.ts > API rate limiting > returns JSON 429 after the configured limit 40ms
+ ✓ tests/rate-limit.test.ts > API rate limiting > does not rate-limit the root route 8ms
+stderr | tests/github.integration.test.ts > GitHubClient > times out a hanging request
+GitHub request failed: timeout.
+
+ ✓ tests/github.integration.test.ts > GitHubClient > times out a hanging request 2020ms
+stderr | tests/github.integration.test.ts > GitHubClient > does not follow redirects (renamed repositories report an error)
+GitHub request failed: client_error (HTTP 301).
+
+ ✓ tests/github.integration.test.ts > GitHubClient > does not retry 401 and reports auth without leaking the token 2ms
+ ✓ tests/github.integration.test.ts > GitHubClient > maps 404 to not_found 1ms
+ ✓ tests/github.integration.test.ts > GitHubClient > stops calling GitHub after a primary rate limit until the reset time 1ms
+ ✓ tests/github.integration.test.ts > GitHubClient > treats a secondary rate limit (429 + Retry-After) the same way 0ms
+ ✓ tests/github.integration.test.ts > GitHubClient > caches successful responses for the TTL 1ms
+ ✓ tests/github.integration.test.ts > GitHubClient > does not follow redirects (renamed repositories report an error) 0ms
+ ✓ tests/github.integration.test.ts > GitHub response mapping > maps a commit without the author's e-mail 0ms
+ ✓ tests/github.integration.test.ts > GitHub response mapping > maps merged pull requests 0ms
+ ✓ tests/github.integration.test.ts > GitHub response mapping > maps workflow runs 0ms
+ ✓ tests/github.integration.test.ts > GitHub response mapping > rejects payloads of the wrong shape 0ms
+ ✓ tests/github.integration.test.ts > GitHubService > resolves only allow-listed repositories (case-insensitive) 0ms
+ ✓ tests/github.integration.test.ts > GitHubService > calls the documented GitHub endpoints 1ms
+ ✓ tests/notification-senders.test.ts > EmailSender > gives up after the overall timeout 1009ms
+ ✓ tests/notification-senders.test.ts > EmailSender > redacts SMTP credentials from classified errors 0ms
+ ✓ tests/e2e/github-api.e2e.test.ts > E2E GitHub integration (mobile -> backend -> GitHub) > E2E-G04 times out (with one retry) when GitHub does not answer 2335ms
+ ✓ tests/e2e/github-api.e2e.test.ts > E2E GitHub integration (mobile -> backend -> GitHub) > E2E-G05 shares one GitHub request between clients within the cache TTL 11ms
+ ✓ tests/e2e/github-api.e2e.test.ts > E2E GitHub integration (mobile -> backend -> GitHub) > E2E-G06 refuses unlisted repositories and unauthenticated callers without contacting GitHub 6ms
+
+ Test Files  18 passed (18)
+      Tests  225 passed (225)
+   Start at  14:08:16
+   Duration  3.73s (tests 49%, import 41%, transform 7%, setup 2%, worker 1%)
+
