@@ -20,9 +20,11 @@ void main() {
     );
 
     expect(find.text('Overview'), findsAtLeastNWidgets(1));
-    expect(find.text('Elevated errors after deployment'), findsOneWidget);
-    expect(find.text('INCIDENTS BY SEVERITY'), findsOneWidget);
+    expect(find.text('INCIDENTS'), findsOneWidget);
     expect(find.text('SERVICE HEALTH'), findsOneWidget);
+    // Data comes from the backend only: no invented incident or metrics.
+    expect(find.text('Elevated errors after deployment'), findsNothing);
+    expect(find.textContaining('payments-api'), findsNothing);
   });
 
   testWidgets('S04IncidentsScreen renders incident list and tabs', (WidgetTester tester) async {

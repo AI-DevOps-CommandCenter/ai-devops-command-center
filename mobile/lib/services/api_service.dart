@@ -1,9 +1,8 @@
+import '../models/service_metrics_model.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../models/service_model.dart';
 import '../models/incident_model.dart';
-import '../models/metric_model.dart';
 import '../models/cicd_model.dart';
 import '../models/playbook_model.dart';
 import '../models/notification_model.dart';
@@ -117,21 +116,6 @@ class ApiService {
     }
   }
 
-  /// Fetches registered backend services (GET /api/services)
-  Future<List<ServiceModel>> fetchServices() async {
-    final response = await _safeGet(ApiEndpoints.services);
-
-    if (response.statusCode == 200) {
-      final Map<String, dynamic> body = jsonDecode(response.body);
-      if (body['data'] is List) {
-        final List list = body['data'];
-        return list.map((e) => ServiceModel.fromJson(e)).toList();
-      }
-      return [];
-    } else {
-      throw ApiException(_parseErrorMessage(response), response.statusCode);
-    }
-  }
 
   /// Fetches production incidents (GET /api/incidents)
   Future<List<IncidentModel>> fetchIncidents({
@@ -248,15 +232,26 @@ class ApiService {
     throw ApiException(_parseErrorMessage(response), response.statusCode);
   }
 
-  /// Fetches live system metrics
-  Future<MetricModel> fetchMetrics() async {
-    return MetricModel(
-      cpuUsage: 78.4,
-      memoryUsage: 64.1,
-      errorRate: 4.2,
-      latencyMs: 142,
-      timestamp: DateTime.now(),
-    );
+  /// GET /api/metrics/services – health of every service Prometheus scrapes.
+  Future<List<ServiceHealth>> fetchServiceHealth() async {
+    final response = await _safeGet('${ApiEndpoints.baseUrl}/api/metrics/services');
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      final list = decoded is Map && decoded['data'] is List ? decoded['data'] as List : const [];
+      return list.whereType<Map>().map((m) => ServiceHealth.fromJson(Map<String, dynamic>.from(m))).toList();
+    }
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
+  }
+
+  /// GET /api/metrics/services/:service?window=… – current values and series.
+  Future<ServiceMetrics> fetchServiceMetrics(String service, {int windowMinutes = 60}) async {
+    final response = await _safeGet(
+        '${ApiEndpoints.baseUrl}/api/metrics/services/${Uri.encodeComponent(service)}?window=$windowMinutes');
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      return ServiceMetrics.fromJson(Map<String, dynamic>.from(decoded['data'] as Map));
+    }
+    throw ApiException(_parseErrorMessage(response), response.statusCode);
   }
 
   // ==========================================

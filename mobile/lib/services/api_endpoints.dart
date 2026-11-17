@@ -28,8 +28,6 @@ class ApiEndpoints {
   static String get authConfig => '$baseUrl/api/auth/config';
 
   // Services Management (Vinuka's routes)
-  static String get services => '$baseUrl/api/services';
-  static String serviceById(String id) => '$baseUrl/api/services/$id';
 
   // Incidents & AI Investigation (Vinuka's routes)
   static String get incidents => '$baseUrl/api/incidents';

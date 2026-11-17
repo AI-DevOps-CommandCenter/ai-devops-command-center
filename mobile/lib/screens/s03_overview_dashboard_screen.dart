@@ -6,8 +6,10 @@ import '../widgets/app_icons.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../models/incident_model.dart';
+import '../models/service_metrics_model.dart';
+import '../widgets/metric_widgets.dart';
+import 's17_recommended_action_screen.dart';
 import 's05_incident_details_screen.dart';
-import 's18_approve_action_screen.dart';
 
 class S03OverviewDashboardScreen extends StatefulWidget {
   const S03OverviewDashboardScreen({super.key});
@@ -17,10 +19,19 @@ class S03OverviewDashboardScreen extends StatefulWidget {
 }
 
 class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen> {
-  int _criticalCount = 1;
-  int _openCount = 2;
-  int _resolvedCount = 3;
+  int _criticalCount = 0;
+  int _openCount = 0;
+  int _resolvedCount = 0;
   IncidentModel? _topIncident;
+  String? _recommendedAction;
+  bool _loadingIncidents = true;
+  String? _incidentError;
+  List<ServiceHealth> _services = [];
+  ServiceMetrics? _metrics;
+  String? _metricsError;
+  int _unread = 0;
+
+  static const _defaultService = 'sample-app';
 
   @override
   void initState() {
@@ -29,35 +40,95 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
   }
 
   Future<void> _loadDashboardData() async {
-    try {
-      final summary = await ApiService().fetchDashboardSummary();
-      if (mounted && summary.isNotEmpty) {
-        setState(() {
-          _criticalCount = int.tryParse(summary['critical']?.toString() ?? '') ?? _criticalCount;
-          _openCount = int.tryParse(summary['open']?.toString() ?? '') ??
-              (int.tryParse(summary['total']?.toString() ?? '') ?? _openCount);
-          _resolvedCount = int.tryParse(summary['resolved']?.toString() ?? '') ?? _resolvedCount;
-        });
-      }
-    } catch (_) {}
+    final api = ApiService();
+    String metricsService = _defaultService;
 
     try {
-      final incidents = await ApiService().fetchIncidents();
-      if (mounted && incidents.isNotEmpty) {
-        setState(() {
-          _topIncident = incidents.firstWhere(
-            (i) => i.severity == IncidentSeverity.critical && i.status != IncidentStatus.resolved,
-            orElse: () => incidents.first,
-          );
-          _criticalCount = incidents
-              .where((i) => i.severity == IncidentSeverity.critical && i.status != IncidentStatus.resolved)
-              .length;
-          _openCount = incidents.where((i) => i.status != IncidentStatus.resolved).length;
-          _resolvedCount = incidents.where((i) => i.status == IncidentStatus.resolved).length;
+      final incidents = await api.fetchIncidents();
+      final open = incidents.where((i) => i.status != IncidentStatus.resolved).toList()
+        ..sort((a, b) {
+          final bySeverity = a.severity.index.compareTo(b.severity.index);
+          return bySeverity != 0 ? bySeverity : b.detectedAt.compareTo(a.detectedAt);
         });
+      String? action;
+      if (open.isNotEmpty) {
+        metricsService = open.first.serviceName;
+        try {
+          final rec = await api.fetchRecommendation(open.first.id);
+          action = (rec['analysis'] as Map?)?['recommended_action']?.toString();
+        } catch (_) {
+          action = null; // no analysis yet
+        }
       }
-    } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        _topIncident = open.isEmpty ? null : open.first;
+        _recommendedAction = action;
+        _criticalCount = open.where((i) => i.severity == IncidentSeverity.critical).length;
+        _openCount = open.length;
+        _resolvedCount = incidents.length - open.length;
+        _loadingIncidents = false;
+        _incidentError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingIncidents = false;
+        _incidentError = e is ApiException ? e.message : 'Could not load incidents.';
+      });
+    }
+
+    try {
+      final results = await Future.wait([
+        api.fetchServiceHealth(),
+        api.fetchServiceMetrics(metricsService),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _services = results[0] as List<ServiceHealth>;
+        _metrics = results[1] as ServiceMetrics;
+        _metricsError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _metricsError = e is ApiException ? e.message : 'Metrics unavailable.');
+    }
+
+    try {
+      final notes = await api.fetchNotifications(limit: 50);
+      if (mounted) setState(() => _unread = notes.where((n) => !n.isRead).length);
+    } catch (_) {
+      // The bell just shows no dot.
+    }
   }
+
+  String _shortId(String id) => 'INC-${id.substring(0, id.length < 8 ? id.length : 8).toUpperCase()}';
+
+  String _age(DateTime t) {
+    final d = DateTime.now().difference(t.toLocal());
+    if (d.inMinutes < 60) return '${d.inMinutes} min';
+    if (d.inHours < 48) return '${d.inHours} h';
+    return '${d.inDays} d';
+  }
+
+  String _greeting() {
+    final h = DateTime.now().hour;
+    return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  }
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'[\s._@-]+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    return (parts.first[0] + (parts.length > 1 ? parts[1][0] : '')).toUpperCase();
+  }
+
+  String _actionLabel(String a) => switch (a) {
+        'restart' => 'restarting the service',
+        'circuit_breaker' => 'opening the circuit breaker',
+        'rollback' => 'rolling back the last deployment',
+        'scale' => 'scaling the service',
+        _ => a.replaceAll('_', ' '),
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +167,7 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Production · Good afternoon, $userName',
+                          'Production · ${_greeting()}, $userName',
                           style: TextStyle(fontSize: 13, color: colors.muted),
                         ),
                       ],
@@ -122,6 +193,7 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                             alignment: Alignment.center,
                             children: [
                               LucideIcon(LucideIconData.bell, size: 20, color: colors.text),
+                              if (_unread > 0)
                               Positioned(
                                 top: 9,
                                 right: 10,
@@ -156,7 +228,7 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                           ),
                           alignment: Alignment.center,
                           child: Text(
-                            'AM',
+                            _initials(userName),
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
@@ -176,191 +248,8 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                 children: [
-                  // 1. INC-1042 Critical Hero Card
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: colors.card,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: colors.border),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Top badges row
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: colors.criticalSoft,
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  LucideIcon(LucideIconData.alertTriangle, size: 13, color: colors.critical, strokeWidth: 2),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    'Critical',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.critical,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: colors.warningSoft,
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                'Awaiting approval',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.warning,
-                                ),
-                              ),
-                            ),
-                            const Spacer(),
-                            Text(
-                              '19 min',
-                              style: TextStyle(fontSize: 13, color: colors.muted),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        // Title & Subtitle
-                        Text(
-                          _topIncident != null
-                              ? '${_topIncident!.id.length > 8 ? "INC-${_topIncident!.id.substring(0, 8).toUpperCase()}" : _topIncident!.id} · ${_topIncident!.serviceName}'
-                              : 'INC-1042 · payments-api',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontFamily: 'JetBrains Mono',
-                            color: colors.muted,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _topIncident?.title ?? 'Elevated errors after deployment',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: colors.text,
-                          ),
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        // Description
-                        RichText(
-                          text: TextSpan(
-                            style: TextStyle(fontSize: 14, color: colors.muted),
-                            children: [
-                              const TextSpan(text: 'AI found a probable cause and recommends '),
-                              TextSpan(
-                                text: 'rolling back to v2.8.0',
-                                style: TextStyle(fontWeight: FontWeight.w700, color: colors.text),
-                              ),
-                              const TextSpan(text: '.'),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 14),
-
-                        // Actions buttons row
-                        Row(
-                          children: [
-                            Expanded(
-                              child: SizedBox(
-                                height: 48,
-                                child: OutlinedButton(
-                                  onPressed: () {
-                                    if (_topIncident != null) {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => S05IncidentDetailsScreen(
-                                            incidentId: _topIncident!.id,
-                                          ),
-                                          settings: RouteSettings(arguments: _topIncident!.id),
-                                        ),
-                                      );
-                                    } else {
-                                      Navigator.pushNamed(context, '/incident-details');
-                                    }
-                                  },
-                                  style: OutlinedButton.styleFrom(
-                                    backgroundColor: colors.card,
-                                    side: BorderSide(color: colors.border),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    'Details',
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.text,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: SizedBox(
-                                height: 48,
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    if (_topIncident != null) {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => S18ApproveActionScreen(
-                                            incidentId: _topIncident!.id,
-                                          ),
-                                          settings: RouteSettings(arguments: _topIncident!.id),
-                                        ),
-                                      );
-                                    } else {
-                                      Navigator.pushNamed(context, '/recommended-action');
-                                    }
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: colors.accent,
-                                    foregroundColor: colors.onAccent,
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  child: const Text(
-                                    'Review action',
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+                  // 1. Most urgent open incident
+                  _buildHeroCard(context),
 
                   const SizedBox(height: 14),
 
@@ -369,7 +258,7 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'INCIDENTS BY SEVERITY',
+                        'INCIDENTS',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -404,7 +293,7 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                           title: 'Critical',
                           dotColor: colors.critical,
                           count: '$_criticalCount',
-                          sub: 'open',
+                          sub: 'open, critical',
                           onTap: () {
                             Navigator.pushNamed(context, '/incidents');
                           },
@@ -414,7 +303,7 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                       Expanded(
                         child: _buildSeverityCard(
                           context,
-                          title: 'Warning',
+                          title: 'Open',
                           dotColor: colors.warning,
                           count: '$_openCount',
                           sub: 'open',
@@ -430,7 +319,7 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                           title: 'Resolved',
                           dotColor: colors.ok,
                           count: '$_resolvedCount',
-                          sub: 'resolved',
+                          sub: 'all time',
                           onTap: () {
                             Navigator.pushNamed(context, '/incidents');
                           },
@@ -459,7 +348,7 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                           Navigator.pushNamed(context, '/services');
                         },
                         child: Text(
-                          '6 services',
+                          '${_services.length} services',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -472,11 +361,9 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
 
                   const SizedBox(height: 8),
 
-                  // Service health bar card
+                  // Service health bar card (Prometheus up + error rate)
                   InkWell(
-                    onTap: () {
-                      Navigator.pushNamed(context, '/services');
-                    },
+                    onTap: () => Navigator.pushNamed(context, '/services'),
                     borderRadius: BorderRadius.circular(16),
                     child: Container(
                       padding: const EdgeInsets.all(16),
@@ -485,44 +372,18 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: colors.border),
                       ),
-                      child: Column(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: SizedBox(
-                              height: 8,
-                              child: Row(
-                                children: [
-                                  Expanded(flex: 3, child: Container(color: colors.ok)),
-                                  const SizedBox(width: 2),
-                                  Expanded(flex: 2, child: Container(color: colors.warning)),
-                                  const SizedBox(width: 2),
-                                  Expanded(flex: 1, child: Container(color: colors.critical)),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              '3 healthy  2 warning  1 degraded',
-                              style: TextStyle(fontSize: 13, color: colors.muted),
-                            ),
-                          ),
-                        ],
-                      ),
+                      child: ServiceHealthBar(services: _services),
                     ),
                   ),
 
                   const SizedBox(height: 14),
 
-                  // 3. PAYMENTS-API · LAST HOUR
+                  // 3. Metrics of the incident's service (or sample-app) for the last hour
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'PAYMENTS-API · LAST HOUR',
+                        '${(_metrics?.service ?? _topIncident?.serviceName ?? _defaultService).toUpperCase()} · LAST HOUR',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -531,16 +392,10 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                         ),
                       ),
                       InkWell(
-                        onTap: () {
-                          Navigator.pushNamed(context, '/metrics');
-                        },
+                        onTap: () => Navigator.pushNamed(context, '/metrics', arguments: _metrics?.service),
                         child: Text(
                           'Metrics',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: colors.accent,
-                          ),
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.accent),
                         ),
                       ),
                     ],
@@ -548,125 +403,23 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
 
                   const SizedBox(height: 8),
 
-                  // Row 1: Error rate & P95 latency
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildMetricCard(
-                          context,
-                          title: 'Error rate',
-                          value: '12.4%',
-                          valueColor: colors.critical,
-                          sub: 'Target below 1%',
-                          points: const [
-                            Offset(2.0, 33.0),
-                            Offset(15.6, 33.0),
-                            Offset(29.2, 32.8),
-                            Offset(42.8, 33.0),
-                            Offset(56.4, 33.0),
-                            Offset(70.0, 26.8),
-                            Offset(83.6, 15.2),
-                            Offset(97.2, 8.2),
-                            Offset(110.8, 5.0),
-                            Offset(124.4, 5.7),
-                            Offset(138.0, 5.0),
-                          ],
-                          strokeColor: colors.critical,
-                          onTap: () {
-                            Navigator.pushNamed(context, '/metrics');
-                          },
-                        ),
+                  if (_metrics != null)
+                    ServiceMetricsGrid(
+                      metrics: _metrics!,
+                      onTap: () => Navigator.pushNamed(context, '/metrics', arguments: _metrics!.service),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: colors.border),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _buildMetricCard(
-                          context,
-                          title: 'P95 latency',
-                          value: '2.4 s',
-                          valueColor: colors.critical,
-                          sub: 'Target below 300 ms',
-                          points: const [
-                            Offset(2.0, 33.0),
-                            Offset(15.6, 33.0),
-                            Offset(29.2, 33.0),
-                            Offset(42.8, 33.0),
-                            Offset(56.4, 33.0),
-                            Offset(70.0, 27.1),
-                            Offset(83.6, 15.7),
-                            Offset(97.2, 8.6),
-                            Offset(110.8, 5.0),
-                            Offset(124.4, 5.7),
-                            Offset(138.0, 5.0),
-                          ],
-                          strokeColor: colors.critical,
-                          onTap: () {
-                            Navigator.pushNamed(context, '/metrics');
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  // Row 2: CPU & Memory
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildMetricCard(
-                          context,
-                          title: 'CPU',
-                          value: '71%',
-                          valueColor: colors.warning,
-                          sub: 'c5.xlarge · 4 vCPU',
-                          points: const [
-                            Offset(2.0, 33.0),
-                            Offset(15.6, 30.1),
-                            Offset(29.2, 31.1),
-                            Offset(42.8, 25.3),
-                            Offset(56.4, 20.4),
-                            Offset(70.0, 12.7),
-                            Offset(83.6, 7.9),
-                            Offset(97.2, 6.0),
-                            Offset(110.8, 5.0),
-                            Offset(124.4, 6.0),
-                            Offset(138.0, 5.0),
-                          ],
-                          strokeColor: colors.warning,
-                          onTap: () {
-                            Navigator.pushNamed(context, '/metrics');
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _buildMetricCard(
-                          context,
-                          title: 'Memory',
-                          value: '64%',
-                          valueColor: colors.info,
-                          sub: '10.2 of 16 GB',
-                          points: const [
-                            Offset(2.0, 33.0),
-                            Offset(15.6, 28.3),
-                            Offset(29.2, 23.7),
-                            Offset(42.8, 23.7),
-                            Offset(56.4, 19.0),
-                            Offset(70.0, 14.3),
-                            Offset(83.6, 9.7),
-                            Offset(97.2, 9.7),
-                            Offset(110.8, 5.0),
-                            Offset(124.4, 5.0),
-                            Offset(138.0, 5.0),
-                          ],
-                          strokeColor: colors.info,
-                          onTap: () {
-                            Navigator.pushNamed(context, '/metrics');
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
+                      child: _metricsError == null
+                          ? const Center(child: CircularProgressIndicator())
+                          : Text(_metricsError!, style: TextStyle(fontSize: 13, color: colors.muted)),
+                    ),
 
                   const SizedBox(height: 16),
 
@@ -686,6 +439,150 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
         ),
       ),
       bottomNavigationBar: const AppBottomNav(currentIndex: 0),
+    );
+  }
+
+  Widget _badge(String text, Color fg, Color bg, {IconData? icon}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (icon != null) ...[Icon(icon, size: 13, color: fg), const SizedBox(width: 4)],
+          Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg)),
+        ]),
+      );
+
+  Widget _buildHeroCard(BuildContext context) {
+    final colors = context.colors;
+    final decoration = BoxDecoration(
+      color: colors.card,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: colors.border),
+    );
+    if (_loadingIncidents) {
+      return Container(
+        padding: const EdgeInsets.all(24),
+        decoration: decoration,
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_incidentError != null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: decoration,
+        child: Row(children: [
+          Icon(Icons.cloud_off, color: colors.critical),
+          const SizedBox(width: 10),
+          Expanded(child: Text(_incidentError!, style: TextStyle(color: colors.text))),
+          TextButton(onPressed: _loadDashboardData, child: const Text('Retry')),
+        ]),
+      );
+    }
+    final inc = _topIncident;
+    if (inc == null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: decoration,
+        child: Row(children: [
+          Icon(Icons.verified_outlined, color: colors.ok, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('All clear', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: colors.text)),
+              const SizedBox(height: 2),
+              Text('No open incidents right now.', style: TextStyle(fontSize: 14, color: colors.muted)),
+            ]),
+          ),
+        ]),
+      );
+    }
+
+    final (Color sevFg, Color sevBg) = switch (inc.severity) {
+      IncidentSeverity.critical => (colors.critical, colors.criticalSoft),
+      IncidentSeverity.high => (colors.warning, colors.warningSoft),
+      _ => (colors.info, colors.accentSoft),
+    };
+    final statusText = switch (inc.status) {
+      IncidentStatus.investigating => _recommendedAction == null ? 'Investigating' : 'Action recommended',
+      IncidentStatus.remediating => 'Remediating',
+      _ => 'Open',
+    };
+    final sevName = inc.severity.name[0].toUpperCase() + inc.severity.name.substring(1);
+
+    void open(Widget screen) => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => screen, settings: RouteSettings(arguments: inc.id)),
+        );
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: decoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            _badge(sevName, sevFg, sevBg, icon: Icons.warning_amber_rounded),
+            const SizedBox(width: 8),
+            _badge(statusText, colors.warning, colors.warningSoft),
+            const Spacer(),
+            Text(_age(inc.detectedAt), style: TextStyle(fontSize: 13, color: colors.muted)),
+          ]),
+          const SizedBox(height: 12),
+          Text('${_shortId(inc.id)} · ${inc.serviceName}',
+              style: TextStyle(fontSize: 13, fontFamily: 'JetBrains Mono', color: colors.muted)),
+          const SizedBox(height: 2),
+          Text(inc.title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: colors.text)),
+          const SizedBox(height: 8),
+          if (_recommendedAction != null)
+            RichText(
+              text: TextSpan(
+                style: TextStyle(fontSize: 14, color: colors.muted),
+                children: [
+                  const TextSpan(text: 'AI found a probable cause and recommends '),
+                  TextSpan(
+                    text: _actionLabel(_recommendedAction!),
+                    style: TextStyle(fontWeight: FontWeight.w700, color: colors.text),
+                  ),
+                  const TextSpan(text: '.'),
+                ],
+              ),
+            )
+          else
+            Text('The AI investigation is still running.', style: TextStyle(fontSize: 14, color: colors.muted)),
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(
+              child: SizedBox(
+                height: 48,
+                child: OutlinedButton(
+                  onPressed: () => open(S05IncidentDetailsScreen(incidentId: inc.id)),
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: colors.card,
+                    side: BorderSide(color: colors.border),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text('Details', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: colors.text)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SizedBox(
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: _recommendedAction == null ? null : () => open(S17RecommendedActionScreen(incidentId: inc.id)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: colors.accent,
+                    foregroundColor: colors.onAccent,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('Review action', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ),
+          ]),
+        ],
+      ),
     );
   }
 
@@ -752,80 +649,4 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
       ),
     );
   }
-
-  Widget _buildMetricCard(
-    BuildContext context, {
-    required String title,
-    required String value,
-    required Color valueColor,
-    required String sub,
-    required List<Offset> points,
-    required Color strokeColor,
-    required VoidCallback onTap,
-  }) {
-    final colors = context.colors;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: colors.card,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: colors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: TextStyle(fontSize: 13, color: colors.muted)),
-            const SizedBox(height: 2),
-            Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: valueColor)),
-            const SizedBox(height: 6),
-            SizedBox(
-              height: 36,
-              width: double.infinity,
-              child: CustomPaint(
-                painter: _SparklinePainter(points: points, color: strokeColor),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(sub, style: TextStyle(fontSize: 12, color: colors.muted), maxLines: 1, overflow: TextOverflow.ellipsis),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SparklinePainter extends CustomPainter {
-  final List<Offset> points;
-  final Color color;
-
-  _SparklinePainter({required this.points, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (points.isEmpty) return;
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final path = Path();
-    for (int i = 0; i < points.length; i++) {
-      final x = points[i].dx * (size.width / 140.0);
-      final y = points[i].dy * (size.height / 36.0);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _SparklinePainter oldDelegate) => false;
 }
