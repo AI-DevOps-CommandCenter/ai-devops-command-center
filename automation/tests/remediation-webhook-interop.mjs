@@ -190,6 +190,8 @@ test('disabled execution mode -> 503 (verifier output + workflow 06 routing)', a
   assert.equal(status.value, '={{ 503 }}');
   assert.deepEqual(next('Execution blocked response', 0), ['Respond 503']);
   assert.equal(node('Respond 503').parameters.options.responseCode, '={{ $json.http_status }}');
-  // The run is not started on this path: "Sign start request" is only on the true branch.
-  assert.deepEqual(next('Execution available?', 0), ['Sign start request']);
+  // The run is not started on this path: "Sign start request" is only on the true
+  // branch, after the webhook nonce was claimed in the database (KI-1).
+  assert.deepEqual(next('Execution available?', 0), ['Sign nonce claim']);
+  assert.deepEqual(next('Nonce claimed?', 0), ['Sign start request']);
 });

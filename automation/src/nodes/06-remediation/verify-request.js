@@ -28,6 +28,8 @@ const secret = env.MACHINE_SIGNING_SECRET;
 if (!secret || secret.length < 32) return reject(503, 'Remediation is not configured (signing secret missing).');
 
 const signedPath = env.N8N_REMEDIATION_SIGNED_PATH || '/webhook/remediation';
+// First filter only: static data is not shared between parallel executions
+// (KI-1). The database claim ("Claim webhook nonce", next nodes) is atomic.
 const store = $getWorkflowStaticData('global');
 store.seenNonces = store.seenNonces || {};
 const check = verifySignedRequest(secret, j.headers, 'POST', signedPath, raw, store.seenNonces, Date.now());
@@ -65,5 +67,8 @@ return [{
     incident_id: body.incident_id,
     requested_action: body.action_type,
     request_payload: body.request_payload || {},
+    // KI-1: claimed in the database by "Claim webhook nonce" before the start.
+    webhook_nonce: String(j.headers['x-dc-nonce']),
+    webhook_signed_at: Number(j.headers['x-dc-timestamp']),
   },
 }];

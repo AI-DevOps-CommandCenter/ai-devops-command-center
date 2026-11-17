@@ -33,13 +33,13 @@ Details: `docs/automation-integration-requirements.md` (contracts, known issues,
 - [x] **N-1** retry-safe completion, **N-2** soft-failure notifications through 09, **N-3** alert de-dupe confirmation (`60e9683`), **N-5** n8n on `127.0.0.1` (`b99ee0f`)
 - [x] 09 soft-failure path and `disabled` mode tested in a live local n8n (not only unit tests)
 
-**Known issue:** **KI-1**: 06's replay nonces live in workflow static data and can be lost under concurrent executions; the database run state prevents a second start (seen with a mock backend only). Not fixed; strict failing check kept in `npm run test:n8n:replay`. Proposal D-N8N-6 in `docs/automation-decision-proposals.md`.
+**KI-1 (fixed 18 Nov 2026):** 06 now claims each webhook nonce in the database (`POST /api/machine/remediation-nonces` → `consume_automation_nonce`) before the start; static data is only a first filter. `npm run test:n8n:replay` 20/20.
 
 **Waiting on others (see the handoff table, §7):**
 - [ ] **BD-5 backend trigger**: Vinuka: call `POST <n8n>/webhook/remediation` after an approval (`buildSignedHeaders`, new nonce per attempt)
 - [ ] **BD-6**: backend sets `request_payload.service_name`
 - [ ] **Real execution**: Keshan's playbook executor (06 has `disabled`/`simulate` only)
-- [ ] **KI-1**: backend + database team agree an atomic shared nonce store
+- [x] **KI-1**: atomic shared nonce store: database claim (D-N8N-6), 18 Nov 2026
 - [ ] **BD-1**: incident creation (contract + migration + route); then replace "Create incident (backend) – BLOCKED" in 01
 - [ ] **BD-2**: AI-analysis storage contract and route (05 needs no change)
 - [ ] **BD-4**: read incident data and save postmortems (with Vinuka; workflow 08 is Tharindu's)

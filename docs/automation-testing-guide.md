@@ -22,7 +22,7 @@ The integration test uses its own temporary n8n folder (never `~/.n8n`). It impo
 | Recovery-check interop with the real backend route | **PASS** (10 Nov) |
 | BD-5 remediation webhook interop (`npm run test:interop:remediation`) | **12 / 12 passed** |
 | n8n integration (`npm run test:n8n`) | **91 / 91 checks passed**, 0 skipped (86 checks of 10 Nov + n8n restart in `disabled` mode + 4 BD-5 checks) |
-| Replay protection (`npm run test:n8n:replay`) | **19 / 20**: the expected failure of known issue KI-1 (S5), reproduced in every run |
+| Replay protection (`npm run test:n8n:replay`) | **20 / 20** since the KI-1 fix (18 Nov 2026). Before: 19/20, S5 failed on purpose |
 | Backend (`cd backend && npx vitest run`) | **153 / 153 passed**; `npx tsc --noEmit` clean (10 Nov, not re-run) |
 
 (8 Nov 2026: unit 18/18, integration 61/61, before N-1, N-2, N-3 and BD-3. 10 Nov: integration 86/86, before the BD-5 disabled-mode checks.)
@@ -55,7 +55,7 @@ Integration checks per workflow. All ran **against mocks**, so they are simulate
 | S2 exact replay while the first execution is still running | 202, 409 | 2 / 1 | `success`, 1 completion | backend run state |
 | S3 two identical requests at the same time | 202 + 409 | 2 / 1 | `success`, 1 completion | backend run state |
 | S4 five identical requests at the same time | one 202, four 409 | 5 / 1 | `success`, 1 completion | backend run state (n8n: 0) |
-| S5 two **different** valid requests at the same time, then each replayed | 202, 202, then 409, 409 | the replay whose nonce was lost reaches `/start` again (refused) | both `success`, 1 completion each | one by n8n, one by backend run state → **check FAILS (KI-1)** |
+| S5 two **different** valid requests at the same time, then each replayed | 202, 202, then 409, 409 | the replay whose nonce was lost reaches `/start` again (refused) | both `success`, 1 completion each | before 18 Nov: one by n8n, one by backend run state → check failed (KI-1). Now both by the database nonce claim, before any `/start` → **passes** |
 
 No run was started or completed twice. The duplicate protection seen here comes from the **mock** backend's run-state check; the real database row lock (`start_playbook_run`, `SELECT … FOR UPDATE`) was not exercised.
 
@@ -70,7 +70,6 @@ No run was started or completed twice. The duplicate protection seen here comes 
 
 **Not covered by automated tests:**
 - workflow 09's **crash** entry point ("On workflow error") inside a running n8n, and whether n8n runs it when a sub-workflow crashes (logic unit-tested only);
-- concurrent replay protection in n8n alone (known issue KI-1);
 - the real backend calling n8n after an approval (BD-5 backend trigger not implemented);
 - every real external service, the real database and Supabase.
 

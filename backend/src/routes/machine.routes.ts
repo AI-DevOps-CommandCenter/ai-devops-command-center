@@ -51,6 +51,12 @@ export interface MachineDeps {
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Webhook nonces share the database store with the n8n -> backend nonces; the
+// prefix keeps the two directions apart. Same format as machine-auth.ts accepts,
+// shortened so prefix + nonce fits consume_automation_nonce's 200 characters.
+const WEBHOOK_NONCE_PREFIX = "webhook:";
+const WEBHOOK_NONCE_PATTERN = /^[A-Za-z0-9_-]{16,192}$/;
+
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -147,6 +153,44 @@ export function createMachineRouter(deps: MachineDeps | null): Router {
       resetSessionOnJwtError(deps.automation, error);
       return sendDbError(res, error, "Machine start playbook run error:", "Failed to start playbook run.");
     }
+  });
+
+  // POST /api/machine/remediation-nonces   (KI-1 / D-N8N-6)
+  // Body: { nonce, signed_at }  = X-DC-Nonce and X-DC-Timestamp (unix seconds)
+  // of the webhook request the BACKEND sent to n8n workflow 06. Workflow 06
+  // calls this right after checking that request's HMAC and before starting
+  // the run, so each webhook request is accepted once, atomically, in the
+  // database (consume_automation_nonce), also when n8n runs executions in
+  // parallel. 200 = first use, 409 = replay, 401 = outside the 5 minute window.
+  router.post("/remediation-nonces", async (req: Request, res: Response) => {
+    const { nonce, signed_at } = req.body ?? {};
+
+    if (typeof nonce !== "string" || !WEBHOOK_NONCE_PATTERN.test(nonce)) {
+      return res.status(400).json({ success: false, message: "A valid nonce is required." });
+    }
+    if (typeof signed_at !== "number" || !Number.isInteger(signed_at) || signed_at <= 0) {
+      return res.status(400).json({ success: false, message: "signed_at must be the unix timestamp of the webhook request." });
+    }
+
+    const client = await getAutomationClient(deps.automation, res);
+    if (!client) return;
+
+    const { error } = await client.rpc("consume_automation_nonce", {
+      p_nonce: WEBHOOK_NONCE_PREFIX + nonce,
+      p_signed_at: new Date(signed_at * 1000).toISOString()
+    });
+
+    if (!error) {
+      return res.status(200).json({ success: true, message: "Nonce accepted." });
+    }
+    resetSessionOnJwtError(deps.automation, error);
+    if (error.code === "DC409") {
+      return res.status(409).json({ success: false, message: "Replayed request (nonce already used)." });
+    }
+    if (error.code === "DC401") {
+      return res.status(401).json({ success: false, message: "Signed request is outside the 5 minute window." });
+    }
+    return sendDbError(res, error, "Machine remediation nonce error:", "Failed to check the request nonce.");
   });
 
   // POST /api/machine/playbook-runs/:id/complete
