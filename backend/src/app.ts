@@ -46,6 +46,11 @@ import {
 
 import notificationRoutes from "./routes/notification.routes.js";
 import deviceTokenRoutes from "./routes/device-token.routes.js";
+import { createMetricsRouter } from "./routes/metrics.routes.js";
+import {
+  createPrometheusClient,
+  type PrometheusClient
+} from "./services/metrics.service.js";
 
 export interface AppOptions {
   // Machine endpoint dependencies. undefined = read from the environment;
@@ -56,6 +61,16 @@ export interface AppOptions {
   // undefined = read from the environment;
   // null = disabled.
   remediationDispatcher?: RemediationWebhookDispatcher | null;
+  // Prometheus client for /api/metrics. undefined = PROMETHEUS_URL from the
+  // environment; null = disabled (the endpoints answer 503).
+  prometheus?: PrometheusClient | null;
+}
+
+function prometheusFromEnv(): PrometheusClient | null {
+  const url = process.env.PROMETHEUS_URL?.trim();
+  if (!url) return null;
+  if (!/^https?:\/\//.test(url)) throw new Error("PROMETHEUS_URL must be an http(s) URL.");
+  return createPrometheusClient(url);
 }
 
 // n8n machine endpoints are enabled only when MACHINE_SIGNING_SECRET,
@@ -152,6 +167,12 @@ export function createApp(
   app.use("/api/remediation-executions", remediationExecutionRoutes);
   app.use("/api/notifications", notificationRoutes);
   app.use("/api/device-tokens", deviceTokenRoutes);
+  app.use(
+    "/api/metrics",
+    createMetricsRouter(
+      options.prometheus === undefined ? prometheusFromEnv() : options.prometheus
+    )
+  );
 
   app.get("/", (_req, res) => {
     res.json({
