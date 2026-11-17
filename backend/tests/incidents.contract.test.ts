@@ -113,3 +113,41 @@ describe("POST /api/incidents (existing contract preserved)", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("PATCH /api/incidents/:id sets resolved_at from the status", () => {
+  const app = createApp(testConfig());
+  const id = "33333333-3333-4333-8333-333333333333";
+
+  async function patch(body: Record<string, unknown>) {
+    mockValidUser();
+    const { client, calls } = createMockUserClient({
+      incidents: { data: { id, status: body.status ?? "investigating" }, error: null }
+    });
+    supabaseMocks.createUserSupabaseClient.mockReturnValue(client);
+    const res = await request(app)
+      .patch(`/api/incidents/${id}`)
+      .set("Authorization", `Bearer ${TEST_TOKEN}`)
+      .send(body);
+    const [update] = callsFor(calls, "incidents", "update");
+    return { res, update: update?.args[0] as Record<string, unknown> | undefined };
+  }
+
+  it("sets resolved_at when the incident is resolved", async () => {
+    const { res, update } = await patch({ status: "resolved" });
+    expect(res.status).toBe(200);
+    expect(update?.status).toBe("resolved");
+    expect(typeof update?.resolved_at).toBe("string");
+  });
+
+  it("clears resolved_at when the incident is reopened", async () => {
+    const { res, update } = await patch({ status: "investigating" });
+    expect(res.status).toBe(200);
+    expect(update).toHaveProperty("resolved_at", null);
+  });
+
+  it("leaves resolved_at alone when the status is not changed", async () => {
+    const { res, update } = await patch({ title: "Updated incident title" });
+    expect(res.status).toBe(200);
+    expect(update).not.toHaveProperty("resolved_at");
+  });
+});

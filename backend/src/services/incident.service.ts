@@ -117,11 +117,20 @@ export async function updateIncident(
   incidentId: string,
   input: UpdateIncidentInput
 ) {
+  const now = new Date().toISOString();
+  // resolved_at follows the status: set when the incident is resolved or
+  // closed, cleared when it is reopened. Other updates leave it unchanged.
+  const resolution =
+    input.status === undefined
+      ? {}
+      : { resolved_at: input.status === "resolved" || input.status === "closed" ? now : null };
+
   const { data, error } = await client
     .from("incidents")
     .update({
       ...input,
-      updated_at: new Date().toISOString()
+      ...resolution,
+      updated_at: now
     })
     .eq("id", incidentId)
     .select()
