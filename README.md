@@ -59,6 +59,8 @@ Dashboard (S03), incidents (S04–S08), logs (S09), metrics and services (S10–
 
 ## 4. Running it locally
 
+**First time? Follow [`docs/SETUP.md`](docs/SETUP.md)**: step by step from `git clone` to a working demo, including which secrets are shared privately and which you create yourself. `node scripts/setup-local.mjs` creates the `.env` files and the local-only secrets.
+
 Prerequisites: Docker Desktop, Node.js 20+, Flutter 3.x, Python 3, a Supabase project with the migrations from `supabase/migrations` applied.
 
 ```bash
