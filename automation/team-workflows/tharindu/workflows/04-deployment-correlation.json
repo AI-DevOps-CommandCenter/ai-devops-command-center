@@ -4,9 +4,9 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## 04 – Deployment Correlation (owner: Tharindu)\nCommits + GitHub Actions runs before the incident. \"Suspect\" = within `DEPLOY_SUSPECT_MINUTES`. Correlation is a **possible** cause, never a confirmed one.",
-        "width": 700,
-        "height": 220
+        "content": "## 04 – Deployment Correlation (owner: Tharindu)\nCommits + GitHub Actions runs (when `GITHUB_OWNER`/`GITHUB_REPO` are set) and local releases recorded by `monitoring/scripts/release.sh` (`GET /api/machine/deployments`, signed) before the incident. \"Suspect\" = within `DEPLOY_SUSPECT_MINUTES`; a local release is the strongest signal (rollback). Correlation is a **possible** cause, never a confirmed one.",
+        "width": 760,
+        "height": 240
       },
       "id": "611936c7-85de-4ce2-a1a3-e6fc68bb83f6",
       "name": "Note 1",
@@ -33,7 +33,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Workflow 04 – Deployment Correlation (owner: Tharindu)\n// Node: \"Build GitHub requests\". The project has no deployment records yet,\n// so changes are taken from the GitHub REST API: recent commits and recent\n// GitHub Actions workflow runs of GITHUB_OWNER/GITHUB_REPO (read-only token).\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst env = $env;\nconst input = readInvestigationInput($input.first().json);\nconst ctx = input.ctx;\n\nif (!input.ok) {\n  return [{ json: { skip: true, result: investigationResult('deployments', ctx, { status: 'invalid_input', error: { kind: 'invalid_input', message: input.error } }) } }];\n}\nconst owner = env.GITHUB_OWNER;\nconst repo = env.GITHUB_REPO;\nif (!owner || !repo || !/^[A-Za-z0-9_.-]{1,100}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) {\n  return [{ json: { skip: true, result: investigationResult('deployments', ctx, { status: 'not_configured', summary: 'GitHub repository is not configured.', error: { kind: 'not_configured', message: 'Set GITHUB_OWNER and GITHUB_REPO in the n8n environment.' } }) } }];\n}\n\nconst api = String(env.GITHUB_API_URL || 'https://api.github.com').replace(/\\/+$/, '');\nconst hours = envInt(env, 'DEPLOY_LOOKBACK_HOURS', 24, 1, 168);\nconst until = new Date(ctx.started_at);\nconst since = new Date(until.getTime() - hours * 3600000);\nconst base = api + '/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo);\nconst timeout = envInt(env, 'GITHUB_TIMEOUT_MS', 15000, 1000, 60000);\nconst window = { since: since.toISOString(), until: until.toISOString() };\n\nreturn [\n  { json: { skip: false, ctx, kind: 'commits', window, timeout_ms: timeout, url: base + '/commits?' + toQuery({ since: window.since, until: window.until, per_page: '30' }) } },\n  { json: { skip: false, ctx, kind: 'workflow_runs', window, timeout_ms: timeout, url: base + '/actions/runs?' + toQuery({ created: '>=' + window.since, per_page: '30' }) } },\n];\n"
+        "jsCode": "// Workflow 04 – Deployment Correlation (owner: Tharindu)\n// Node: \"Build GitHub requests\". Two sources of changes before the incident:\n//   - GitHub REST API: recent commits and GitHub Actions workflow runs of\n//     GITHUB_OWNER/GITHUB_REPO (read-only token), when configured;\n//   - local releases recorded by monitoring/scripts/release.sh, read from the\n//     backend in \"Sign local releases request\" (always tried).\n// Without GitHub settings one item { kind: 'none' } is returned, so the local\n// release check still runs.\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst env = $env;\nconst input = readInvestigationInput($input.first().json);\nconst ctx = input.ctx;\n\nif (!input.ok) {\n  return [{ json: { skip: true, result: investigationResult('deployments', ctx, { status: 'invalid_input', error: { kind: 'invalid_input', message: input.error } }) } }];\n}\n\nconst hours = envInt(env, 'DEPLOY_LOOKBACK_HOURS', 24, 1, 168);\nconst until = new Date(ctx.started_at);\nconst since = new Date(until.getTime() - hours * 3600000);\nconst window = { since: since.toISOString(), until: until.toISOString() };\n\nconst owner = env.GITHUB_OWNER;\nconst repo = env.GITHUB_REPO;\nif (!owner || !repo || !/^[A-Za-z0-9_.-]{1,100}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) {\n  return [{ json: { skip: false, ctx, kind: 'none', window, github_reason: 'GitHub repository is not configured (GITHUB_OWNER, GITHUB_REPO).' } }];\n}\n\nconst api = String(env.GITHUB_API_URL || 'https://api.github.com').replace(/\\/+$/, '');\nconst base = api + '/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo);\nconst timeout = envInt(env, 'GITHUB_TIMEOUT_MS', 15000, 1000, 60000);\n\nreturn [\n  { json: { skip: false, ctx, kind: 'commits', window, timeout_ms: timeout, url: base + '/commits?' + toQuery({ since: window.since, until: window.until, per_page: '30' }) } },\n  { json: { skip: false, ctx, kind: 'workflow_runs', window, timeout_ms: timeout, url: base + '/actions/runs?' + toQuery({ created: '>=' + window.since, per_page: '30' }) } },\n];\n"
       },
       "id": "9fad1d71-c0cf-412e-a4d5-819fb2a132ec",
       "name": "Build GitHub requests",
@@ -42,7 +42,8 @@
       "position": [
         260,
         0
-      ]
+      ],
+      "notes": "Two GitHub requests, or one { kind: none } item when GitHub is not configured."
     },
     {
       "parameters": {
@@ -81,6 +82,55 @@
     },
     {
       "parameters": {
+        "jsCode": "// Shared terminal node for 02/03/04: \"Return skipped result\".\n// Used when no HTTP call is made (invalid input or source not configured).\nreturn [{ json: $input.first().json.result }];\n"
+      },
+      "id": "81ab14a3-42a6-405c-a8fe-2d1a214cf9a9",
+      "name": "Return skipped result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        180
+      ],
+      "notes": "Invalid input: no HTTP call."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cf7addcf-faa0-4acd-a1fe-6830915fd926",
+              "leftValue": "={{ $json.kind !== \"none\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "f7a793fd-4b5b-4cfb-a760-ebc3e8122a5e",
+      "name": "GitHub configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "parameters": {
         "method": "GET",
         "url": "={{ $json.url }}",
         "authentication": "genericCredentialType",
@@ -113,7 +163,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        780,
+        1040,
         -180
       ],
       "onError": "continueRegularOutput",
@@ -130,31 +180,108 @@
     },
     {
       "parameters": {
-        "jsCode": "// Workflow 04 – Node: \"Correlate changes\". A change is \"suspect\" when it\n// happened within DEPLOY_SUSPECT_MINUTES (default 60) before the incident.\n// Workflow runs whose name matches DEPLOY_WORKFLOW_PATTERN (default\n// deploy|release|cd) are treated as deployments.\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst env = $env;\nconst reqs = $('Build GitHub requests').all().map((i) => i.json);\nconst resps = $input.all().map((i) => i.json);\nconst ctx = reqs[0].ctx;\nconst window = reqs[0].window;\nconst incidentAt = new Date(ctx.started_at).getTime();\nconst suspectMin = envInt(env, 'DEPLOY_SUSPECT_MINUTES', 60, 5, 1440);\nlet deployRe;\ntry { deployRe = new RegExp(env.DEPLOY_WORKFLOW_PATTERN || 'deploy|release|\\\\bcd\\\\b', 'i'); } catch (e) { deployRe = /deploy|release|\\bcd\\b/i; }\n\nconst changes = [];\nconst errors = [];\nreqs.forEach((req, idx) => {\n  const r = resps[idx] || {};\n  const c = classifyHttp(r);\n  if (c.kind !== 'ok') { errors.push({ request: req.kind, kind: c.kind, http_status: c.status, retryable: c.retryable, message: c.kind === 'auth' ? 'GitHub token rejected or lacks access (needs read-only Contents + Actions).' : c.message }); return; }\n  if (req.kind === 'commits' && Array.isArray(r.body)) {\n    for (const cm of r.body) {\n      const at = cm.commit && cm.commit.committer && cm.commit.committer.date;\n      if (!at) continue;\n      changes.push({ type: 'commit', ref: String(cm.sha || '').slice(0, 12), at, title: truncate(String((cm.commit.message || '').split('\\n')[0]), 150), author: (cm.author && cm.author.login) || (cm.commit.author && cm.commit.author.name) || null, url: cm.html_url || null });\n    }\n  } else if (req.kind === 'workflow_runs' && r.body && Array.isArray(r.body.workflow_runs)) {\n    for (const run of r.body.workflow_runs) {\n      const at = run.run_started_at || run.created_at;\n      if (!at) continue;\n      changes.push({ type: deployRe.test(String(run.name || '') + ' ' + String(run.path || '')) ? 'deployment' : 'workflow_run', ref: String(run.id), at, title: truncate(String(run.name || '') + ' (' + (run.conclusion || run.status || 'unknown') + ') on ' + (run.head_branch || '?'), 150), conclusion: run.conclusion || null, url: run.html_url || null });\n    }\n  } else {\n    errors.push({ request: req.kind, kind: 'invalid_response', message: 'Unexpected GitHub response shape.' });\n  }\n});\n\nif (errors.length === reqs.length) {\n  const auth = errors.some((e) => e.kind === 'auth');\n  return [{ json: investigationResult('deployments', ctx, { status: 'unavailable', window, summary: auth ? 'GitHub authentication failed.' : 'GitHub API unavailable.', error: errors[0] }) }];\n}\n\nconst before = changes\n  .filter((ch) => { const t = new Date(ch.at).getTime(); return t <= incidentAt && t >= new Date(window.since).getTime(); })\n  .map((ch) => ({ ...ch, minutes_before_incident: Math.round((incidentAt - new Date(ch.at).getTime()) / 60000) }))\n  .sort((a, b) => a.minutes_before_incident - b.minutes_before_incident);\nconst suspects = before.filter((ch) => ch.minutes_before_incident <= suspectMin && (ch.type !== 'workflow_run'));\n\nconst findings = [];\nconst partial = errors.length ? { kind: 'partial', message: errors.map((e) => e.request + ': ' + e.kind).join('; '), details: errors } : null;\nif (!before.length) {\n  return [{ json: investigationResult('deployments', ctx, { status: 'no_evidence', window, summary: 'No commits or deployments in the ' + window.since + ' – ' + window.until + ' window.', confidence: 0.2, error: partial }) }];\n}\nfindings.push(before.length + ' change(s) in the lookback window; ' + suspects.length + ' within ' + suspectMin + ' minutes before the incident.');\nfor (const s of suspects.slice(0, 5)) findings.push(s.type + ' ' + s.ref + ' \"' + s.title + '\" ' + s.minutes_before_incident + ' min before the incident.');\n\nconst evidence = before.slice(0, 10).map((ch) => ({ type: ch.type, source: 'github', ref: ch.ref, timestamp: ch.at, value: ch.title, minutes_before_incident: ch.minutes_before_incident, url: ch.url }));\nreturn [{\n  json: investigationResult('deployments', ctx, {\n    status: suspects.length ? 'evidence_found' : 'no_evidence',\n    window,\n    summary: suspects.length ? 'Recent change(s) shortly before the incident: possible cause, not confirmed.' : 'Changes found, but none close to the incident time.',\n    findings,\n    evidence,\n    confidence: suspects.length ? (suspects.some((s) => s.type === 'deployment') ? 0.6 : 0.45) : 0.2,\n    error: partial,\n  }),\n}];\n"
+        "jsCode": "// Workflow 04 – Node: \"Sign local releases request\". Runs after the GitHub\n// calls (or straight after \"Build GitHub requests\" when GitHub is not\n// configured). Keeps the GitHub responses and builds the signed\n// GET /api/machine/deployments for the releases release.sh recorded in the\n// lookback window. Without signing config the local check is skipped.\n// ---- shared: HMAC signing (same scheme as backend/src/middleware/machine-auth.ts) ----\n// canonical = timestamp + \".\" + nonce + \".\" + METHOD + \".\" + path + \".\" + rawBody\n// header X-DC-Signature = \"sha256=\" + hex(HMAC-SHA256(secret, canonical))\nconst __crypto = require('crypto');\nconst HMAC_MAX_SKEW_SECONDS = 300;\nconst HMAC_MIN_SECRET_LENGTH = 32;\nconst HMAC_NONCE_PATTERN = /^[A-Za-z0-9_-]{16,200}$/;\nconst HMAC_SIGNATURE_PATTERN = /^sha256=[0-9a-f]{64}$/;\n\nfunction hmacCanonical(timestamp, nonce, method, path, body) {\n  return [String(timestamp), nonce, String(method).toUpperCase(), path, body].join('.');\n}\n\nfunction hmacSignature(secret, timestamp, nonce, method, path, body) {\n  return 'sha256=' + __crypto.createHmac('sha256', secret)\n    .update(hmacCanonical(timestamp, nonce, method, path, body), 'utf8').digest('hex');\n}\n\nfunction hmacSecret(value) {\n  if (typeof value !== 'string' || value.length < HMAC_MIN_SECRET_LENGTH) {\n    throw new Error('MACHINE_SIGNING_SECRET is missing or shorter than 32 characters.');\n  }\n  return value;\n}\n\nfunction hmacNonce() {\n  return __crypto.randomBytes(24).toString('base64url');\n}\n\n// Timeout of a signed backend request (BACKEND_TIMEOUT_MS, 1-60 s, default 15 s).\nfunction hmacTimeoutMs(env) {\n  const raw = env.BACKEND_TIMEOUT_MS;\n  const n = Number(raw);\n  if (raw === undefined || raw === '' || !Number.isFinite(n)) return 15000;\n  return Math.min(60000, Math.max(1000, Math.round(n)));\n}\n\n// Build a signed backend request. `path` must be the full request path (e.g.\n// /api/machine/playbook-runs/<id>/start) because the backend signs req.originalUrl.\n// Every call creates a NEW nonce and timestamp: a retry must call this again,\n// never re-send an old request (the backend answers 409 \"Replayed request\").\nfunction signedBackendRequest(env, method, path, payload, now) {\n  const secret = hmacSecret(env.MACHINE_SIGNING_SECRET);\n  const base = String(env.BACKEND_BASE_URL || '').replace(/\\/+$/, '');\n  if (!/^https?:\\/\\//.test(base)) throw new Error('BACKEND_BASE_URL is not configured.');\n  const body = payload === undefined ? '' : JSON.stringify(payload);\n  const timestamp = Math.floor((now || Date.now()) / 1000);\n  const nonce = hmacNonce();\n  return {\n    method: method.toUpperCase(),\n    url: base + path,\n    path,\n    body,\n    timeout_ms: hmacTimeoutMs(env),\n    headers: {\n      'X-DC-Timestamp': String(timestamp),\n      'X-DC-Nonce': nonce,\n      'X-DC-Signature': hmacSignature(secret, timestamp, nonce, method, path, body),\n    },\n  };\n}\n\n// Verify an incoming signed request (backend -> n8n). Returns { ok, status, reason }.\n// `seen` is a plain object used as the replay store (workflow static data).\nfunction verifySignedRequest(secret, headers, method, path, rawBody, seen, nowMs) {\n  const now = nowMs || Date.now();\n  const h = {};\n  for (const [k, v] of Object.entries(headers || {})) h[String(k).toLowerCase()] = v;\n  const ts = h['x-dc-timestamp'];\n  const nonce = h['x-dc-nonce'];\n  const sig = h['x-dc-signature'];\n  if (!ts || !nonce || !sig) return { ok: false, status: 401, reason: 'Signed request headers are required.' };\n  if (!/^\\d{1,12}$/.test(String(ts))) return { ok: false, status: 401, reason: 'Invalid request timestamp.' };\n  if (Math.abs(now / 1000 - Number(ts)) > HMAC_MAX_SKEW_SECONDS) {\n    return { ok: false, status: 401, reason: 'Signed request is outside the 5 minute window.' };\n  }\n  if (!HMAC_NONCE_PATTERN.test(nonce) || !HMAC_SIGNATURE_PATTERN.test(sig)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  const expected = Buffer.from(hmacSignature(hmacSecret(secret), Number(ts), nonce, method, path, rawBody), 'utf8');\n  const given = Buffer.from(sig, 'utf8');\n  if (given.length !== expected.length || !__crypto.timingSafeEqual(given, expected)) {\n    return { ok: false, status: 401, reason: 'Invalid request signature.' };\n  }\n  // Replay protection: each nonce once within 15 minutes (3x the skew window).\n  const cutoff = now - 15 * 60 * 1000;\n  for (const [k, at] of Object.entries(seen)) if (at < cutoff) delete seen[k];\n  if (seen[nonce]) return { ok: false, status: 409, reason: 'Replayed request.' };\n  seen[nonce] = now;\n  return { ok: true, status: 200, reason: null };\n}\n// ---- end shared: HMAC ----\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst reqs = $('Build GitHub requests').all().map((i) => i.json);\nconst first = reqs[0];\nconst githubConfigured = first.kind !== 'none';\nconst githubResponses = githubConfigured ? $input.all().map((i) => i.json) : [];\n\nlet request = null;\nlet signError = null;\ntry {\n  // service_name is validated ([A-Za-z0-9_.:-]) and ISO timestamps only use\n  // [0-9TZ:.-], so the query needs no encoding: the signed path is exactly\n  // the path the backend sees (req.originalUrl).\n  const path = '/api/machine/deployments?service_name=' + first.ctx.service_name +\n    '&since=' + first.window.since + '&until=' + first.window.until;\n  request = signedBackendRequest($env, 'GET', path);\n} catch (e) {\n  signError = String(e.message || e);\n}\n\nreturn [{\n  json: {\n    ctx: first.ctx,\n    window: first.window,\n    github_configured: githubConfigured,\n    github_reason: first.github_reason || null,\n    github_responses: githubResponses,\n    request,\n    skip_local: !request,\n    sign_error: signError,\n  },\n}];\n"
+      },
+      "id": "39eacb51-60ec-452a-a8eb-2f4c305e8e02",
+      "name": "Sign local releases request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        0
+      ],
+      "notes": "Keeps the GitHub responses; signs GET /api/machine/deployments for the lookback window."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d85dc8e2-a66e-43d9-af3a-bbfd0004661a",
+              "leftValue": "={{ !$json.skip_local }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "3b468949-33f2-4f72-afd9-db11afadb892",
+      "name": "Read local releases?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.request.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-DC-Timestamp",
+              "value": "={{ $json.request.headers[\"X-DC-Timestamp\"] }}"
+            },
+            {
+              "name": "X-DC-Nonce",
+              "value": "={{ $json.request.headers[\"X-DC-Nonce\"] }}"
+            },
+            {
+              "name": "X-DC-Signature",
+              "value": "={{ $json.request.headers[\"X-DC-Signature\"] }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": "={{ $json.request.timeout_ms || 15000 }}",
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "abce4d20-1c81-42f6-afe3-0f924ce337ae",
+      "name": "Backend: local releases",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1820,
+        -180
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "GET /api/machine/deployments?service_name=&since=&until= → list_recent_deployments (releases recorded by release.sh)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Workflow 04 – Node: \"Correlate changes\". A change is \"suspect\" when it\n// happened within DEPLOY_SUSPECT_MINUTES (default 60) before the incident.\n// Sources: GitHub commits and workflow runs (runs whose name matches\n// DEPLOY_WORKFLOW_PATTERN, default deploy|release|cd, are deployments) and\n// local releases recorded by release.sh (always deployments). A recent local\n// release is the strongest signal: a new version went out just before the\n// errors, which a rollback fixes and a restart does not.\n// Input: the backend response for local releases, or the \"Sign local\n// releases request\" item itself when that request was skipped.\n// ---- shared: common helpers ----\nconst SECRET_PATTERNS = [\n  /(authorization|api[_-]?key|token|secret|password|signature)([\"'\\s:=]+)([^\\s\"',}]+)/gi,\n  /\\bgsk_[A-Za-z0-9]{10,}\\b/g,          // Groq keys\n  /\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g,     // GitHub tokens\n  /\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}\\b/g, // JWTs\n  /https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g,\n  /https:\\/\\/discord(?:app)?\\.com\\/api\\/webhooks\\/[^\\s\"']+/g,\n];\n\nfunction redact(text) {\n  let out = String(text == null ? '' : text);\n  for (const re of SECRET_PATTERNS) {\n    // Only the first pattern has capture groups (key + separator are kept).\n    out = out.replace(re, (m, a, b) => (typeof a === 'string' && typeof b === 'string' ? a + b + '[REDACTED]' : '[REDACTED]'));\n  }\n  return out;\n}\n\nfunction truncate(text, max) {\n  const s = String(text == null ? '' : text);\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n}\n\nfunction envInt(env, name, fallback, min, max) {\n  const raw = env[name];\n  const n = raw === undefined || raw === '' ? fallback : Number(raw);\n  if (!Number.isFinite(n)) return fallback;\n  return Math.min(max, Math.max(min, Math.round(n)));\n}\n\nfunction envNumber(env, name, fallback) {\n  const n = Number(env[name]);\n  return env[name] === undefined || env[name] === '' || !Number.isFinite(n) ? fallback : n;\n}\n\n// Classify the output of an HTTP Request node that runs with\n// \"full response\" + \"never error\" + onError=continueRegularOutput.\n// kind: ok | timeout | unavailable | auth | rate_limited | not_found | not_implemented | invalid | server_error | client_error\nfunction classifyHttp(item, opts) {\n  const o = opts || {};\n  if (item && item.error) {\n    const msg = String(item.error.message || item.error.description || item.error || '');\n    const code = String(item.error.code || '');\n    if (/timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED/i.test(msg + code)) {\n      return { kind: 'timeout', retryable: true, status: null, message: 'Request timed out.' };\n    }\n    return { kind: 'unavailable', retryable: true, status: null, message: redact(truncate(msg || 'Connection failed.', 300)) };\n  }\n  const status = Number(item && item.statusCode);\n  if (!status) return { kind: 'invalid', retryable: false, status: null, message: 'No HTTP status in response.' };\n  if (status >= 200 && status < 300) return { kind: 'ok', retryable: false, status, message: null };\n  const bodyMsg = item.body && typeof item.body === 'object' ? (item.body.message || (item.body.error && (item.body.error.message || item.body.error))) : item.body;\n  const message = redact(truncate(bodyMsg || ('HTTP ' + status), 300));\n  if (status === 401 || status === 403) return { kind: 'auth', retryable: false, status, message };\n  if (status === 429) return { kind: 'rate_limited', retryable: true, status, message };\n  if (status === 404 && o.notFoundMeansNotImplemented) return { kind: 'not_implemented', retryable: false, status, message: 'Backend endpoint is not implemented yet (404).' };\n  if (status === 404) return { kind: 'not_found', retryable: false, status, message };\n  if (status === 503 && o.serviceUnavailableMeansNotConfigured) return { kind: 'not_configured', retryable: true, status, message };\n  if (status >= 500) return { kind: 'server_error', retryable: true, status, message };\n  return { kind: 'client_error', retryable: false, status, message };\n}\n\n// Standard investigation result (automation/schemas/investigation-output.schema.json).\nfunction investigationResult(source, ctx, fields) {\n  const f = fields || {};\n  return {\n    incident_id: ctx.incident_id || null,\n    source,\n    status: f.status,                 // evidence_found | no_evidence | unavailable | not_configured | invalid_input\n    ok: f.status === 'evidence_found' || f.status === 'no_evidence',\n    summary: f.summary || '',\n    findings: f.findings || [],\n    evidence: f.evidence || [],\n    confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0,\n    window: f.window || null,\n    error: f.error || null,\n    collected_at: new Date().toISOString(),\n  };\n}\n\n// URLSearchParams is not available in the n8n task-runner sandbox (n8n 2.x).\nfunction toQuery(params) {\n  return Object.entries(params)\n    .filter(([, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))\n    .join('&');\n}\n\nfunction isUuid(v) {\n  return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n}\n\n// Investigation input (from workflow 01 / 05). Returns { ok, ctx, error }.\nfunction readInvestigationInput(json) {\n  const j = json || {};\n  const started = j.started_at ? new Date(j.started_at) : null;\n  const errors = [];\n  if (!j.service_name || typeof j.service_name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(j.service_name)) {\n    errors.push('service_name is required (letters, digits, _ . : - only).');\n  }\n  if (!started || isNaN(started.getTime())) errors.push('started_at must be an ISO timestamp.');\n  if (j.incident_id != null && !isUuid(j.incident_id)) errors.push('incident_id must be a UUID or null.');\n  return {\n    ok: errors.length === 0,\n    error: errors.join(' ') || null,\n    ctx: {\n      incident_id: j.incident_id || null,\n      service_name: j.service_name,\n      alert_name: j.alert_name || null,\n      severity: j.severity || null,\n      started_at: started && !isNaN(started.getTime()) ? started.toISOString() : null,\n    },\n  };\n}\n// ---- end shared: common ----\nconst env = $env;\nconst signed = $('Sign local releases request').first().json;\nconst ctx = signed.ctx;\nconst window = signed.window;\nconst incidentAt = new Date(ctx.started_at).getTime();\nconst sinceAt = new Date(window.since).getTime();\nconst suspectMin = envInt(env, 'DEPLOY_SUSPECT_MINUTES', 60, 5, 1440);\nlet deployRe;\ntry { deployRe = new RegExp(env.DEPLOY_WORKFLOW_PATTERN || 'deploy|release|\\\\bcd\\\\b', 'i'); } catch (e) { deployRe = /deploy|release|\\bcd\\b/i; }\n\nconst changes = [];\nconst errors = [];\nlet sourcesTried = 0;\n\n// ---- GitHub ----\nif (signed.github_configured) {\n  const reqs = $('Build GitHub requests').all().map((i) => i.json);\n  const resps = signed.github_responses || [];\n  reqs.forEach((req, idx) => {\n    sourcesTried += 1;\n    const r = resps[idx] || {};\n    const c = classifyHttp(r);\n    if (c.kind !== 'ok') { errors.push({ request: req.kind, kind: c.kind, http_status: c.status, retryable: c.retryable, message: c.kind === 'auth' ? 'GitHub token rejected or lacks access (needs read-only Contents + Actions).' : c.message }); return; }\n    if (req.kind === 'commits' && Array.isArray(r.body)) {\n      for (const cm of r.body) {\n        const at = cm.commit && cm.commit.committer && cm.commit.committer.date;\n        if (!at) continue;\n        changes.push({ type: 'commit', source: 'github', ref: String(cm.sha || '').slice(0, 12), at, title: truncate(String((cm.commit.message || '').split('\\n')[0]), 150), url: cm.html_url || null });\n      }\n    } else if (req.kind === 'workflow_runs' && r.body && Array.isArray(r.body.workflow_runs)) {\n      for (const run of r.body.workflow_runs) {\n        const at = run.run_started_at || run.created_at;\n        if (!at) continue;\n        changes.push({ type: deployRe.test(String(run.name || '') + ' ' + String(run.path || '')) ? 'deployment' : 'workflow_run', source: 'github', ref: String(run.id), at, title: truncate(String(run.name || '') + ' (' + (run.conclusion || run.status || 'unknown') + ') on ' + (run.head_branch || '?'), 150), url: run.html_url || null });\n      }\n    } else {\n      errors.push({ request: req.kind, kind: 'invalid_response', message: 'Unexpected GitHub response shape.' });\n    }\n  });\n}\n\n// ---- local releases (release.sh) ----\nlet localChecked = false;\nif (!signed.skip_local) {\n  sourcesTried += 1;\n  const r = $input.first().json || {};\n  const c = classifyHttp(r, { notFoundMeansNotImplemented: true, serviceUnavailableMeansNotConfigured: true });\n  const list = r.body && r.body.data && r.body.data.deployments;\n  if (c.kind !== 'ok') {\n    errors.push({ request: 'local_releases', kind: c.kind, http_status: c.status, retryable: c.retryable, message: c.message });\n  } else if (!Array.isArray(list)) {\n    errors.push({ request: 'local_releases', kind: 'invalid_response', message: 'Unexpected backend response shape.' });\n  } else {\n    localChecked = true;\n    for (const d of list.slice(0, 20)) {\n      if (!d || !d.completed_at || !d.version) continue;\n      changes.push({ type: 'deployment', source: 'local', ref: truncate(String(d.version), 64), at: d.completed_at, title: truncate('local release ' + String(d.service_name || ctx.service_name) + ' ' + String(d.version) + ' (' + String(d.status || 'success') + ')', 150), version: String(d.version), url: null });\n    }\n  }\n}\n\nconst notes = [];\nif (!signed.github_configured) notes.push(signed.github_reason || 'GitHub is not configured.');\nif (signed.skip_local) notes.push('Local releases not checked: ' + (signed.sign_error || 'backend signing is not configured.'));\n\nif (sourcesTried === 0) {\n  return [{ json: investigationResult('deployments', ctx, { status: 'not_configured', window, summary: 'No change source is configured (GitHub or local releases).', error: { kind: 'not_configured', message: notes.join(' ') } }) }];\n}\nif (errors.length === sourcesTried) {\n  const auth = errors.some((e) => e.kind === 'auth');\n  return [{ json: investigationResult('deployments', ctx, { status: 'unavailable', window, summary: auth ? 'Change sources rejected the credentials.' : 'Change sources unavailable.', error: errors[0] }) }];\n}\n\nconst before = changes\n  .filter((ch) => { const t = new Date(ch.at).getTime(); return t <= incidentAt && t >= sinceAt; })\n  .map((ch) => ({ ...ch, minutes_before_incident: Math.round((incidentAt - new Date(ch.at).getTime()) / 60000) }))\n  // Local releases first at equal distance; then the closest change first.\n  .sort((a, b) => a.minutes_before_incident - b.minutes_before_incident || (a.source === 'local' ? -1 : 0) - (b.source === 'local' ? -1 : 0));\nconst suspects = before.filter((ch) => ch.minutes_before_incident <= suspectMin && ch.type !== 'workflow_run');\nconst localSuspect = suspects.find((s) => s.source === 'local');\n\nconst partial = errors.length || notes.length\n  ? { kind: 'partial', message: [...errors.map((e) => e.request + ': ' + e.kind), ...notes].join('; '), details: errors }\n  : null;\nif (!before.length) {\n  return [{ json: investigationResult('deployments', ctx, { status: 'no_evidence', window, summary: 'No commits, deployments or local releases in the ' + window.since + ' – ' + window.until + ' window.', confidence: 0.2, error: partial }) }];\n}\n\nconst findings = [];\nif (localSuspect) {\n  findings.push('Release ' + ctx.service_name + ' ' + localSuspect.version + ' went out ' + localSuspect.minutes_before_incident + ' min before the incident. A bad release is fixed by a rollback, not by a restart.');\n}\nfindings.push(before.length + ' change(s) in the lookback window; ' + suspects.length + ' within ' + suspectMin + ' minutes before the incident.');\nfor (const s of suspects.slice(0, 5)) findings.push(s.type + (s.source === 'local' ? ' (local)' : '') + ' ' + s.ref + ' \"' + s.title + '\" ' + s.minutes_before_incident + ' min before the incident.');\nif (!localChecked && !signed.skip_local) findings.push('Local releases could not be read; only GitHub was checked.');\n\nconst evidence = before.slice(0, 10).map((ch) => ({ type: ch.type, source: ch.source, ref: ch.ref, timestamp: ch.at, value: ch.title, minutes_before_incident: ch.minutes_before_incident, url: ch.url }));\nlet confidence = 0.2;\nif (suspects.length) confidence = localSuspect ? 0.7 : (suspects.some((s) => s.type === 'deployment') ? 0.6 : 0.45);\nreturn [{\n  json: investigationResult('deployments', ctx, {\n    status: suspects.length ? 'evidence_found' : 'no_evidence',\n    window,\n    summary: localSuspect\n      ? 'A new release (' + localSuspect.version + ') went out ' + localSuspect.minutes_before_incident + ' min before the incident: likely cause, not confirmed.'\n      : (suspects.length ? 'Recent change(s) shortly before the incident: possible cause, not confirmed.' : 'Changes found, but none close to the incident time.'),\n    findings,\n    evidence,\n    confidence,\n    error: partial,\n  }),\n}];\n"
       },
       "id": "04c10c9a-94a1-4818-ad35-acf205c3a9b4",
       "name": "Correlate changes",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1040,
-        -180
+        2080,
+        0
       ],
       "notes": "Returns automation/schemas/investigation-output.schema.json"
-    },
-    {
-      "parameters": {
-        "jsCode": "// Shared terminal node for 02/03/04: \"Return skipped result\".\n// Used when no HTTP call is made (invalid input or source not configured).\nreturn [{ json: $input.first().json.result }];\n"
-      },
-      "id": "81ab14a3-42a6-405c-a8fe-2d1a214cf9a9",
-      "name": "Return skipped result",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        780,
-        180
-      ],
-      "notes": "Invalid input or source not configured: no HTTP call."
     }
   ],
   "connections": {
@@ -184,7 +311,7 @@
       "main": [
         [
           {
-            "node": "GitHub API",
+            "node": "GitHub configured?",
             "type": "main",
             "index": 0
           }
@@ -198,7 +325,65 @@
         ]
       ]
     },
+    "GitHub configured?": {
+      "main": [
+        [
+          {
+            "node": "GitHub API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sign local releases request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "GitHub API": {
+      "main": [
+        [
+          {
+            "node": "Sign local releases request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign local releases request": {
+      "main": [
+        [
+          {
+            "node": "Read local releases?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read local releases?": {
+      "main": [
+        [
+          {
+            "node": "Backend: local releases",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Correlate changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backend: local releases": {
       "main": [
         [
           {

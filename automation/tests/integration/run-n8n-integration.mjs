@@ -186,13 +186,15 @@ async function main() {
   }
 
   console.log('\n04 Deployment Correlation');
-  for (const [github, status] of [['recent', 'evidence_found'], ['none', 'no_evidence'], ['auth', 'unavailable']]) {
-    setScenario({ github });
+  for (const [github, releases, status] of [['recent', 'none', 'evidence_found'], ['none', 'none', 'no_evidence'], ['auth', 'down', 'unavailable'], ['none', 'recent', 'evidence_found']]) {
+    setScenario({ github, releases });
     const o = first(await post('it-deploys', ctx));
-    check('04 github=' + github + ' -> ' + status, o.status === status, o);
+    check('04 github=' + github + ' releases=' + releases + ' -> ' + status, o.status === status, o);
     if (github === 'recent') check('04 deployment 501 found 15 min before', (o.evidence || []).some((e) => e.ref === '501' && e.minutes_before_incident === 15 && e.type === 'deployment'), o.evidence);
     if (github === 'auth') check('04 auth error reported as auth', o.error && o.error.kind === 'auth', o.error);
+    if (releases === 'recent') check('04 local release v2 found 4 min before (signed GET accepted)', (o.evidence || []).some((e) => e.source === 'local' && e.ref === 'v2' && e.minutes_before_incident === 4) && o.confidence === 0.7, o);
   }
+  setScenario({ releases: 'none' });
 
   console.log('\n05 Root Cause Analysis');
   setScenario({}); takeCalls();
