@@ -20,7 +20,7 @@ Time: about 30–45 minutes the first time.
 | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | `backend/.env` | **Not secret.** Copy `projectUrl` and `anonKey` from `mobile/lib/services/supabase_config.dart` (see [1a](#1a-why-the-supabase-publishable-key-is-in-git)) |
 | `AUTOMATION_EMAIL`, `AUTOMATION_PASSWORD` (the Supabase account n8n acts as) | `backend/.env` | **Shared privately** by the team lead |
 | Demo account passwords (`demo.admin@demo.local`, `demo.requester@demo.local`) | You type them in the app; optionally `TEST_*_PASSWORD` in `backend/.env` | **Shared privately** by the team lead |
-| Groq API key | n8n credential **Groq API** | **You create it**: free at <https://console.groq.com/keys> |
+| Groq API key | n8n credential **Groq API**, and `GROQ_API_KEY` in `backend/.env` (developer assistant, S23; without it the assistant answers 503) | **You create it**: free at <https://console.groq.com/keys> |
 | GitHub token (fine-grained, read-only) | n8n credential **GitHub API (read-only)**, and `GITHUB_TOKEN` in `backend/.env` | **You create it**: see [step 6](#6-create-your-own-groq-key-and-github-token) |
 | `MACHINE_SIGNING_SECRET` (HMAC, n8n ↔ backend) | `backend/.env` + `automation/.env` | **Generated** by `scripts/setup-local.mjs` |
 | `EXECUTOR_SIGNING_SECRET` (HMAC, n8n → executor) | `monitoring/.env` + `automation/.env` | **Generated** by `scripts/setup-local.mjs` |

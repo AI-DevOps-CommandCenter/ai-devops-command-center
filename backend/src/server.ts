@@ -3,6 +3,7 @@ import "./config/load-env.js";
 
 import { createApp } from "./app.js";
 import { loadServerConfig, loadSupabaseEnv } from "./config/env.js";
+import { assistantFromEnv } from "./services/assistant.service.js";
 import {
   createAutomationClientProvider,
   loadAutomationEnv,
@@ -46,3 +47,9 @@ if (webhook && automationEnv && outboxIntervalMs > 0) {
 } else {
   console.log("Remediation dispatch outbox: off (needs N8N_REMEDIATION_WEBHOOK_URL, MACHINE_SIGNING_SECRET and the automation identity)");
 }
+
+// Developer assistant (S23): shows the model in use; the key is never printed.
+const assistant = assistantFromEnv();
+console.log(assistant
+  ? `Developer assistant: on (model ${assistant.model})`
+  : "Developer assistant: off (GROQ_API_KEY not set)");

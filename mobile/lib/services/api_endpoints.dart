@@ -71,6 +71,9 @@ class ApiEndpoints {
   static String get deviceTokens => '$baseUrl/api/device-tokens';
   static String get notificationPreferences => '$baseUrl/api/notifications/preferences';
 
+  // Developer assistant (S23): explain a pasted log or error
+  static String get assistantExplain => '$baseUrl/api/assistant/explain';
+
   // Playbook Runs & Approvals (Vinuka's Backend API - M5 Handoff)
   static String get playbookRuns => '$baseUrl/api/playbook-runs';
   static String playbookRunById(String id) => '$baseUrl/api/playbook-runs/$id';
