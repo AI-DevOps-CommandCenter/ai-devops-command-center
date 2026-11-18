@@ -45,7 +45,7 @@ For the whole system (monitoring, n8n, backend, app), follow [`docs/SETUP.md`](.
    If you import through the editor instead (*Import from file*), re-select the sub-workflow in every *Execute Workflow* node and the error workflow in each workflow's settings.
 5. **Attach the credentials.** Open 00, 01, 04, 05 and 08, click each node with a ⚠ credential warning and select the credential.
 6. **Run 00 – Groq Connection Test.** The result must be `PASS`.
-7. **Publish** 01 and 06 (webhooks), and 02–05, 07, 08 (sub-workflows). n8n 2.x calls the published version of a sub-workflow. Webhooks become reachable some seconds after n8n starts.
+7. **Publish** 01 and 06 (webhooks), 02–05, 07, 08 (sub-workflows) and 09 (error handler; 06 cannot be published until 09 is). n8n 2.x calls the published version of a sub-workflow. Webhooks become reachable some seconds after n8n starts.
 
 ## Develop and test
 
