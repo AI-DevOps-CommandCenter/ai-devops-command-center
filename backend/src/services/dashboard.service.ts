@@ -1,4 +1,5 @@
 import type { UserSupabaseClient } from "../config/supabase.js";
+import { NOT_TEST_ENVIRONMENT_FILTER } from "./incident.service.js";
 
 // Dashboard statistics structure
 export interface DashboardSummary {
@@ -28,34 +29,42 @@ export async function getDashboardSummary(
     criticalResult
   ] = await Promise.all([
     client.from("incidents")
-      .select("id", { count: "exact", head: true }),
+      .select("id", { count: "exact", head: true })
+      .or(NOT_TEST_ENVIRONMENT_FILTER),
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
+      .or(NOT_TEST_ENVIRONMENT_FILTER)
       .eq("status", "open"),
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
+      .or(NOT_TEST_ENVIRONMENT_FILTER)
       .eq("status", "investigating"),
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
+      .or(NOT_TEST_ENVIRONMENT_FILTER)
       .eq("status", "identified"),
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
+      .or(NOT_TEST_ENVIRONMENT_FILTER)
       .eq("status", "mitigating"),
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
+      .or(NOT_TEST_ENVIRONMENT_FILTER)
       .eq("status", "resolved"),
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
+      .or(NOT_TEST_ENVIRONMENT_FILTER)
       .eq("status", "closed"),
 
     client.from("incidents")
       .select("id", { count: "exact", head: true })
+      .or(NOT_TEST_ENVIRONMENT_FILTER)
       .eq("severity", "critical")
   ]);
 
