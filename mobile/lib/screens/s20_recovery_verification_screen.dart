@@ -6,6 +6,7 @@ import '../models/incident_model.dart';
 import '../services/api_service.dart';
 import '../models/playbook_model.dart';
 import '../widgets/flow_widgets.dart';
+import '../utils/run_format.dart';
 import 's21_postmortem_report_screen.dart';
 
 /// S20 Recovery verification.
@@ -71,13 +72,7 @@ class _S20RecoveryVerificationScreenState extends State<S20RecoveryVerificationS
           // Leave unknown; the resolve button still works.
         }
       }
-      Map<String, dynamic>? match;
-      for (final c in checks) {
-        if (c['playbook_run_id']?.toString() == runId) {
-          match = c;
-          break;
-        }
-      }
+      final match = recoveryCheckForRun(checks, runId);
       if (!mounted) return;
       setState(() {
         _run = run;
@@ -129,7 +124,11 @@ class _S20RecoveryVerificationScreenState extends State<S20RecoveryVerificationS
   Widget build(BuildContext context) {
     final colors = context.colors;
     final run = _run;
-    final subtitle = run == null ? 'Loading run…' : '${run.serviceName} · ${run.actionType.name}';
+    // Playbook name and incident number, so a run of another incident is
+    // never mistaken for this one.
+    final subtitle = run == null
+        ? 'Loading run…'
+        : '${run.playbookName ?? '${run.serviceName} · ${run.actionType.slug}'} · ${incidentNumber(run.incidentId)}';
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -156,7 +155,7 @@ class _S20RecoveryVerificationScreenState extends State<S20RecoveryVerificationS
 
     final status = _check?['status']?.toString();
     final details = _check?['details'] is Map ? Map<String, dynamic>.from(_check!['details']) : <String, dynamic>{};
-    final checks = details['checks'] is List ? (details['checks'] as List) : const [];
+    final checks = recoveryAttempts(_check);
     final reason = details['reason']?.toString();
 
     late final IconData icon;
@@ -230,23 +229,14 @@ class _S20RecoveryVerificationScreenState extends State<S20RecoveryVerificationS
               items: [
                 'Type: ${_check!['check_type'] ?? 'prometheus'}',
                 'Checks performed: ${checks.length}',
-                if (_check!['checked_at'] != null) 'Checked at: ${_check!['checked_at']}',
+                if (_check!['checked_at'] != null) 'Result stored: ${localDateTime(_check!['checked_at'])}',
                 if (details['simulated_remediation'] == true) 'Remediation was simulated',
               ],
             ),
             if (checks.isNotEmpty)
               FlowSection(
                 label: 'Health checks',
-                items: checks.map((c) {
-                  if (c is Map) {
-                    final parts = c.entries
-                        .where((e) => e.value is! Map && e.value is! List)
-                        .map((e) => '${e.key}: ${e.value}')
-                        .join(' · ');
-                    return parts.isEmpty ? c.toString() : parts;
-                  }
-                  return c.toString();
-                }).toList(),
+                items: checks.map(describeAttempt).toList(),
               ),
           ],
           if (status == 'healthy' && _run != null) ...[

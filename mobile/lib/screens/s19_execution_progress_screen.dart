@@ -4,6 +4,7 @@ import '../theme/app_colors.dart';
 import '../widgets/app_back_button.dart';
 import '../services/api_service.dart';
 import '../models/playbook_model.dart';
+import '../utils/run_format.dart';
 import 's20_recovery_verification_screen.dart';
 
 class S19ExecutionProgressScreen extends StatefulWidget {
@@ -27,6 +28,13 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
   String? _errorMessage;
   PlaybookRunModel? _run;
   String? _resolvedRunId;
+  // Recovery check stored by workflow 07 for this run (null until it exists).
+  Map<String, dynamic>? _check;
+  int _recoveryPolls = 0;
+
+  // 07 waits RECOVERY_WAIT_SECONDS (60 s) up to RECOVERY_MAX_CHECKS (3) times:
+  // poll for up to 5 minutes after the action finished.
+  static const _maxRecoveryPolls = 100;
 
   @override
   void didChangeDependencies() {
@@ -59,14 +67,16 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
       if (!mounted) return;
       await _fetchStatus(isPolling: true);
 
-      // If run reached a terminal state (success, failed, rejected, cancelled), slow down or stop polling
-      if (_run != null &&
-          (_run!.status == PlaybookRunStatus.success ||
-              _run!.status == PlaybookRunStatus.failed ||
-              _run!.status == PlaybookRunStatus.cancelled ||
-              _run!.status == PlaybookRunStatus.rejected)) {
-        timer.cancel();
-      }
+      // Stop when the run failed / was stopped, or when it succeeded and
+      // workflow 07 stored its final recovery verdict.
+      final run = _run;
+      if (run == null) return;
+      final stopped = run.status == PlaybookRunStatus.failed ||
+          run.status == PlaybookRunStatus.cancelled ||
+          run.status == PlaybookRunStatus.rejected;
+      final verified = run.status == PlaybookRunStatus.success &&
+          (isFinalRecoveryStatus(_check?['status']?.toString()) || _recoveryPolls >= _maxRecoveryPolls);
+      if (stopped || verified) timer.cancel();
     });
   }
 
@@ -99,10 +109,21 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
     }
 
     try {
-      final run = await ApiService().fetchPlaybookRun(_resolvedRunId!);
+      final api = ApiService();
+      final run = await api.fetchPlaybookRun(_resolvedRunId!);
+      Map<String, dynamic>? check = _check;
+      if (run.status == PlaybookRunStatus.success && !isFinalRecoveryStatus(check?['status']?.toString())) {
+        _recoveryPolls++;
+        try {
+          check = recoveryCheckForRun(await api.fetchRecoveryChecks(run.incidentId), run.id) ?? check;
+        } catch (_) {
+          // Keep the last known check; the next poll tries again.
+        }
+      }
       if (mounted) {
         setState(() {
           _run = run;
+          _check = check;
           _isLoading = false;
         });
       }
@@ -124,6 +145,9 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
     final shortRunId = _resolvedRunId != null && _resolvedRunId!.length > 8
         ? 'RUN-${_resolvedRunId!.substring(0, 8).toUpperCase()}'
         : (_resolvedRunId ?? 'RUN-EXECUTION');
+    final headerSubtitle = run == null
+        ? shortRunId
+        : '${run.playbookName ?? run.actionType.displayName} · ${incidentNumber(run.incidentId)}';
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -152,7 +176,7 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                         ),
                         const SizedBox(height: 1),
                         Text(
-                          '$shortRunId · ${run?.serviceName ?? "Service"}',
+                          headerSubtitle,
                           style: TextStyle(
                             fontSize: 13,
                             color: colors.muted,
@@ -228,17 +252,44 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
         status == PlaybookRunStatus.rejected;
     final isRunning = status == PlaybookRunStatus.running ||
         status == PlaybookRunStatus.approved;
+    // The action finishing is not recovery: only the check stored by
+    // workflow 07 (healthy / unhealthy / failed) says whether it recovered.
+    final recovery = _check?['status']?.toString();
+    final recovered = isSuccess && recovery == 'healthy';
+    final notRecovered = isSuccess && recovery == 'unhealthy';
+    final unverified = isSuccess && recovery == 'failed';
+    final checking = isSuccess && !isFinalRecoveryStatus(recovery);
+    final gaveUp = checking && _recoveryPolls >= _maxRecoveryPolls;
 
     Color statusColor = colors.accent;
     String statusTitle = 'Execution in progress';
     String statusSubtitle = 'n8n automation engine is running the remediation playbook.';
     IconData statusIcon = Icons.autorenew_rounded;
 
-    if (isSuccess) {
+    if (recovered) {
       statusColor = colors.ok;
-      statusTitle = 'Remediation completed successfully';
-      statusSubtitle = 'All steps passed. System is verified healthy.';
+      statusTitle = 'Remediation complete · service recovered';
+      statusSubtitle = 'The action ran and the Prometheus recovery checks passed.';
       statusIcon = Icons.shield_outlined;
+    } else if (notRecovered) {
+      statusColor = colors.critical;
+      statusTitle = 'Action ran · service not recovered';
+      statusSubtitle = 'The recovery checks still fail. Try another playbook or escalate.';
+      statusIcon = Icons.report_gmailerrorred_outlined;
+    } else if (unverified) {
+      statusColor = colors.warning;
+      statusTitle = 'Action ran · recovery not verified';
+      statusSubtitle = 'The recovery check could not be completed. Check the service manually.';
+      statusIcon = Icons.help_outline;
+    } else if (gaveUp) {
+      statusColor = colors.warning;
+      statusTitle = 'Action ran · no recovery result yet';
+      statusSubtitle = 'No recovery check arrived. Open the recovery checks or refresh later.';
+      statusIcon = Icons.hourglass_bottom;
+    } else if (checking) {
+      statusColor = colors.accent;
+      statusTitle = 'Action ran · checking recovery';
+      statusSubtitle = 'Waiting for the Prometheus health and error-rate checks (about 1-3 minutes).';
     } else if (isFailed) {
       statusColor = colors.critical;
       statusTitle = 'Playbook execution stopped';
@@ -255,7 +306,7 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Stepper: Detect -> Investigate -> Cause -> Approve -> Recover (active)
-          _buildStepper(context, isSuccess: isSuccess),
+          _buildStepper(context, isSuccess: recovered),
           const SizedBox(height: 14),
 
           // Status Banner
@@ -268,7 +319,7 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
             ),
             child: Row(
               children: [
-                if (isRunning)
+                if (isRunning || (checking && !gaveUp))
                   SizedBox(
                     width: 26,
                     height: 26,
@@ -338,7 +389,7 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                 _buildInfoRow('Status', status.slug.toUpperCase(), colors, highlightColor: statusColor),
                 if (run?.startedAt != null) ...[
                   const SizedBox(height: 8),
-                  _buildInfoRow('Started', run!.startedAt!.toLocal().toString().substring(11, 19), colors),
+                  _buildInfoRow('Started', localTime(run!.startedAt), colors),
                 ],
               ],
             ),
@@ -382,9 +433,16 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
           const SizedBox(height: 8),
           _buildPhaseCard(
             title: '4. Recovery check',
-            subtitle: 'Prometheus health and error-rate checks after the action',
-            isComplete: isSuccess,
-            isRunning: false,
+            subtitle: recovered
+                ? 'Recovered: health and error-rate checks passed'
+                : notRecovered
+                    ? 'Not recovered: checks still failing'
+                    : unverified
+                        ? 'Could not verify recovery'
+                        : 'Prometheus health and error-rate checks after the action',
+            isComplete: recovered,
+            isRunning: checking && !gaveUp,
+            isFailed: notRecovered || unverified,
             colors: colors,
           ),
           const SizedBox(height: 20),
@@ -406,8 +464,8 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
                   );
                 },
                 icon: const Icon(Icons.verified_outlined, size: 18),
-                label: const Text(
-                  'Verify System Recovery',
+                label: Text(
+                  checking ? 'Open Recovery Checks' : 'View Recovery Checks',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
@@ -479,6 +537,7 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
     required String subtitle,
     required bool isComplete,
     bool isRunning = false,
+    bool isFailed = false,
     required AppColorScheme colors,
   }) {
     return Container(
@@ -489,7 +548,9 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
         border: Border.all(
           color: isRunning
               ? colors.accent
-              : (isComplete ? colors.ok.withOpacity(0.4) : colors.border),
+              : isFailed
+                  ? colors.critical.withOpacity(0.4)
+                  : (isComplete ? colors.ok.withOpacity(0.4) : colors.border),
         ),
       ),
       child: Row(
@@ -505,9 +566,9 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
             )
           else
             Icon(
-              isComplete ? Icons.check_circle : Icons.radio_button_unchecked,
+              isFailed ? Icons.cancel : (isComplete ? Icons.check_circle : Icons.radio_button_unchecked),
               size: 20,
-              color: isComplete ? colors.ok : colors.muted,
+              color: isFailed ? colors.critical : (isComplete ? colors.ok : colors.muted),
             ),
           const SizedBox(width: 12),
           Expanded(

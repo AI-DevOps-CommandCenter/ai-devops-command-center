@@ -46,17 +46,17 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
     });
 
     try {
-      final list = await ApiService().fetchApprovals(status: 'pending');
+      final all = await ApiService().fetchApprovals(status: 'pending');
+      // Opened for an incident: only that incident's approvals. Never fall
+      // back to another incident's approval (it would be approved by mistake).
+      final incidentId = _resolvedIncidentId;
+      final list = incidentId == null ? all : all.where((a) => a.incidentId == incidentId).toList();
       if (mounted) {
         setState(() {
           _pendingApprovals = list;
           ApprovalModel? match;
           for (final a in list) {
             if (widget.approvalId != null && a.id == widget.approvalId) {
-              match = a;
-              break;
-            }
-            if (_resolvedIncidentId != null && a.incidentId == _resolvedIncidentId) {
               match = a;
               break;
             }
@@ -145,11 +145,12 @@ class _S18ApproveActionScreenState extends State<S18ApproveActionScreen> {
     final colors = context.colors;
     final approval = _selectedApproval;
 
-    final shortIncId = approval != null && approval.incidentId.length > 8
-        ? (approval.incidentId.startsWith('INC-')
-            ? approval.incidentId
-            : 'INC-${approval.incidentId.substring(0, 8).toUpperCase()}')
-        : (approval?.incidentId ?? 'INC-ACTION');
+    final incId = (approval != null && approval.incidentId.isNotEmpty) ? approval.incidentId : (_resolvedIncidentId ?? '');
+    final shortIncId = incId.startsWith('INC-')
+        ? incId
+        : incId.length > 8
+            ? 'INC-${incId.substring(0, 8).toUpperCase()}'
+            : (incId.isNotEmpty ? incId : 'Approvals');
 
     return Scaffold(
       backgroundColor: colors.bg,

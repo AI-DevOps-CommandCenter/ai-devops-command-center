@@ -219,3 +219,52 @@ test('BD-4: 08 signs the context GET and the postmortem POST; invalid drafts are
   const [notStored] = await runCodeNode('08-postmortem/store-result.js', { items: [{}], nodes: { 'Sign store postmortem request': [skip] } });
   assert.equal(notStored.stored, false);
 });
+
+// 08 impact_facts: detection -> recovery duration and the error rates that
+// 07 measured, so the AI does not answer "Unknown" for the impact.
+test('08 impact_facts: duration, measured error rates and earlier checks', async () => {
+  const id = '22222222-2222-4222-8222-222222222222';
+  const input = {
+    incident_id: id,
+    playbook_run_id: 'run-rollback',
+    status: 'recovered',
+    checks_performed: 2,
+    evidence: [
+      { attempt: 1, at: '2026-11-18T08:51:48.669Z', results: [{ name: 'up', ok: true, value: 1 }, { name: 'error_rate', ok: true, value: 0.1741, threshold: 0.05 }] },
+      { attempt: 2, at: '2026-11-18T08:52:48.761Z', results: [{ name: 'error_rate', ok: true, value: 0, threshold: 0.05 }] },
+    ],
+  };
+  const [ctx] = await runCodeNode('08-postmortem/sign-context.js', { items: [input], env: BACKEND_ENV });
+  const stored = {
+    incident: { id, service_name: 'sample-app', severity: 'critical', detected_at: '2026-11-18T07:41:06.234Z', description: '5xx responses are 31.55% of requests.' },
+    rca: { root_cause: 'bad release' },
+    playbook_runs: [{ id: 'run-scale' }, { id: 'run-rollback' }],
+    recovery_checks: [
+      { playbook_run_id: 'run-rollback', status: 'healthy', checked_at: '2026-11-18T08:52:49Z' },
+      { playbook_run_id: 'run-scale', status: 'unhealthy', checked_at: '2026-11-18T07:49:34Z' },
+    ],
+  };
+  const [collected] = await runCodeNode('08-postmortem/collect-context.js', {
+    items: [{ statusCode: 200, body: { data: stored } }],
+    nodes: { 'Sign context request': [ctx] },
+  });
+  const f = collected.context.impact_facts;
+  assert.equal(f.service_name, 'sample-app');
+  assert.equal(f.severity, 'critical');
+  assert.equal(f.detected_at, '2026-11-18T07:41:06.234Z');
+  assert.equal(f.recovered_at, '2026-11-18T08:52:48.761Z');
+  assert.equal(f.detection_to_recovery_minutes, 72);
+  assert.equal(f.alert_description, '5xx responses are 31.55% of requests.');
+  assert.deepEqual(f.error_rate_after_remediation.map((e) => e.error_rate_percent), [17.4, 0]);
+  assert.equal(f.error_rate_after_remediation[0].threshold_percent, 5);
+  assert.equal(f.peak_error_rate_after_remediation_percent, 17.4);
+  assert.equal(f.remediation_runs, 2);
+  assert.deepEqual(f.earlier_recovery_checks, [{ checked_at: '2026-11-18T07:49:34Z', status: 'unhealthy' }]);
+
+  // Not recovered and no stored context: unknown parts stay null.
+  const [ctx2] = await runCodeNode('08-postmortem/sign-context.js', { items: [{ incident_id: id, status: 'not_recovered', evidence: [] }], env: BACKEND_ENV });
+  const [c2] = await runCodeNode('08-postmortem/collect-context.js', { items: [{ statusCode: 500, body: {} }], nodes: { 'Sign context request': [ctx2] } });
+  assert.equal(c2.context.impact_facts.recovered_at, null);
+  assert.equal(c2.context.impact_facts.detection_to_recovery_minutes, null);
+  assert.equal(c2.context.impact_facts.peak_error_rate_after_remediation_percent, null);
+});
