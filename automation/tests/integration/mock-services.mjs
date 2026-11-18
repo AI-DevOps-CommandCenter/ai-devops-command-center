@@ -44,6 +44,7 @@ export function startMocks({ servicesPort, backendPort, secret, backendTimeoutMs
   const late = backendTimeoutMs * 2;
   const calls = [];
   const nonces = new Set();
+  const webhookNonces = new Set();
   const recoveryChecks = [];
   // BD-1: incidents by alert fingerprint (create_incident_from_alert is idempotent
   // on the fingerprint while the incident is active). The incident used by the
@@ -143,6 +144,23 @@ export function startMocks({ servicesPort, backendPort, secret, backendTimeoutMs
     nonces.add(h['x-dc-nonce']);
     call.auth = 'ok';
     call.body = raw ? JSON.parse(raw) : null;
+
+    // KI-1: POST /api/machine/remediation-nonces, like consume_automation_nonce
+    // (one shared, atomic store: this process handles one request at a time).
+    if (req.url === '/api/machine/remediation-nonces') {
+      const b = call.body || {};
+      if (typeof b.nonce !== 'string' || !/^[A-Za-z0-9_-]{16,192}$/.test(b.nonce) || !Number.isInteger(b.signed_at)) {
+        return send(res, 400, { success: false, message: 'A valid nonce is required.' });
+      }
+      if (scenario.nonce_claim === 'down') return send(res, 500, { success: false, message: 'Failed to check the request nonce.' });
+      if (Math.abs(Date.now() / 1000 - b.signed_at) > 300) return send(res, 401, { success: false, message: 'Signed request is outside the 5 minute window.' });
+      const key = 'webhook:' + b.nonce;
+      call.claim = key;
+      if (webhookNonces.has(key)) { call.answer = 409; return send(res, 409, { success: false, message: 'Replayed request (nonce already used).' }); }
+      webhookNonces.add(key);
+      call.answer = 200;
+      return send(res, 200, { success: true, message: 'Nonce accepted.' });
+    }
 
     const m = req.url.match(/^\/api\/machine\/playbook-runs\/([0-9a-f-]+)\/(start|complete)$/);
     if (m) {

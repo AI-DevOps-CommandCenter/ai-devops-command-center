@@ -2,7 +2,7 @@
 
 **Status:** proposals only (12 Nov 2026), prepared on the n8n side for the owner of `database/DATABASE_DECISION_REGISTER.md`. Nothing here changes the register, the contract or the security configuration. Once the team decides, the register owner records the outcome and the n8n side follows it.
 
-**Update 17 Nov 2026:** D-N8N-1 is decided (option A, register D-010). D-N8N-6 (KI-1) is still a proposal; it is planned for 19 Nov.
+**Update 17 Nov 2026:** D-N8N-1 is decided (option A, register D-010). D-N8N-6 (KI-1) is implemented (18 Nov): the database claim described below.
 
 ---
 
@@ -48,4 +48,4 @@ With `true`, the Code nodes cannot read the secret, so no signed backend call an
 
 **Until then:** keep the static-data check as a first filter, keep relying on the database run state, and keep the strict S5 test.
 
-**Decision needed from:** backend + database team (they own the nonce store and the machine endpoints); the n8n side will adapt workflow 06 once the mechanism exists.
+**Implemented (18 Nov 2026):** the preferred direction. Signed `POST /api/machine/remediation-nonces` → `consume_automation_nonce` (prefix `webhook:`, no migration); 06 calls it after the HMAC check and fails closed (503) if it cannot get an answer. Replay test 20/20.

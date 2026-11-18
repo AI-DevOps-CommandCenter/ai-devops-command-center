@@ -7,13 +7,12 @@
 //
 // Run from automation/:  npm run test:n8n:replay   (about 3 minutes)
 //
-// KNOWN ISSUE (not fixed): check "S5 n8n nonce store kept BOTH nonces" FAILS on
-// purpose. 06 keeps replay nonces in workflow static data, which n8n loads when an
-// execution starts and saves (whole object, last writer wins) when it ends, so a
-// nonce of one of two concurrent executions can be lost. The backend run state
-// (start_playbook_run) is what prevents a second start today. See
-// docs/automation-integration-requirements.md, known issue KI-1. Do NOT relax
-// the S5 check: it must pass only once replay protection is atomic and shared.
+// KI-1 (FIXED 18 Nov 2026): check "S5 BOTH nonces kept" failed on purpose while
+// 06 kept replay nonces only in workflow static data (loaded when an execution
+// starts, saved whole when it ends, last writer wins). 06 now claims every
+// webhook nonce in the database (POST /api/machine/remediation-nonces ->
+// consume_automation_nonce) before the start. The S5 check was NOT relaxed.
+// See docs/automation-integration-requirements.md, KI-1.
 // This script is deliberately NOT part of `npm test` or `npm run test:n8n`.
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -201,7 +200,7 @@ async function main() {
   console.log(`  OBSERVED S5 replay A -> ${ra.status} "${brief(ra).message}" (new /start calls: ${reachedA})`);
   console.log(`  OBSERVED S5 replay B -> ${rb.status} "${brief(rb).message}" (new /start calls: ${reachedB})`);
   check('S5 both replays rejected with 409', ra.status === 409 && rb.status === 409, [brief(ra), brief(rb)]);
-  check('S5 n8n nonce store kept BOTH nonces (replays rejected as "Replayed request.", no backend call)', /Replayed request/.test(brief(ra).message || '') && /Replayed request/.test(brief(rb).message || '') && reachedA === 0 && reachedB === 0, { A: brief(ra), B: brief(rb), reachedA, reachedB });
+  check('S5 BOTH nonces kept (replays rejected as "Replayed request." before any /start: n8n static data or the database claim, KI-1)', /Replayed request/.test(brief(ra).message || '') && /Replayed request/.test(brief(rb).message || '') && reachedA === 0 && reachedB === 0, { A: brief(ra), B: brief(rb), reachedA, reachedB });
   check('S5 each run executed once', [run5a, run5b].every((x) => mocks.runs[x].status === 'success' && mocks.runs[x].completions === 1), [mocks.runs[run5a], mocks.runs[run5b]]);
   evidence.S5 = { first: pair.map(brief), replayA: { ...brief(ra), new_start_calls: reachedA }, replayB: { ...brief(rb), new_start_calls: reachedB }, runA: snapshot(run5a), runB: snapshot(run5b) };
 

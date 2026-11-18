@@ -45,7 +45,7 @@ What the backend must send, and what workflow 06 answers. Source of truth: `auto
 - `HMAC-SHA256(MACHINE_SIGNING_SECRET, timestamp + "." + nonce + ".POST." + path + "." + rawBody)`, the same scheme and secret (≥ 32 chars) as the n8n → backend calls.
 - `path` is the path n8n sees, `N8N_REMEDIATION_SIGNED_PATH` (default `/webhook/remediation`); behind a proxy that rewrites paths, set it to match.
 - Sign the **exact bytes** that are sent: serialize the body once and send that string (re-serializing → 401).
-- Timestamp within ±300 s of n8n's clock. Each nonce is accepted once (15-minute memory, see KI-1 for the concurrency limit).
+- Timestamp within ±300 s of n8n's clock. Each nonce is accepted once: first in n8n static data, then atomically in the database (`POST /api/machine/remediation-nonces`, KI-1 fix).
 - `buildSignedHeaders(secret, { method: "POST", path: "/webhook/remediation", body, nonce })` in `backend/src/middleware/machine-auth.ts` produces correct headers (proved by the interop test below).
 
 **Responses**
@@ -159,7 +159,11 @@ Proposals for D-N8N-1 and for replacing the nonce store (KI-1, proposed decision
 
 ## 6a. Known issues
 
-### KI-1: replay nonces in workflow 06 can be lost under concurrency (open, not fixed)
+### KI-1: replay nonces in workflow 06 can be lost under concurrency (FIXED 18 Nov 2026)
+
+**Fix (D-N8N-6, branch `feature/ki1-webhook-nonces`):** after the HMAC check, workflow 06 claims the webhook nonce in the **database** through a signed `POST /api/machine/remediation-nonces { nonce, signed_at }` (backend → `consume_automation_nonce`, prefix `webhook:`; no migration). 200 = first use, 409 = replay (06 answers 409 "Replayed request."), 401 = outside the window; anything else → 06 answers 503 and starts nothing (fail closed). The static-data check stays as a first filter. `npm run test:n8n:replay`: **20/20**, S5 passes without relaxing the check.
+
+The text below is the original analysis (12 Nov 2026).
 
 **What:** workflow 06 stores the nonces it has accepted in workflow static data (`$getWorkflowStaticData('global').seenNonces`). n8n loads static data when an execution starts and saves the whole object when it ends (about 10 s later for a remediation run). Concurrent executions therefore don't see each other's nonces, and the one that ends last overwrites the others' updates (last writer wins). A nonce can be lost, and the exact same signed request can then pass n8n's replay check again **within the 5-minute timestamp window**.
 
@@ -182,7 +186,7 @@ No run was started or completed twice. **Limits:** the backend was a mock; the p
 | BD-5 trigger | Vinuka (backend approval flow) | After an approval, call `POST <n8n>/webhook/remediation` per section 2a (`buildSignedHeaders`, new nonce per attempt, n8n URL in backend config) | Done and tested (mocks) |
 | BD-6 | Backend (Vinuka) | Set `request_payload.service_name` when a run is requested (e.g. copy `incidents.service_name`) | 06 refuses to execute without it (run completed as failed) |
 | Real execution | Keshan (playbook executor) | HMAC-authenticated executor for the four fixed actions | ✅ Connected (executor mode, 14 Nov); live test with sample-app still to do |
-| KI-1 nonce race | Backend + database team | Agree and provide an atomic shared nonce store | Documented; strict failing test kept |
+| KI-1 nonce race | Backend + database team | Agree and provide an atomic shared nonce store | ✅ Fixed 18 Nov 2026: database claim via `POST /api/machine/remediation-nonces` (D-N8N-6) |
 | BD-1 | Backend + database team | Contract, migration and route to create an incident from an alert (idempotent on fingerprint) | 01 node "Create incident (backend) – BLOCKED" |
 | BD-2 | Backend team (contract with Vishwa) | Finalize and implement the AI-analysis storage route (`/investigations/:id/analysis` or incident-level), plus `root_cause` (D-N8N-3) | 05 already signs and sends; 404 → `not_implemented` |
 | D-N8N-1 | Decision-register owner (database team) / team | Confirm env access for `MACHINE_SIGNING_SECRET` or choose another secret-injection method | ✅ Decided 17 Nov 2026: `false` kept as an exception (register D-010) |

@@ -314,14 +314,19 @@ function wf05() {
 // ---------- 06 Remediation (Vishwa) ----------
 function wf06() {
   const w = makeWorkflow(WF.remediation);
-  w.sticky('## 06 – Remediation (owner: Vishwa)\nBackend → `POST /webhook/remediation` (HMAC signed) → verify signature, time window, nonce → **backend start** (`start_playbook_run` only succeeds for an APPROVED run) → fixed branch per action → **backend complete** → 07 Recovery Check.\nNever executes commands from the webhook or the AI. `REMEDIATION_EXECUTION_MODE`: `disabled` (default) refuses before the run is started; `executor` sends a signed `POST /v1/execute` { action, service_name, playbook_run_id } to the playbook executor (Keshan, `infrastructure/playbooks/executor`); `simulate` records a clearly marked simulated result for tests.', 0, -4, 900, 260);
+  w.sticky('## 06 – Remediation (owner: Vishwa)\nBackend → `POST /webhook/remediation` (HMAC signed) → verify signature, time window, nonce → **claim the nonce in the database** (KI-1, `POST /api/machine/remediation-nonces`) → **backend start** (`start_playbook_run` only succeeds for an APPROVED run) → fixed branch per action → **backend complete** → 07 Recovery Check.\nNever executes commands from the webhook or the AI. `REMEDIATION_EXECUTION_MODE`: `disabled` (default) refuses before the run is started; `executor` sends a signed `POST /v1/execute` { action, service_name, playbook_run_id } to the playbook executor (Keshan, `infrastructure/playbooks/executor`); `simulate` records a clearly marked simulated result for tests.', 0, -4, 900, 260);
   w.webhook('Remediation webhook', 0, 0, 'remediation', { rawBody: true, notes: 'POST /webhook/remediation. Raw Body ON: the signature covers the exact bytes.' });
-  w.code('Verify signature and payload', '06-remediation/verify-request.js', 1, 0, 'HMAC-SHA256, 300 s window, nonce once (static data), strict body.');
+  w.code('Verify signature and payload', '06-remediation/verify-request.js', 1, 0, 'HMAC-SHA256, 300 s window, nonce once (static data: first filter only), strict body.');
   w.isTrue('Request valid?', 2, 0, '={{ $json.valid }}');
   w.respond('Respond rejected', 3, 2, '401 bad signature / 409 replay / 400 bad body / 503 not configured.');
   w.isTrue('Execution available?', 3, 0, '={{ $json.execution_available }}', 'executor or simulate. disabled (default, or executor not configured) → refuse before the run is started.');
   w.set('Execution blocked response', 4, 1, [['http_status', '={{ 503 }}', 'number'], ['response', '={{ { accepted: false, message: "Remediation execution is not available (REMEDIATION_EXECUTION_MODE is disabled or the executor is not configured). The run was not started." } }}', 'object']]);
   w.respond('Respond 503', 5, 1);
+  w.code('Sign nonce claim', '06-remediation/sign-claim-nonce.js', 4, -2.5, 'KI-1: claim the webhook nonce in the database (atomic, shared by all executions).');
+  w.http('Backend: claim webhook nonce', 5, -2.5, { method: 'POST', signed: true, notes: 'POST /api/machine/remediation-nonces → consume_automation_nonce. 200 first use, 409 replay.' });
+  w.code('Check nonce claim', '06-remediation/check-nonce-claim.js', 6, -2.5, '409 replay / 401 window / anything else → 503 (fail closed).');
+  w.isTrue('Nonce claimed?', 7, -2.5, '={{ $json.nonce_claimed }}');
+  w.respond('Respond replay or unverified', 8, -3.5, '409 replay (database) / 401 / 503 replay protection unavailable. Nothing is started.');
   w.code('Sign start request', '06-remediation/sign-start.js', 4, -1);
   w.http('Backend: start run', 5, -1, { method: 'POST', signed: true, notes: 'POST /api/machine/playbook-runs/:id/start → start_playbook_run (approval enforced in the database).' });
   w.code('Check start result', '06-remediation/check-start.js', 6, -1, 'Uses the action_type returned by the DATABASE.');
@@ -358,7 +363,10 @@ function wf06() {
   w.chain('Remediation webhook', 'Verify signature and payload', 'Request valid?');
   w.link('Request valid?', 'Execution available?', 0);
   w.link('Request valid?', 'Respond rejected', 1);
-  w.link('Execution available?', 'Sign start request', 0);
+  w.link('Execution available?', 'Sign nonce claim', 0);
+  w.chain('Sign nonce claim', 'Backend: claim webhook nonce', 'Check nonce claim', 'Nonce claimed?');
+  w.link('Nonce claimed?', 'Sign start request', 0);
+  w.link('Nonce claimed?', 'Respond replay or unverified', 1);
   w.link('Execution available?', 'Execution blocked response', 1);
   w.link('Execution blocked response', 'Respond 503');
   w.chain('Sign start request', 'Backend: start run', 'Check start result', 'Run started?');
