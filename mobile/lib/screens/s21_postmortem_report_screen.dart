@@ -5,6 +5,7 @@ import '../theme/app_colors.dart';
 import '../services/api_service.dart';
 import '../models/incident_model.dart';
 import '../widgets/flow_widgets.dart';
+import '../utils/run_format.dart';
 
 /// S21 Postmortem report.
 /// Shows the postmortem draft written by n8n workflow 08 (Groq, validated
@@ -23,6 +24,8 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
   String? _incidentId;
   IncidentModel? _incident;
   Map<String, dynamic>? _postmortem;
+  List<Map<String, dynamic>> _checks = const [];
+  Map<String, String> _runNames = const {};
   String? _errorMessage;
   bool _isLoading = true;
   Timer? _poll;
@@ -59,10 +62,24 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
       final api = ApiService();
       final incident = _incident ?? await api.fetchIncidentById(id);
       final postmortem = await api.fetchLatestPostmortem(id);
+      var checks = _checks;
+      var runNames = _runNames;
+      try {
+        checks = await api.fetchRecoveryChecks(id);
+        final runs = await api.fetchPlaybookRuns(incidentId: id);
+        runNames = {
+          for (final r in runs)
+            if (r.incidentId == id) r.id: r.playbookName ?? r.actionType.displayName,
+        };
+      } catch (_) {
+        // Measured impact is optional; the report still shows.
+      }
       if (!mounted) return;
       setState(() {
         _incident = incident;
         _postmortem = postmortem;
+        _checks = checks;
+        _runNames = runNames;
         _errorMessage = null;
         _isLoading = false;
       });
@@ -104,11 +121,50 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
     );
   }
 
-  String _shortTime(String iso) {
-    final t = DateTime.tryParse(iso)?.toLocal();
-    if (t == null) return iso;
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
+  String _shortTime(String iso) => localDateTime(iso);
+
+  /// Timeline rows as local "13:11:52  event". The date is shown once in the
+  /// section label, and again on the first row of any later day.
+  ({String? date, List<String> rows}) _timeline(dynamic raw) {
+    final entries = (raw is List ? raw : const []).whereType<Map>().toList();
+    String? firstDate;
+    DateTime? lastDay;
+    final rows = <String>[];
+    for (final e in entries) {
+      final t = parseTime(e['time']);
+      final event = e['event']?.toString() ?? '';
+      if (t == null) {
+        rows.add('${e['time'] ?? ''}  $event'.trim());
+        continue;
+      }
+      firstDate ??= localDate(t);
+      final newDay = lastDay != null && !sameLocalDay(lastDay, t);
+      lastDay = t;
+      rows.add('${newDay ? '${localDate(t)}, ' : ''}${localTime(t)}  $event');
+    }
+    return (date: firstDate, rows: rows);
+  }
+
+  /// Facts measured by the recovery checks (workflow 07): time from detection
+  /// to the first healthy check, and the outcome of each remediation.
+  List<String> _measuredImpact() {
+    final incident = _incident;
+    if (incident == null || _checks.isEmpty) return const [];
+    final facts = <String>[];
+    DateTime? recoveredAt;
+    for (final c in _checks) {
+      if (c['status'] != 'healthy') continue;
+      final at = parseTime(c['checked_at']);
+      if (at != null && (recoveredAt == null || at.isBefore(recoveredAt))) recoveredAt = at;
+    }
+    if (recoveredAt != null) {
+      facts.add('Detected ${localTime(incident.detectedAt)}, recovered ${localTime(recoveredAt)} '
+          '(${formatDuration(recoveredAt.difference(incident.detectedAt.toLocal()))})');
+    }
+    // Per remediation, so a failed attempt's peak is not read as the result.
+    final outcomes = remediationOutcomes(_checks, _runNames);
+    if (outcomes != null) facts.add(outcomes);
+    return facts;
   }
 
   Widget _buildBody(BuildContext context) {
@@ -136,10 +192,10 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
     }
 
     final report = pm['report'] is Map ? Map<String, dynamic>.from(pm['report']) : <String, dynamic>{};
-    final timeline = (pm['timeline'] is List ? pm['timeline'] as List : const [])
-        .whereType<Map>()
-        .map((e) => '${e['time'] ?? ''}  ${e['event'] ?? ''}'.trim())
-        .toList();
+    final timeline = _timeline(pm['timeline']);
+    final measured = _measuredImpact();
+    final aiImpact = pm['impact']?.toString();
+    final aiImpactUnknown = aiImpact == null || aiImpact.trim().isEmpty || aiImpact.toLowerCase().startsWith('unknown');
     final lessons = _strings(report['lessons_learned']);
     final actions = _strings(pm['action_items']);
 
@@ -157,8 +213,14 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
                   style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: colors.text)),
             ),
           FlowSection(label: 'Summary', text: pm['summary']?.toString()),
-          FlowSection(label: 'Impact', text: pm['impact']?.toString()),
-          FlowSection(label: 'Timeline', items: timeline),
+          // AI text plus the measured facts; an "Unknown" AI answer is replaced
+          // by the measured facts when there are any.
+          FlowSection(
+            label: 'Impact',
+            text: aiImpactUnknown && measured.isNotEmpty ? null : aiImpact,
+            items: measured.isNotEmpty ? measured : null,
+          ),
+          FlowSection(label: timeline.date == null ? 'Timeline' : 'Timeline · ${timeline.date}', items: timeline.rows),
           FlowSection(label: 'Root cause', text: pm['root_cause']?.toString()),
           if (report['remediation'] != null) FlowSection(label: 'Remediation', text: report['remediation'].toString()),
           if (report['recovery_result'] != null)

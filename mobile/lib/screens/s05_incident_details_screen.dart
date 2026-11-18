@@ -10,6 +10,11 @@ import 's18_approve_action_screen.dart';
 import 's09_logs_explorer_screen.dart';
 import 's10_metrics_screen.dart';
 import 's14_deployment_details_screen.dart';
+import 's19_execution_progress_screen.dart';
+import 's20_recovery_verification_screen.dart';
+import 's21_postmortem_report_screen.dart';
+import '../models/playbook_model.dart';
+import '../utils/run_format.dart';
 
 class S05IncidentDetailsScreen extends StatefulWidget {
   final String? incidentId;
@@ -25,6 +30,12 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
   String? _errorMessage;
   IncidentModel? _incident;
   String? _resolvedIncidentId;
+  // Remediation history for the links to S19 / S20 / S21. Loaded after the
+  // incident; a failure here only hides the links.
+  PlaybookRunModel? _latestRun;
+  Map<String, dynamic>? _latestCheck;
+  bool _hasPostmortem = false;
+  bool _awaitingApproval = false;
 
   @override
   void didChangeDependencies() {
@@ -77,6 +88,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
           _incident = incident;
           _isLoading = false;
         });
+        _loadRemediation(incident.id);
       }
     } catch (e) {
       if (mounted) {
@@ -86,6 +98,142 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
         });
       }
     }
+  }
+
+  // When the run actually ran (started, else finished, else requested).
+  static DateTime? _ranAt(PlaybookRunModel r) => r.startedAt ?? r.completedAt ?? r.createdAt;
+
+  Future<void> _loadRemediation(String incidentId) async {
+    final api = ApiService();
+    PlaybookRunModel? latest;
+    Map<String, dynamic>? check;
+    var hasPostmortem = false;
+    var awaitingApproval = false;
+    try {
+      final all = (await api.fetchPlaybookRuns(incidentId: incidentId)).where((r) => r.incidentId == incidentId).toList();
+      awaitingApproval = all.any((r) => r.status == PlaybookRunStatus.pendingApproval);
+      final runs = all.where((r) => r.status != PlaybookRunStatus.pendingApproval).toList()
+        ..sort((a, b) => (_ranAt(b) ?? DateTime(0)).compareTo(_ranAt(a) ?? DateTime(0)));
+      latest = runs.isEmpty ? null : runs.first;
+      if (latest != null) {
+        check = recoveryCheckForRun(await api.fetchRecoveryChecks(incidentId), latest.id);
+      }
+    } catch (_) {}
+    try {
+      hasPostmortem = await api.fetchLatestPostmortem(incidentId) != null;
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _latestRun = latest;
+      _latestCheck = check;
+      _hasPostmortem = hasPostmortem;
+      _awaitingApproval = awaitingApproval;
+    });
+  }
+
+  // The incident status is only changed by people (resolve) and the alert
+  // intake, so the stepper is derived from the remediation history:
+  // Detect 0, Investigate 1, Cause 2, Approve 3, Recover 4, Report 5, all done 6.
+  bool get _recoveredNotResolved {
+    final s = _incident?.status;
+    return _latestCheck?['status'] == 'healthy' && s != IncidentStatus.resolved;
+  }
+
+  int _activeStage(IncidentModel incident) {
+    if (incident.status == IncidentStatus.resolved) return 6;
+    if (_latestCheck?['status'] == 'healthy' || _hasPostmortem) return 5;
+    if (_latestRun != null) return 4;
+    if (_awaitingApproval) return 3;
+    if (incident.status == IncidentStatus.remediating) return 4;
+    return incident.status == IncidentStatus.open ? 0 : 1;
+  }
+
+  String _statusLabel(IncidentModel incident) =>
+      _recoveredNotResolved ? 'recovered · awaiting resolve' : incident.status.name;
+
+  Widget _buildRemediationLinks(AppColorScheme colors, IncidentModel incident) {
+    final run = _latestRun;
+    if (run == null && !_hasPostmortem) return const SizedBox.shrink();
+    final checkStatus = _latestCheck?['status']?.toString();
+    final checkLabel = switch (checkStatus) {
+      'healthy' => 'Recovered',
+      'unhealthy' => 'Not recovered',
+      'failed' => 'Could not verify',
+      _ => run?.status == PlaybookRunStatus.success ? 'Checking…' : 'No check yet',
+    };
+
+    Widget link({required IconData icon, required String title, required String subtitle, VoidCallback? onTap}) {
+      return ListTile(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        enabled: onTap != null,
+        leading: Icon(icon, size: 20, color: onTap != null ? colors.accent : colors.muted),
+        title: Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text)),
+        subtitle: Text(subtitle, style: TextStyle(fontSize: 12, color: colors.muted)),
+        trailing: onTap != null ? Icon(Icons.chevron_right, color: colors.muted) : null,
+        onTap: onTap,
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      decoration: BoxDecoration(
+        color: colors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('REMEDIATION',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: colors.muted)),
+          if (run != null) ...[
+            link(
+              icon: Icons.play_circle_outline,
+              title: 'Latest run',
+              subtitle: '${run.playbookName ?? run.actionType.displayName} · ${run.status.slug}'
+                  '${_ranAt(run) != null ? ' · ran ${localTime(_ranAt(run))}' : ''}',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => S19ExecutionProgressScreen(playbookRunId: run.id),
+                  settings: RouteSettings(arguments: run.id),
+                ),
+              ),
+            ),
+            link(
+              icon: Icons.monitor_heart_outlined,
+              title: 'Recovery checks',
+              subtitle: checkLabel,
+              onTap: run.status == PlaybookRunStatus.success
+                  ? () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => S20RecoveryVerificationScreen(playbookRunId: run.id),
+                          settings: RouteSettings(arguments: run.id),
+                        ),
+                      )
+                  : null,
+            ),
+          ],
+          link(
+            icon: Icons.description_outlined,
+            title: 'Postmortem',
+            subtitle: _hasPostmortem ? 'AI draft ready' : 'Not written yet',
+            onTap: _hasPostmortem
+                ? () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => S21PostmortemReportScreen(incidentId: incident.id),
+                        settings: RouteSettings(arguments: incident.id),
+                      ),
+                    )
+                : null,
+          ),
+        ],
+      ),
+    );
   }
 
   String _formatDateTime(DateTime dt) {
@@ -246,7 +394,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  incident.status.name.toUpperCase(),
+                  _statusLabel(incident).toUpperCase(),
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -277,7 +425,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
           const SizedBox(height: 14),
 
           // Stepper: Detect -> Investigate -> Cause -> Approve -> Recover -> Report
-          _buildStepper(context, activeStage: incident.status == IncidentStatus.open ? 0 : 1),
+          _buildStepper(context, activeStage: _activeStage(incident)),
           const SizedBox(height: 14),
 
           // Metadata Card
@@ -316,7 +464,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
                 _buildMetaRow(
                   label: 'Status',
                   valueWidget: Text(
-                    incident.status.name,
+                    _statusLabel(incident),
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -572,6 +720,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
               ),
             ),
           ),
+          _buildRemediationLinks(colors, incident),
         ],
       ),
     );

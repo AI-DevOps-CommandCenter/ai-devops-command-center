@@ -238,6 +238,7 @@ class PlaybookRunModel {
   final DateTime? completedAt;
   final String? resultMessage;
   final List<PlaybookExecutionStep> steps;
+  final String? playbookName;
 
   PlaybookRunModel({
     required this.id,
@@ -262,6 +263,7 @@ class PlaybookRunModel {
     this.completedAt,
     this.resultMessage,
     this.steps = const [],
+    this.playbookName,
   });
 
   factory PlaybookRunModel.fromJson(Map<String, dynamic> json) {
@@ -285,16 +287,17 @@ class PlaybookRunModel {
       requestedBy: json['requested_by'] as String? ?? '',
       decidedBy: json['decided_by'] as String?,
       comments: json['comments'] as String?,
-      cancellationReason: json['cancellation_reason'] as String?,
+      cancellationReason: json['cancellation_reason'] as String? ?? json['status_reason'] as String?,
       idempotencyKey: json['idempotency_key'] as String?,
       n8nExecutionId: json['n8n_execution_id'] as String?,
-      createdAt: json['created_at'] != null ? DateTime.tryParse(json['created_at'].toString()) : null,
+      createdAt: DateTime.tryParse((json['created_at'] ?? json['requested_at'] ?? '').toString()),
       startedAt: json['started_at'] != null ? DateTime.tryParse(json['started_at'].toString()) : null,
       completedAt: json['completed_at'] != null ? DateTime.tryParse(json['completed_at'].toString()) : null,
       resultMessage: json['result'] is Map ? (json['result']['message'] as String?) : json['result_message'] as String?,
       steps: stepsJson != null
           ? stepsJson.map((e) => PlaybookExecutionStep.fromJson(e as Map<String, dynamic>)).toList()
           : [],
+      playbookName: json['playbook_name'] as String?,
     );
   }
 
