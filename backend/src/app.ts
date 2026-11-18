@@ -57,6 +57,8 @@ import {
 import deviceTokenRoutes from "./routes/device-token.routes.js";
 import { createMetricsRouter } from "./routes/metrics.routes.js";
 import { createLogsRouter } from "./routes/logs.routes.js";
+import { createAssistantRouter, type AssistantRateLimit } from "./routes/assistant.routes.js";
+import { createGroqClient, type AssistantClient } from "./services/assistant.service.js";
 import { createLokiClient, type LokiClient } from "./services/logs.service.js";
 import {
   createPrometheusClient,
@@ -86,6 +88,40 @@ export interface AppOptions {
   passwordReset?: PasswordResetClient | null;
   // Where the reset email link leads. undefined = PASSWORD_RESET_REDIRECT_URL.
   passwordResetRedirectUrl?: string;
+  // Developer assistant (Groq). undefined = GROQ_API_KEY from the environment;
+  // null = disabled (the endpoint answers 503).
+  assistant?: AssistantClient | null;
+  // Per-user limit for /api/assistant. undefined = ASSISTANT_RATE_LIMIT_* (10 per 5 minutes).
+  assistantRateLimit?: AssistantRateLimit;
+}
+
+function envPositiveInt(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${name} must be an integer from ${min} to ${max}.`);
+  return n;
+}
+
+// The key is read here only; it is never logged or returned.
+function assistantFromEnv(): AssistantClient | null {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) return null;
+  const baseUrl = process.env.GROQ_API_BASE_URL?.trim() || "https://api.groq.com/openai/v1";
+  if (!/^https:\/\//.test(baseUrl)) throw new Error("GROQ_API_BASE_URL must be an https URL.");
+  return createGroqClient({
+    apiKey,
+    baseUrl,
+    model: process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b",
+    timeoutMs: envPositiveInt("GROQ_TIMEOUT_MS", 25000, 1000, 60000)
+  });
+}
+
+function assistantRateLimitFromEnv(): AssistantRateLimit {
+  return {
+    windowMs: envPositiveInt("ASSISTANT_RATE_LIMIT_WINDOW_MS", 5 * 60 * 1000, 1000, 24 * 3600 * 1000),
+    max: envPositiveInt("ASSISTANT_RATE_LIMIT_MAX", 10, 1, 1000)
+  };
 }
 
 // The server itself never starts without the Supabase settings (config/supabase.ts);
@@ -229,6 +265,13 @@ export function createApp(
   app.use(
     "/api/logs",
     createLogsRouter(options.loki === undefined ? lokiFromEnv() : options.loki)
+  );
+  app.use(
+    "/api/assistant",
+    createAssistantRouter(
+      options.assistant === undefined ? assistantFromEnv() : options.assistant,
+      options.assistantRateLimit ?? assistantRateLimitFromEnv()
+    )
   );
   app.use(
     "/api/github",
