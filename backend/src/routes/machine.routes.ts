@@ -30,6 +30,15 @@ import {
   INCIDENT_SEVERITIES,
   type PostmortemReport
 } from "../services/alert-intake.service.js";
+import {
+  recordDeployment,
+  listRecentDeployments,
+  DEPLOYMENT_STATUSES,
+  PROVIDER_PATTERN,
+  SERVICE_NAME_PATTERN,
+  VERSION_PATTERN,
+  type DeploymentStatus
+} from "../services/deployment.service.js";
 import { sendDbError } from "../lib/db-errors.js";
 
 // n8n -> backend machine endpoints (decision A5).
@@ -471,6 +480,94 @@ export function createMachineRouter(deps: MachineDeps | null): Router {
     } catch (error) {
       resetSessionOnJwtError(deps.automation, error);
       return sendDbError(res, error, "Machine save postmortem error:", "Failed to save postmortem.");
+    }
+  });
+
+  // POST /api/machine/deployments  (sent by monitoring/scripts/release.sh)
+  // Body: { service_name, version, status?, provider? }
+  router.post("/deployments", async (req: Request, res: Response) => {
+    const body: unknown = req.body;
+    if (!isJsonObject(body)) {
+      return res.status(400).json({ success: false, message: "A JSON object body is required." });
+    }
+    const { service_name, version } = body;
+    const status = body.status ?? "success";
+    const provider = body.provider ?? "local";
+
+    if (typeof service_name !== "string" || !SERVICE_NAME_PATTERN.test(service_name)) {
+      return res.status(400).json({
+        success: false,
+        message: "service_name must be 1 to 100 characters (letters, digits, _ . : -)."
+      });
+    }
+    if (typeof version !== "string" || !VERSION_PATTERN.test(version)) {
+      return res.status(400).json({
+        success: false,
+        message: "version must be 1 to 64 characters (letters, digits, _ . + -)."
+      });
+    }
+    if (typeof status !== "string" || !(DEPLOYMENT_STATUSES as readonly string[]).includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Status must be one of: ${DEPLOYMENT_STATUSES.join(", ")}.`
+      });
+    }
+    if (typeof provider !== "string" || !PROVIDER_PATTERN.test(provider)) {
+      return res.status(400).json({ success: false, message: "provider must be 1 to 30 characters (a-z, 0-9, _ -)." });
+    }
+
+    const client = await getAutomationClient(deps.automation, res);
+    if (!client) return;
+
+    try {
+      const deploymentId = await recordDeployment(client, {
+        service_name,
+        version,
+        status: status as DeploymentStatus,
+        provider
+      });
+      return res.status(201).json({
+        success: true,
+        message: "Deployment recorded.",
+        data: { deployment_id: deploymentId }
+      });
+    } catch (error) {
+      resetSessionOnJwtError(deps.automation, error);
+      return sendDbError(res, error, "Machine record deployment error:", "Failed to record deployment.");
+    }
+  });
+
+  // GET /api/machine/deployments?service_name=&since=&until=  (read by n8n workflow 04)
+  // The signed path includes the query string.
+  router.get("/deployments", async (req: Request, res: Response) => {
+    const { service_name, since, until } = req.query;
+
+    if (typeof service_name !== "string" || !SERVICE_NAME_PATTERN.test(service_name)) {
+      return res.status(400).json({ success: false, message: "A valid service_name is required." });
+    }
+    const sinceAt = typeof since === "string" ? new Date(since) : null;
+    const untilAt = typeof until === "string" ? new Date(until) : null;
+    if (!sinceAt || !untilAt || isNaN(sinceAt.getTime()) || isNaN(untilAt.getTime())) {
+      return res.status(400).json({ success: false, message: "since and until must be ISO timestamps." });
+    }
+    if (sinceAt > untilAt || untilAt.getTime() - sinceAt.getTime() > 7 * 24 * 3600 * 1000) {
+      return res.status(400).json({ success: false, message: "since must be before until, at most 7 days apart." });
+    }
+
+    const client = await getAutomationClient(deps.automation, res);
+    if (!client) return;
+
+    try {
+      const deployments = await listRecentDeployments(
+        client,
+        service_name,
+        sinceAt.toISOString(),
+        untilAt.toISOString()
+      );
+      return res.status(200).json({ success: true, data: { deployments } });
+    } catch (error) {
+      resetSessionOnJwtError(deps.automation, error);
+      return sendDbError(res, error, "Machine list deployments error:", "Failed to read deployments.");
     }
   });
 
