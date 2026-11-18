@@ -13,5 +13,23 @@ firebase.initializeApp({
   storageBucket: 'ai-devops-command-center.firebasestorage.app',
 });
 
+// Clicking a push focuses an open app tab, or opens the app if none is open.
+// Registered before firebase.messaging() so it runs before the SDK's own
+// click handler (which only acts when the message has a link).
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const payload = (event.notification.data && event.notification.data.FCM_MSG) || {};
+  const data = payload.data || {};
+  const appUrl = new URL('./', self.registration.scope).href;
+  event.stopImmediatePropagation();
+  event.waitUntil((async () => {
+    const windows = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const tab = windows.find((w) => w.url.startsWith(appUrl));
+    const client = tab ? await tab.focus() : await clients.openWindow(appUrl);
+    // The app can use this to open the incident; ignored if it does not listen.
+    if (client) client.postMessage({ type: 'push-click', incident_id: data.incident_id || null, notification_id: data.notification_id || null });
+  })());
+});
+
 // Messages with a "notification" part are shown by FCM itself.
 firebase.messaging();
