@@ -7,6 +7,8 @@
 #   scripts/release.sh status       instances, image and version
 #
 # dc-sample-app:stable is the executor's rollback_image (infrastructure/playbooks/executor/allowlist.json).
+# deploy-bad and reset record the release (scripts/record-release.mjs -> POST /api/machine/deployments),
+# so workflow 04 links the next incident to it. build records nothing.
 set -euo pipefail
 export MSYS_NO_PATHCONV=1  # Git Bash on Windows
 cd "$(dirname "$0")/.."
@@ -50,6 +52,13 @@ status() {
   done
 }
 
+# Records the release in the deployments table (workflow 04 links it to the
+# next incident). Never fails the release: the backend may be down.
+record_release() {
+  node scripts/record-release.mjs sample-app "$1" \
+    || echo "warning: release $1 not recorded; workflow 04 will not see it" >&2
+}
+
 case "${1:-}" in
   build) build ;;
   deploy-bad)
@@ -57,10 +66,12 @@ case "${1:-}" in
     remove_replicas
     SAMPLE_APP_IMAGE=dc-sample-app:v2-bad docker compose up -d --no-build sample-app
     echo "deployed v2-bad. The executor's rollback playbook goes back to dc-sample-app:stable."
+    record_release v2
     ;;
   reset)
     remove_replicas
     docker compose up -d --force-recreate --no-deps sample-app
+    record_release v1
     ;;
   status) status ;;
   *) usage ;;
