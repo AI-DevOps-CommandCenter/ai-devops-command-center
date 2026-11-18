@@ -249,7 +249,9 @@ class _S22IncidentHistoryScreenState extends State<S22IncidentHistoryScreen> {
                           padding: const EdgeInsets.only(bottom: 10.0),
                           child: InkWell(
                             onTap: () {
-                              Navigator.pushNamed(context, '/postmortem', arguments: item['incidentId']);
+                              // Open the incident (S05); its Remediation card links to the run,
+                              // the recovery checks and the postmortem.
+                              Navigator.pushNamed(context, '/incident-details', arguments: item['incidentId']);
                             },
                             borderRadius: BorderRadius.circular(14),
                             child: Container(

@@ -39,9 +39,14 @@ import 'screens/s40_loading_screen.dart';
 import 'screens/s41_all_clear_screen.dart';
 import 'screens/s45_brand_screen.dart';
 import 'services/notification_service.dart';
+import 'services/password_recovery.dart';
+import 'screens/s29b_set_new_password_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // A password reset email link opens the web app with the recovery token in
+  // the URL fragment; the app then starts on S29b instead of the splash screen.
+  PasswordRecovery.pending = parseRecoveryLink(Uri.base);
   try {
     await NotificationService().initialize();
   } catch (_) {}
@@ -111,6 +116,15 @@ class DevOpsCommandCenterApp extends StatelessWidget {
             );
           },
           initialRoute: '/',
+          // Only used once, at startup; null keeps Flutter's default initial route.
+          onGenerateInitialRoutes: PasswordRecovery.pending == null
+              ? null
+              : (_) => [
+                    MaterialPageRoute(
+                      settings: const RouteSettings(name: '/reset-password'),
+                      builder: (context) => const S29bSetNewPasswordScreen(),
+                    ),
+                  ],
           onGenerateRoute: (settings) {
             if (settings.name == '/assistant') {
               final ctx = settings.arguments as String?;
@@ -126,6 +140,7 @@ class DevOpsCommandCenterApp extends StatelessWidget {
             '/welcome': (context) => const S01WelcomeScreen(),
             '/signin': (context) => const S02SignInScreen(),
             '/forgot-password': (context) => const S29ForgotPasswordScreen(),
+            '/reset-password': (context) => const S29bSetNewPasswordScreen(),
             '/dashboard': (context) => const S03OverviewDashboardScreen(),
             '/search': (context) => const S30SearchScreen(),
             '/incidents': (context) => const S04IncidentsScreen(),

@@ -24,7 +24,16 @@ export interface IncidentFilters {
   service_name?: string;
   limit?: number;
   offset?: number;
+  // Test incidents (environment = 'test') are hidden unless this is true.
+  include_test?: boolean;
 }
+
+// PostgREST filter: environment IS NULL OR environment <> 'test'. Test runs
+// (live tests, old demo seeds) are marked environment = 'test' and kept out of
+// the incident list, history and dashboard counts. Decided approvals are
+// immutable, so these incidents cannot be deleted instead.
+export const TEST_ENVIRONMENT = "test";
+export const NOT_TEST_ENVIRONMENT_FILTER = `environment.is.null,environment.neq.${TEST_ENVIRONMENT}`;
 
 // Create a new incident
 export async function createIncident(
@@ -74,6 +83,10 @@ export async function getIncidents(
 
   if (filters.service_name) {
     query = query.eq("service_name", filters.service_name);
+  }
+
+  if (!filters.include_test) {
+    query = query.or(NOT_TEST_ENVIRONMENT_FILTER);
   }
 
   const { data, error } = await query;

@@ -119,7 +119,7 @@ Demo accounts (staging Supabase): `demo.requester@demo.local` (operator) and `de
 - Per-user notification preferences are not stored.
 - The n8n replay store can lose a nonce under concurrent requests (KI-1); the backend's run state prevents double execution. Fix: consume nonces through the database.
 - The GitHub screens need a read-only `GITHUB_TOKEN` in `backend/.env`.
-- Remediation webhook delivery is retried in memory (no outbox table).
+- Remediation webhook delivery: immediate send after approval, then the dispatch outbox re-sends approved runs every ~30 s (max 10 attempts). Runs that use up their attempts are flagged (`dispatch_failed_at`), shown on the incident timeline, and operators/admins get an in-app + push notification; list them with `GET /api/playbook-runs?dispatch_failed=true`.
 
 ## 7. Team
 

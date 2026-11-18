@@ -8,6 +8,7 @@ Rules:
 4. "timeline" items must come from timestamps in the data, in time order.
 5. Blameless: describe systems and processes, not individuals.
 6. No commands, scripts or code.
+7. "impact": use "impact_facts". State the affected service and severity, the time from detection to recovery (detection_to_recovery_minutes, with detected_at and recovered_at), the error rate reported by the alert (alert_description) and the error rates measured after remediation (peak and latest), and how many remediation attempts were needed. Only the parts that are null are unknown: name them (for example "user impact not measured") instead of writing "Unknown" for the whole section.
 
 Reply with ONLY one JSON object, no extra text, in this exact shape:
 {"title": "", "summary": "", "timeline": [{"time": "", "event": ""}], "root_cause": "", "impact": "", "evidence": [], "remediation": "", "recovery_result": "", "lessons_learned": [], "preventive_actions": []}

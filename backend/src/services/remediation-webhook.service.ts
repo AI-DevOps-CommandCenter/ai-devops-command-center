@@ -61,6 +61,52 @@ async function getPlaybookActionType(
   return typeof actionType === "string" ? actionType : null;
 }
 
+// Outcome of one signed webhook attempt:
+//   done   202 accepted, or 409 (n8n/database refused: replay, not approved,
+//          already started); nothing more to do for this run
+//   retry  502/503 or a network error: try again later
+//   failed any other answer (e.g. 400/401): not retried
+export type WebhookAttemptOutcome = "done" | "retry" | "failed";
+
+export interface RemediationWebhookBody {
+  playbook_run_id: string;
+  incident_id: string;
+  action_type: string;
+  request_payload: Record<string, unknown>;
+}
+
+// One signed POST to n8n workflow 06, with a new nonce (every attempt is signed
+// again). Shared by the immediate dispatch and the outbox worker.
+export async function sendRemediationWebhook(
+  config: RemediationWebhookConfig,
+  payload: RemediationWebhookBody,
+  fetchImpl: FetchFunction = fetch
+): Promise<{ outcome: WebhookAttemptOutcome; status: string }> {
+  const body = JSON.stringify(payload);
+  const nonce = randomBytes(18).toString("base64url");
+  const headers = buildSignedHeaders(config.signingSecret, { method: "POST", path: WEBHOOK_PATH, body, nonce });
+
+  try {
+    const response = await fetchImpl(config.url, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    });
+    const status = String(response.status);
+    if (response.status === 202 || response.status === 409) return { outcome: "done", status };
+    if (response.status === 502 || response.status === 503) return { outcome: "retry", status };
+    return { outcome: "failed", status };
+  } catch {
+    // Do not log error details: they may contain sensitive request data.
+    return { outcome: "retry", status: "network_error" };
+  }
+}
+
+export function isRemediationAction(action: unknown): action is string {
+  return typeof action === "string" && isAllowedAction(action);
+}
+
 export function createRemediationWebhookDispatcher(
   config: RemediationWebhookConfig,
   options: DispatcherOptions = {}
@@ -99,55 +145,25 @@ export function createRemediationWebhookDispatcher(
         return;
       }
 
-      const body = JSON.stringify({
-        playbook_run_id: run.id,
+      const payload: RemediationWebhookBody = {
+        playbook_run_id: String(run.id),
         incident_id: run.incident_id,
         action_type: actionType,
-        request_payload: run.request_payload ?? {}
-      });
+        request_payload: (run.request_payload ?? {}) as Record<string, unknown>
+      };
 
       for (let attempt = 1; attempt <= RETRY_DELAYS_MS.length + 1; attempt++) {
-        const nonce = randomBytes(18).toString("base64url");
+        const { outcome, status } = await sendRemediationWebhook(config, payload, fetchImpl);
+        log(runId, attempt, status);
 
-        const headers = buildSignedHeaders(
-          config.signingSecret,
-          {
-            method: "POST",
-            path: WEBHOOK_PATH,
-            body,
-            nonce
-          }
-        );
-
-        try {
-          const response = await fetchImpl(config.url, {
-            method: "POST",
-            headers: {
-              ...headers,
-              "content-type": "application/json"
-            },
-            body,
-            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-          });
-
-          log(runId, attempt, String(response.status));
-
-          if (response.status === 202 || response.status === 409) {
-            return;
-          }
-
-          if (response.status !== 502 && response.status !== 503) {
-            return;
-          }
-        } catch {
-          // Do not log error details: they may contain sensitive request data.
-          log(runId, attempt, "network_error");
-        }
+        if (outcome !== "retry") return;
 
         if (attempt <= RETRY_DELAYS_MS.length) {
           await sleep(RETRY_DELAYS_MS[attempt - 1]!);
         }
       }
+      // Still not delivered: the outbox worker (dispatch-outbox.service.ts)
+      // sends approved runs again until n8n starts them.
     }
   };
 }

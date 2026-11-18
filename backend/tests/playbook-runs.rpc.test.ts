@@ -438,6 +438,25 @@ describe("Playbook run lifecycle through database functions", () => {
     expect(res.status).toBe(403);
   });
 
+  it("GET ?dispatch_failed=true lists approved runs the outbox gave up on", async () => {
+    const stuck = { ...runRow, status: "approved", dispatch_attempts: 10, dispatch_failed_at: "2026-11-19T08:00:00Z" };
+    const { calls } = useClient({ playbook_runs: { data: [stuck] } });
+
+    const res = await request(app).get("/api/playbook-runs?dispatch_failed=true").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].dispatch_failed_at).toBe("2026-11-19T08:00:00Z");
+    expect(callsFor(calls, "playbook_runs", "eq").map((call) => call.args)).toContainEqual(["status", "approved"]);
+    expect(callsFor(calls, "playbook_runs", "not")[0]?.args).toEqual(["dispatch_failed_at", "is", null]);
+    expectNoDirectWrites(calls);
+  });
+
+  it("GET ?dispatch_failed=yes is 400", async () => {
+    useClient({});
+    const res = await request(app).get("/api/playbook-runs?dispatch_failed=yes").set(auth);
+    expect(res.status).toBe(400);
+  });
+
   it("there is no human endpoint to start a run (n8n only, A5)", async () => {
     useClient({});
 

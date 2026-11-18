@@ -16,10 +16,11 @@ SELECT tests.ok(
 -- 31 verified baseline policies, plus 3 read policies added by 000600/000700
 -- (ai_analyses, recovery_checks, notifications). 000700 replaces the approvals
 -- SELECT policy one-for-one (operators are approvers, A3-Q1).
+-- notification_preferences (20261118000100) is checked in suite 16.
 SELECT tests.is(
     (SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'
        AND tablename NOT IN ('incident_events','notification_deliveries','automation_runs',
-                             'automation_request_nonces')),
+                             'automation_request_nonces','notification_preferences')),
     34, '31 verified baseline policies + 3 read policies (A2/A6)');
 
 SELECT tests.is(

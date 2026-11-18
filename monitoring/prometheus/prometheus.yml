@@ -14,11 +14,18 @@ alerting:
 # (PROM_SERVICE_LABEL=service) and it is also on `up`, which workflow 07 queries.
 # The job name is the same value, so queries on `job` work as well.
 scrape_configs:
+  # Every sample-app instance (the compose container and the replicas the
+  # executor's `scale` adds) has the network alias `sample-app`, so a DNS lookup
+  # finds all of them. `instance` is the container IP and port.
   - job_name: sample-app
-    static_configs:
-      - targets: ["sample-app:8000"]
-        labels:
-          service: sample-app
+    dns_sd_configs:
+      - names: ["sample-app"]
+        type: A
+        port: 8000
+        refresh_interval: 15s
+    relabel_configs:
+      - target_label: service
+        replacement: sample-app
 
   - job_name: prometheus
     static_configs:

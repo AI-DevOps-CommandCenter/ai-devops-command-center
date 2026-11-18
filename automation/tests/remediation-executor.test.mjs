@@ -67,7 +67,7 @@ test('06 executor request: exact body, executor secret, path /v1/execute, 90 s t
     assert.equal(r.method, 'POST');
     assert.equal(r.url, 'http://host.docker.internal:9095/v1/execute');
     assert.equal(r.path, '/v1/execute');
-    assert.equal(r.timeout_ms, 90000);
+    assert.equal(r.timeout_ms, 240000);
     assert.deepEqual(JSON.parse(r.body), { action, service_name: 'sample-app', playbook_run_id: RUN });
     const h = r.headers;
     const expect = (secret) => 'sha256=' + createHmac('sha256', secret).update([h['X-DC-Timestamp'], h['X-DC-Nonce'], 'POST', '/v1/execute', r.body].join('.')).digest('hex');

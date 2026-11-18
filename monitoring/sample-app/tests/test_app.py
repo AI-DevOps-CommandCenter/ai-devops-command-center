@@ -47,7 +47,31 @@ def duration_count(route: str, method: str = "GET") -> float:
 
 
 def test_health(client):
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok", "version": "dev"}
+
+
+def test_health_reports_the_release_version(monkeypatch):
+    monkeypatch.setenv("APP_VERSION", "v2")
+    assert TestClient(create_app()).get("/health").json() == {"status": "ok", "version": "v2"}
+
+
+def test_release_fault_is_active_from_startup(monkeypatch):
+    monkeypatch.setenv("RELEASE_FAULT", "errors:1.0")
+    release = TestClient(create_app(fault_latency_seconds=0.05))
+
+    assert release.get("/admin/fault").json() == {"mode": "errors", "rate": 1.0, "breaker_open": False}
+    assert release.get("/api/orders/1").status_code == 500
+
+
+def test_no_release_fault_by_default(client):
+    assert client.get("/admin/fault").json()["mode"] == "off"
+
+
+@pytest.mark.parametrize("value", ["crash:0.5", "errors:2", "errors:x"])
+def test_invalid_release_fault_is_refused(monkeypatch, value):
+    monkeypatch.setenv("RELEASE_FAULT", value)
+    with pytest.raises(ValueError):
+        create_app()
 
 
 def test_order_is_counted_under_route_template(client):
@@ -157,6 +181,13 @@ def test_json_log_line_has_fields_for_loki():
     assert line["msg"] == "inventory call failed"
     assert line["route"] == ORDER_ROUTE
     assert "ValueError: boom" in line["exc"]
+
+
+def test_json_log_line_carries_the_release_version():
+    record = logging.LogRecord("sample_app", logging.INFO, __file__, 1, "release started", None, None)
+
+    assert json.loads(JsonFormatter("sample-app", "v2").format(record))["version"] == "v2"
+    assert "version" not in json.loads(JsonFormatter("sample-app").format(record))
 
 
 def test_uvicorn_startup_lines_do_not_look_like_errors():

@@ -232,7 +232,8 @@ export async function getIncidentsController(
         severity,
         service_name,
         limit: limitValue,
-        offset: offsetValue
+        offset: offsetValue,
+        include_test: req.query.include_test === "true"
       }
     );
 
