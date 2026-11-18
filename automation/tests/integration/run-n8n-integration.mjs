@@ -127,7 +127,7 @@ async function main() {
   const mocks = startMocks({ servicesPort: SVC, backendPort: BACKEND, secret: SECRET, backendTimeoutMs: BACKEND_TIMEOUT_MS });
   mocks.notifier = TLS ? startNotificationReceiver({ port: NOTIFY, key: TLS.key, cert: TLS.cert }) : null;
   console.log(TLS ? 'error notifications: test HTTPS receiver on ' + NOTIFY : 'error notifications: openssl not found, notification checks will be SKIPPED');
-  const setScenario = (s) => Object.assign(mocks.scenario, { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent', complete: [], start: 'ok', recovery_store: 'ok' }, s);
+  const setScenario = (s) => Object.assign(mocks.scenario, { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent', complete: [], start: 'ok', recovery_store: 'ok', postmortem_store: 'ok' }, s);
   const takeCalls = () => mocks.calls.splice(0);
 
   // ---- import
@@ -225,13 +225,20 @@ async function main() {
   const auth = { Authorization: 'Bearer test-alert-token' };
   r = await post('alertmanager', alert, {});
   check('01 missing token -> 401/403', r.status === 401 || r.status === 403, r);
+  takeCalls();
   r = await post('alertmanager', alert, auth);
   check('01 valid alert -> 202, 1 new', r.status === 202 && jsonField(r, 'new_alerts') === 1, r);
   // n8n saves static data when an execution ENDS, so the repeat is sent after
   // the first execution finished (Alertmanager repeats after repeat_interval).
   await sleep(4000);
+  const incidentCalls = () => takeCalls().filter((c) => c.port === 'backend' && c.path === '/api/machine/incidents');
+  let ic = incidentCalls();
+  check('01 BD-1: incident created via signed POST /api/machine/incidents (201)', ic.length === 1 && ic[0].auth === 'ok' && ic[0].answer === 201 && ic[0].body.fingerprint === JSON.parse(alert).alerts[0].fingerprint, ic);
   r = await post('alertmanager', alert, auth);
   check('01 repeated alert -> duplicate, 0 new', r.status === 202 && jsonField(r, 'new_alerts') === 0 && jsonField(r, 'duplicate_alerts') === 1, r);
+  await sleep(1000);
+  ic = incidentCalls();
+  check('01 BD-1: duplicate is not sent to the backend again', ic.length === 0, ic);
   r = await post('alertmanager', { alerts: [] }, auth);
   check('01 invalid payload -> 400', r.status === 400, r);
   r = await post('alertmanager', JSON.parse(alert.replace('"status": "firing",\n      "labels"', '"status": "resolved",\n      "labels"').replace('a1b2c3d4e5f60718', 'ffff000011112222')), auth);
@@ -299,8 +306,18 @@ async function main() {
 
   console.log('\n08 Postmortem');
   setScenario({});
+  takeCalls();
   o = first(await post('it-postmortem', { incident_id: INC, playbook_run_id: RUN, status: 'recovered', checks_performed: 1, evidence: [], action_type: 'restart', simulated_remediation: true }));
-  check('08 complete context -> draft_ready, not stored (BD-4)', o.status === 'draft_ready' && o.postmortem && o.stored === false && o.store_error.kind === 'blocked', o);
+  const pmCalls = takeCalls().filter((c) => c.port === 'backend' && c.path.startsWith('/api/machine/incidents/' + INC + '/'));
+  const savedPm = mocks.postmortems.find((p) => p.incident_id === INC) || {};
+  check('08 BD-4: context read via signed GET .../context', pmCalls.some((c) => c.method === 'GET' && c.path.endsWith('/context') && c.auth === 'ok'), pmCalls);
+  check('08 complete context -> draft_ready, stored (BD-4), postmortem_id returned', o.status === 'draft_ready' && o.postmortem && o.stored === true && o.store_error === null && typeof o.postmortem_id === 'string' && o.postmortem_id === savedPm.id, o);
+  check('08 BD-4: stored body matches the backend contract', pmCalls.some((c) => c.method === 'POST' && c.path.endsWith('/postmortem') && c.auth === 'ok' && c.answer === 'ok') && savedPm.title === o.postmortem.title && Array.isArray(savedPm.timeline), savedPm);
+  o = first(await post('it-postmortem', { incident_id: INC, playbook_run_id: RUN, status: 'recovered', checks_performed: 1, evidence: [], action_type: 'restart', simulated_remediation: true }));
+  check('08 BD-4: re-run updates the same postmortem (one per incident)', o.stored === true && o.postmortem_id === savedPm.id && mocks.postmortems.filter((p) => p.incident_id === INC).length === 1, { o, n: mocks.postmortems.length });
+  setScenario({ postmortem_store: 500 });
+  o = first(await post('it-postmortem', { incident_id: INC, playbook_run_id: RUN, status: 'recovered', checks_performed: 1, evidence: [], action_type: 'restart', simulated_remediation: true }));
+  check('08 BD-4: backend error (500) -> draft_ready, not stored, server_error', o.status === 'draft_ready' && o.postmortem && o.stored === false && o.store_error && o.store_error.kind === 'server_error', o);
   o = first(await post('it-postmortem', { incident_id: INC }));
   check('08 missing context -> insufficient_context, no Groq', o.status === 'insufficient_context', o);
   setScenario({ groq: 'rate_limited' });

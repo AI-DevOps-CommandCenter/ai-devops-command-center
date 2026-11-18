@@ -39,11 +39,19 @@ export function startMocks({ servicesPort, backendPort, secret, backendTimeoutMs
   //   'ok' | <HTTP status> | 'timeout' (no answer in time, nothing changed) |
   //   'timeout_commit' (the run IS completed, the answer comes too late) | 'reset' (connection dropped)
   // start: 'ok' | 'timeout'.  recovery_store: 'ok' | 'not_found' | <HTTP status>.
-  const scenario = { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent', complete: [], start: 'ok', recovery_store: 'ok' };
+  // postmortem_store: 'ok' | <HTTP status>.
+  const scenario = { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent', complete: [], start: 'ok', recovery_store: 'ok', postmortem_store: 'ok' };
   const late = backendTimeoutMs * 2;
   const calls = [];
   const nonces = new Set();
   const recoveryChecks = [];
+  // BD-1: incidents by alert fingerprint (create_incident_from_alert is idempotent
+  // on the fingerprint while the incident is active). The incident used by the
+  // 06/07/08 checks exists from the start so BD-4 context can be read for it.
+  const incidents = {
+    '22222222-2222-4222-8222-222222222222': { incident_id: '22222222-2222-4222-8222-222222222222', investigation_id: '66666666-6666-4666-8666-666666666666', fingerprint: 'seed', title: 'HighErrorRate on checkout-api', severity: 'critical', service_name: 'checkout-api', status: 'investigating' },
+  };
+  const postmortems = [];
   const runs = {
     '11111111-1111-4111-8111-111111111111': { status: 'approved', action_type: 'restart', incident_id: '22222222-2222-4222-8222-222222222222' },
     '33333333-3333-4333-8333-333333333333': { status: 'pending', action_type: 'rollback', incident_id: '22222222-2222-4222-8222-222222222222' },
@@ -179,6 +187,58 @@ export function startMocks({ servicesPort, backendPort, secret, backendTimeoutMs
       recoveryChecks.push({ id, ...b });
       return send(res, 201, { success: true, message: 'Recovery check recorded.', data: { recovery_check_id: id } });
     }
+    // BD-1: POST /api/machine/incidents (validation like machine.routes.ts).
+    if (req.url === '/api/machine/incidents' && req.method === 'POST') {
+      const b = call.body;
+      const text = (v, max) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+      const optText = (v, max) => v === undefined || v === null || text(v, max);
+      if (!b || typeof b !== 'object' || !text(b.fingerprint, 200) || !text(b.title, 300) || !['critical', 'high', 'medium', 'low', 'info'].includes(b.severity)
+        || !text(b.service_name, 200) || !optText(b.description, 4000) || !optText(b.environment, 100)
+        || (b.detected_at !== undefined && b.detected_at !== null && Number.isNaN(Date.parse(b.detected_at)))) {
+        call.answer = 400;
+        return send(res, 400, { success: false, message: 'Invalid incident.' });
+      }
+      const existing = Object.values(incidents).find((i) => i.fingerprint === b.fingerprint && i.status !== 'resolved');
+      if (existing) {
+        call.answer = 200;
+        return send(res, 200, { success: true, message: 'Incident already exists for this alert.', data: { incident_id: existing.incident_id, investigation_id: existing.investigation_id, created: false } });
+      }
+      const inc = { incident_id: randomUUID(), investigation_id: randomUUID(), fingerprint: b.fingerprint, title: b.title, severity: b.severity, service_name: b.service_name, status: 'investigating' };
+      incidents[inc.incident_id] = inc;
+      call.answer = 201;
+      return send(res, 201, { success: true, message: 'Incident created.', data: { incident_id: inc.incident_id, investigation_id: inc.investigation_id, created: true } });
+    }
+
+    // BD-4: GET /api/machine/incidents/:id/context and POST .../postmortem.
+    const pm = req.url.match(/^\/api\/machine\/incidents\/([0-9a-f-]+)\/(context|postmortem)$/);
+    if (pm) {
+      const inc = incidents[pm[1]];
+      if (!inc) return send(res, 404, { success: false, message: 'Incident not found.' });
+      if (pm[2] === 'context' && req.method === 'GET') {
+        const { fingerprint, investigation_id, ...incident } = inc;
+        return send(res, 200, { success: true, data: { incident: { id: inc.incident_id, ...incident }, rca: null, playbook_runs: [], recovery_checks: [], timeline: [] } });
+      }
+      if (pm[2] === 'postmortem' && req.method === 'POST') {
+        const b = call.body;
+        const text = (v, max) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+        const list = (v) => Array.isArray(v) && v.length <= 20 && v.every((x) => text(x, 500));
+        if (!b || typeof b !== 'object' || !['title', 'summary', 'root_cause', 'impact', 'remediation', 'recovery_result'].every((f) => text(b[f], 4000))
+          || !['evidence', 'lessons_learned', 'preventive_actions'].every((f) => list(b[f]))
+          || !Array.isArray(b.timeline) || b.timeline.length > 50 || !b.timeline.every((e) => e && text(e.time, 40) && text(e.event, 500))) {
+          call.answer = 400;
+          return send(res, 400, { success: false, message: 'Invalid postmortem.' });
+        }
+        const mode = scenario.postmortem_store;
+        call.answer = mode;
+        if (typeof mode === 'number') return send(res, mode, { success: false, message: 'Failed to save postmortem.' });
+        // One automation postmortem per incident: a re-run updates it (same id).
+        const prev = postmortems.find((p) => p.incident_id === pm[1]);
+        const id = prev ? prev.id : randomUUID();
+        if (prev) Object.assign(prev, b); else postmortems.push({ id, incident_id: pm[1], ...b });
+        return send(res, 201, { success: true, message: 'Postmortem saved.', data: { postmortem_id: id } });
+      }
+    }
+
     // The other contract routes (analysis, incident-events) are not implemented
     // in the real backend yet: answer like Express does.
     return send(res, 404, { success: false, message: 'Route not found.' });
@@ -191,6 +251,8 @@ export function startMocks({ servicesPort, backendPort, secret, backendTimeoutMs
     runs,
     calls,
     recoveryChecks,
+    incidents,
+    postmortems,
     close: () => { services.close(); backend.close(); },
   };
 }
