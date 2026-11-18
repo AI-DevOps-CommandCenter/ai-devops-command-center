@@ -4,7 +4,7 @@ import type { ClaimedDelivery, DeliveryResult, ExternalChannel } from "./types.j
 
 // Helpers shared by the channel senders.
 
-const LABEL: Record<ExternalChannel, string> = { email: "Email", slack: "Slack", discord: "Discord" };
+const LABEL: Record<ExternalChannel, string> = { email: "Email", slack: "Slack", discord: "Discord", push: "Push" };
 
 export function truncateText(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 3)}...` : text;

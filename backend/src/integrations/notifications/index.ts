@@ -3,6 +3,12 @@ import { loadNotificationSenderConfig, type NotificationSenderConfig } from "./c
 import { DiscordSender } from "./discord.sender.js";
 import { createSmtpTransport, EmailSender, type MailTransport } from "./email.sender.js";
 import { SlackSender } from "./slack.sender.js";
+import { createFirebaseMessaging, loadPushConfig, PushSender, type PushMessaging } from "./push.sender.js";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+// src/integrations/notifications (or dist/...) -> backend folder.
+const BACKEND_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 import type { NotificationSender } from "./types.js";
 
 // Entry point for the notification sender worker (owner: Vinuka, M5).
@@ -18,6 +24,7 @@ import type { NotificationSender } from "./types.js";
 
 export * from "./types.js";
 export { loadNotificationSenderConfig } from "./config.js";
+export { PushSender, buildPushMessage, loadPushConfig, type PushMessaging } from "./push.sender.js";
 
 export interface SenderDeps {
   fetchImpl?: FetchLike;
@@ -39,4 +46,24 @@ export function createNotificationSenders(
   }
 
   return senders;
+}
+
+// Senders for every configured channel, push included. Push needs the
+// Firebase service account (FIREBASE_SERVICE_ACCOUNT_FILE), read once here;
+// a relative path is resolved from the backend folder.
+export async function createAllNotificationSenders(
+  env: NodeJS.ProcessEnv = process.env,
+  deps: SenderDeps & { pushMessaging?: PushMessaging } = {}
+): Promise<Map<string, NotificationSender>> {
+  const senders = createNotificationSenders(loadNotificationSenderConfig(env), deps);
+  const push = loadPushConfig(env);
+  if (push) {
+    const messaging = deps.pushMessaging ?? await createFirebaseMessaging(push, BACKEND_DIR);
+    senders.set("push", new PushSender(messaging));
+  }
+  return senders;
+}
+
+export function isPushConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return loadPushConfig(env) !== null;
 }

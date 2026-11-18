@@ -54,7 +54,8 @@ describe("notification-delivery-processor", () => {
     expect(result).toEqual({
       claimed: 0,
       succeeded: 0,
-      failed: 0
+      failed: 0,
+      retrying: 0
     });
     expect(dependencies.send).not.toHaveBeenCalled();
     expect(dependencies.record).not.toHaveBeenCalled();
@@ -83,7 +84,8 @@ describe("notification-delivery-processor", () => {
     expect(result).toEqual({
       claimed: 1,
       succeeded: 1,
-      failed: 0
+      failed: 0,
+      retrying: 0
     });
   });
 
@@ -128,7 +130,8 @@ describe("notification-delivery-processor", () => {
     expect(result).toEqual({
       claimed: 2,
       succeeded: 1,
-      failed: 1
+      failed: 1,
+      retrying: 0
     });
   });
 

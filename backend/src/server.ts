@@ -9,12 +9,22 @@ import {
   loadRemediationWebhookEnv
 } from "./config/machine.js";
 import { createDispatchOutbox, outboxIntervalFromEnv } from "./services/dispatch-outbox.service.js";
+import { startNotificationWorker } from "./workers/notification-dispatcher.js";
 
 const config = loadServerConfig();
 const app = createApp(config);
 
 app.listen(config.port, () => {
   console.log(`Server running at http://localhost:${config.port}`);
+});
+
+// Notification worker (decision A6): delivers email, Slack, Discord and push
+// notifications. Needs the automation identity and at least one configured
+// channel; NOTIFICATION_WORKER_POLL_INTERVAL_MS=0 turns it off.
+void startNotificationWorker().then((result) => {
+  console.log(result.started
+    ? `Notification worker: on (${result.channels.join(", ")})`
+    : `Notification worker: off (${result.reason})`);
 });
 
 // Dispatch outbox (migration 20261118000200): sends approved remediation runs

@@ -15,8 +15,16 @@ class NotificationService {
 
   final ApiService _apiService = ApiService();
 
+  /// Web push needs the Firebase web VAPID public key. It is passed at build
+  /// time and is not stored in git:
+  ///   flutter run -d chrome --dart-define=FCM_WEB_VAPID_KEY=YOUR_KEY
+  /// Without it, web gets no push token (in-app notifications still work).
+  static const String _webVapidKey = String.fromEnvironment('FCM_WEB_VAPID_KEY');
+
   bool _isInitialized = false;
+  bool _signedIn = false;
   String? _fcmToken;
+  StreamSubscription<String>? _tokenRefreshSubscription;
   final StreamController<NotificationModel> _notificationStreamController =
       StreamController<NotificationModel>.broadcast();
 
@@ -44,18 +52,26 @@ class NotificationService {
 
       if (settings.authorizationStatus == AuthorizationStatus.authorized ||
           settings.authorizationStatus == AuthorizationStatus.provisional) {
-        // 3. Retrieve FCM device token
+        // 3. Retrieve the real FCM device token. It is registered with the
+        //    backend (POST /api/device-tokens) only after sign-in, because the
+        //    route needs the user's session (see registerTokenOnLogin).
         if (!kIsWeb) {
           _fcmToken = await messaging.getToken();
+        } else if (_webVapidKey.isNotEmpty) {
+          _fcmToken = await messaging.getToken(vapidKey: _webVapidKey);
         } else {
-          _fcmToken = 'web-fcm-token-${DateTime.now().millisecondsSinceEpoch}';
+          debugPrint('[push] FCM_WEB_VAPID_KEY not set: web push is off.');
         }
 
-        // 4. Register token with Vinuka's POST /api/device-tokens
-        if (_fcmToken != null) {
-          final platform = defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
-          await _apiService.registerDeviceToken(_fcmToken!, platform: platform);
-        }
+        // 4. FCM can replace the token; register the new one while signed in.
+        _tokenRefreshSubscription = messaging.onTokenRefresh.listen((token) async {
+          final old = _fcmToken;
+          _fcmToken = token;
+          if (_signedIn) {
+            if (old != null && old != token) await _apiService.unregisterDeviceToken(old);
+            await _apiService.registerDeviceToken(token, platform: _platform);
+          }
+        });
 
         // 5. Listen to foreground FCM messages
         FirebaseMessaging.onMessage.listen((RemoteMessage message) {
@@ -68,21 +84,33 @@ class NotificationService {
         });
       }
     } catch (e) {
-      // Graceful fallback for web/demo mode without breaking presentation
-      _fcmToken = 'mock-fcm-token-android-1014327278289';
+      // No push on this device (Firebase unavailable, permission error...).
+      // No token is invented: the app keeps working with in-app notifications.
+      _fcmToken = null;
+      debugPrint('[push] push notifications unavailable: $e');
     }
 
     _isInitialized = true;
   }
 
-  /// Register FCM token after user signs in
-  Future<void> registerTokenOnLogin() async {
-    final token = _fcmToken ?? 'mock-fcm-token-android-1014327278289';
-    await _apiService.registerDeviceToken(token);
+  String get _platform {
+    if (kIsWeb) return 'web';
+    return defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
   }
 
-  /// Unregister FCM token on user logout
+  /// Register the FCM token after the user signs in. Does nothing when this
+  /// device has no push token.
+  Future<void> registerTokenOnLogin() async {
+    _signedIn = true;
+    final token = _fcmToken;
+    if (token == null) return;
+    await _apiService.registerDeviceToken(token, platform: _platform);
+  }
+
+  /// Unregister the FCM token on sign-out, so this device gets no more pushes
+  /// for that user.
   Future<void> unregisterTokenOnLogout() async {
+    _signedIn = false;
     if (_fcmToken != null) {
       await _apiService.unregisterDeviceToken(_fcmToken!);
     }
@@ -138,6 +166,7 @@ class NotificationService {
   }
 
   void dispose() {
+    _tokenRefreshSubscription?.cancel();
     _notificationStreamController.close();
   }
 }

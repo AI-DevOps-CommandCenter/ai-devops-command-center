@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_endpoints.dart';
+import '../controllers/auth_controller.dart';
 import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/flow_widgets.dart';
@@ -129,7 +130,8 @@ class S28ProfileScreen extends StatelessWidget {
                     height: 48,
                     child: OutlinedButton.icon(
                       onPressed: () async {
-                        await AuthService().signOut();
+                        // Unregisters this device's push token first, then ends the session.
+                        await AuthController.instance.signOut();
                         if (!context.mounted) return;
                         Navigator.pushNamedAndRemoveUntil(context, '/signin', (route) => false);
                       },

@@ -12,9 +12,9 @@
 // The senders only deliver. Claiming, retry policy, scheduling and recording
 // stay in the worker.
 
-// The external channels that M7 implements. `push` (Firebase) is M6's;
-// `in_app` needs no delivery.
-export type ExternalChannel = "email" | "slack" | "discord";
+// The external channels with a sender: email, Slack and Discord (M7) and push
+// (Firebase Cloud Messaging, push.sender.ts). `in_app` needs no delivery.
+export type ExternalChannel = "email" | "slack" | "discord" | "push";
 
 // One row returned by claim_notification_deliveries(), unchanged.
 export interface ClaimedDelivery {
