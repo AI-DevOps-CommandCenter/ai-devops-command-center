@@ -69,6 +69,47 @@ SELECT tests.is(tests.scalar('SELECT count(*) FROM public.claim_runs_for_dispatc
     'not claimed after p_max_attempts attempts (stays approved for an operator)');
 RESET ROLE;
 
+-- ... and that same pass flags it once for the operators
+SELECT tests.ok((SELECT dispatch_failed_at IS NOT NULL FROM public.playbook_runs
+                 WHERE id = 'd1700000-0000-4000-8000-000000000001'), 'the exhausted run is flagged dispatch_failed_at');
+SELECT tests.is((SELECT status FROM public.playbook_runs WHERE id = 'd1700000-0000-4000-8000-000000000001'), 'approved',
+    'flagging does not change the run status');
+SELECT tests.is(tests.scalar($$SELECT count(*) FROM public.incident_events
+                               WHERE metadata ->> 'playbook_run_id' = 'd1700000-0000-4000-8000-000000000001'
+                                 AND event_type = 'remediation' AND level = 'error'$$), 1::bigint,
+    'an error event is on the incident timeline');
+SELECT tests.is(tests.scalar($$SELECT count(*) FROM public.audit_logs
+                               WHERE action = 'PLAYBOOK_RUN_DISPATCH_FAILED'
+                                 AND entity_id = 'd1700000-0000-4000-8000-000000000001'$$), 1::bigint,
+    'and an audit entry');
+SELECT tests.is(tests.scalar($$SELECT count(DISTINCT n.user_id) FROM public.notifications n
+                               JOIN public.profiles p ON p.id = n.user_id
+                               WHERE n.title = 'Remediation not sent' AND p.role IN ('admin', 'operator')$$),
+    tests.scalar($$SELECT count(*) FROM public.profiles WHERE role IN ('admin', 'operator')$$),
+    'every operator and admin is notified');
+SELECT tests.is(tests.scalar($$SELECT count(*) FROM public.notifications n JOIN public.profiles p ON p.id = n.user_id
+                               WHERE n.title = 'Remediation not sent' AND p.role NOT IN ('admin', 'operator')$$), 0::bigint,
+    'nobody else is notified');
+
+-- The operator sees the flag on the run and the notification in their inbox
+SELECT tests.login('op');
+SET LOCAL ROLE authenticated;
+SELECT tests.ok((SELECT dispatch_failed_at IS NOT NULL FROM public.playbook_runs
+                 WHERE id = 'd1700000-0000-4000-8000-000000000001'), 'the operator can read the flag');
+SELECT tests.is(tests.scalar($$SELECT count(*) FROM public.notifications WHERE title = 'Remediation not sent'$$), 1::bigint,
+    'the operator has one notification in their inbox');
+RESET ROLE;
+
+-- Flagged only once
+CREATE TEMP TABLE notes_before ON COMMIT DROP AS
+    SELECT count(*) AS n FROM public.notifications WHERE title = 'Remediation not sent';
+SELECT tests.login('bot');
+SET LOCAL ROLE authenticated;
+SELECT tests.lives($$SELECT * FROM public.claim_runs_for_dispatch(10, 30, 30, 3)$$, 'another pass');
+RESET ROLE;
+SELECT tests.is(tests.scalar($$SELECT count(*) FROM public.notifications WHERE title = 'Remediation not sent'$$),
+    (SELECT n FROM notes_before), 'no second notification for the same run');
+
 -- The fresh run becomes due after its grace period
 UPDATE public.playbook_runs SET approved_at = now() - interval '2 minutes' WHERE id = 'd1700000-0000-4000-8000-000000000002';
 SELECT tests.login('bot');

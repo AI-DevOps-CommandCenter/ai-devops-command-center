@@ -18,6 +18,8 @@ export type PlaybookRunStatus =
 export interface PlaybookRunFilters {
   status?: PlaybookRunStatus;
   incident_id?: string;
+  // true: only approved runs the outbox gave up on (migration 20261118000200)
+  dispatch_failed?: boolean;
 }
 
 // Runs are returned with their playbook's name and action_type, and the
@@ -53,6 +55,10 @@ export async function getPlaybookRuns(
 
   if (filters.incident_id) {
     query = query.eq("incident_id", filters.incident_id);
+  }
+
+  if (filters.dispatch_failed) {
+    query = query.eq("status", "approved").not("dispatch_failed_at", "is", null);
   }
 
   const { data, error } = await query;

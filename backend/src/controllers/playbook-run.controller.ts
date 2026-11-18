@@ -145,7 +145,14 @@ export async function getPlaybookRunsController(
       });
     }
 
-    const { status, incident_id } = req.query;
+    const { status, incident_id, dispatch_failed } = req.query;
+
+    if (dispatch_failed !== undefined && dispatch_failed !== "true" && dispatch_failed !== "false") {
+      return res.status(400).json({
+        success: false,
+        message: "dispatch_failed must be true or false."
+      });
+    }
 
     if (status && !validStatuses.includes(status as string)) {
       return res.status(400).json({
@@ -169,7 +176,8 @@ export async function getPlaybookRunsController(
 
     const runs = await getPlaybookRuns(client, {
       status: status as never,
-      incident_id: incident_id as string | undefined
+      incident_id: incident_id as string | undefined,
+      dispatch_failed: dispatch_failed === "true"
     });
 
     return res.status(200).json({
