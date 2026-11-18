@@ -35,6 +35,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
   PlaybookRunModel? _latestRun;
   Map<String, dynamic>? _latestCheck;
   bool _hasPostmortem = false;
+  bool _awaitingApproval = false;
 
   @override
   void didChangeDependencies() {
@@ -104,10 +105,11 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
     PlaybookRunModel? latest;
     Map<String, dynamic>? check;
     var hasPostmortem = false;
+    var awaitingApproval = false;
     try {
-      final runs = (await api.fetchPlaybookRuns(incidentId: incidentId))
-          .where((r) => r.incidentId == incidentId && r.status != PlaybookRunStatus.pendingApproval)
-          .toList()
+      final all = (await api.fetchPlaybookRuns(incidentId: incidentId)).where((r) => r.incidentId == incidentId).toList();
+      awaitingApproval = all.any((r) => r.status == PlaybookRunStatus.pendingApproval);
+      final runs = all.where((r) => r.status != PlaybookRunStatus.pendingApproval).toList()
         ..sort((a, b) => (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
       latest = runs.isEmpty ? null : runs.first;
       if (latest != null) {
@@ -122,8 +124,29 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
       _latestRun = latest;
       _latestCheck = check;
       _hasPostmortem = hasPostmortem;
+      _awaitingApproval = awaitingApproval;
     });
   }
+
+  // The incident status is only changed by people (resolve) and the alert
+  // intake, so the stepper is derived from the remediation history:
+  // Detect 0, Investigate 1, Cause 2, Approve 3, Recover 4, Report 5, all done 6.
+  bool get _recoveredNotResolved {
+    final s = _incident?.status;
+    return _latestCheck?['status'] == 'healthy' && s != IncidentStatus.resolved && s != IncidentStatus.closed;
+  }
+
+  int _activeStage(IncidentModel incident) {
+    if (incident.status == IncidentStatus.resolved || incident.status == IncidentStatus.closed) return 6;
+    if (_latestCheck?['status'] == 'healthy' || _hasPostmortem) return 5;
+    if (_latestRun != null) return 4;
+    if (_awaitingApproval) return 3;
+    if (incident.status == IncidentStatus.identified || incident.status == IncidentStatus.mitigating) return 2;
+    return incident.status == IncidentStatus.open ? 0 : 1;
+  }
+
+  String _statusLabel(IncidentModel incident) =>
+      _recoveredNotResolved ? 'recovered · awaiting resolve' : incident.status.name;
 
   Widget _buildRemediationLinks(AppColorScheme colors, IncidentModel incident) {
     final run = _latestRun;
@@ -368,7 +391,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  incident.status.name.toUpperCase(),
+                  _statusLabel(incident).toUpperCase(),
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -399,7 +422,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
           const SizedBox(height: 14),
 
           // Stepper: Detect -> Investigate -> Cause -> Approve -> Recover -> Report
-          _buildStepper(context, activeStage: incident.status == IncidentStatus.open ? 0 : 1),
+          _buildStepper(context, activeStage: _activeStage(incident)),
           const SizedBox(height: 14),
 
           // Metadata Card
@@ -438,7 +461,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
                 _buildMetaRow(
                   label: 'Status',
                   valueWidget: Text(
-                    incident.status.name,
+                    _statusLabel(incident),
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
