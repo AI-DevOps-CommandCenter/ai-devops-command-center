@@ -54,6 +54,12 @@ SELECT tests.throws(format($$SELECT public.mark_notification_read(%L)$$, tests.f
     'DC404', 'users cannot touch someone else''s notification');
 RESET ROLE;
 
+-- u1 opts in to email (S27, migration 20261118000100; email is off by default).
+SELECT tests.login('u1');
+SET LOCAL ROLE authenticated;
+SELECT tests.lives($$SELECT * FROM public.set_notification_preferences(true, true)$$, 'u1 turns email on');
+RESET ROLE;
+
 -- Backend notification module (automation identity)
 SELECT tests.login('bot');
 SET LOCAL ROLE authenticated;

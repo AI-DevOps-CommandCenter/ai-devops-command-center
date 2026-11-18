@@ -8,6 +8,8 @@
 --   write_notification (replaced)  applies the recipient's settings:
 --       push_enabled = false  -> no push delivery
 --       email_enabled = true  -> an email delivery is added
+--       email_enabled = false -> no email delivery (even if the caller asked)
+--       nothing left          -> the in-app inbox row is still written
 --     The in-app inbox is always written. Team channels (slack, discord) and
 --     notifications without a recipient are not affected.
 --
@@ -110,8 +112,16 @@ BEGIN
         IF coalesce(v_push, true) = false THEN
             v_channels := array_remove(v_channels, 'push');
         END IF;
-        IF coalesce(v_email, false) AND NOT 'email' = ANY (v_channels) THEN
-            v_channels := v_channels || 'email'::text;
+        IF coalesce(v_email, false) THEN
+            IF NOT 'email' = ANY (v_channels) THEN
+                v_channels := v_channels || 'email'::text;
+            END IF;
+        ELSE
+            v_channels := array_remove(v_channels, 'email');
+        END IF;
+        -- Everything the caller asked for was switched off: keep the inbox row.
+        IF cardinality(v_channels) = 0 THEN
+            v_channels := ARRAY['in_app'];
         END IF;
     END IF;
 
