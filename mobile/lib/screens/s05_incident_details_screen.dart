@@ -133,15 +133,15 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
   // Detect 0, Investigate 1, Cause 2, Approve 3, Recover 4, Report 5, all done 6.
   bool get _recoveredNotResolved {
     final s = _incident?.status;
-    return _latestCheck?['status'] == 'healthy' && s != IncidentStatus.resolved && s != IncidentStatus.closed;
+    return _latestCheck?['status'] == 'healthy' && s != IncidentStatus.resolved;
   }
 
   int _activeStage(IncidentModel incident) {
-    if (incident.status == IncidentStatus.resolved || incident.status == IncidentStatus.closed) return 6;
+    if (incident.status == IncidentStatus.resolved) return 6;
     if (_latestCheck?['status'] == 'healthy' || _hasPostmortem) return 5;
     if (_latestRun != null) return 4;
     if (_awaitingApproval) return 3;
-    if (incident.status == IncidentStatus.identified || incident.status == IncidentStatus.mitigating) return 2;
+    if (incident.status == IncidentStatus.remediating) return 4;
     return incident.status == IncidentStatus.open ? 0 : 1;
   }
 
