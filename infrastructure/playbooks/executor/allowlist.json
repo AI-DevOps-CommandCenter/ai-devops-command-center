@@ -2,6 +2,8 @@
   "sample-app": {
     "container": "dc-sample-app",
     "base_url": "http://sample-app:8000",
-    "actions": ["restart", "circuit_breaker"]
+    "actions": ["restart", "circuit_breaker", "rollback", "scale"],
+    "rollback_image": "dc-sample-app:stable",
+    "max_replicas": 3
   }
 }

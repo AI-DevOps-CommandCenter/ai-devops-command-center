@@ -8,7 +8,10 @@ name: dc-monitoring
 services:
   sample-app:
     build: ./sample-app
-    image: dc-sample-app:dev
+    # SAMPLE_APP_IMAGE lets scripts/release.sh deploy another release
+    # (dc-sample-app:v2-bad) with `docker compose up -d --no-build sample-app`.
+    # The executor's rollback goes back to dc-sample-app:stable (allowlist.json).
+    image: ${SAMPLE_APP_IMAGE:-dc-sample-app:dev}
     container_name: dc-sample-app
     restart: unless-stopped
     # No published port: /admin/* has no authentication and must stay on this network.
@@ -22,16 +25,28 @@ services:
       timeout: 3s
       retries: 3
 
+  # Round-robin load balancer over sample-app and its replicas (sample-lb/nginx.conf).
+  sample-lb:
+    image: nginx:${NGINX_VERSION:-1.27.5-alpine}
+    restart: unless-stopped
+    # No published port, like sample-app.
+    user: "101:101"
+    volumes:
+      - ./sample-lb/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      sample-app:
+        condition: service_healthy
+
   loadgen:
     image: dc-sample-app:dev
     restart: unless-stopped
     command: ["python", "-m", "loadgen.loadgen"]
     environment:
-      TARGET_URL: http://sample-app:8000
+      # Through the load balancer, so a scale-up spreads the traffic.
+      TARGET_URL: http://sample-lb:8080
       LOADGEN_RPS: "${LOADGEN_RPS:-5}"
     depends_on:
-      sample-app:
-        condition: service_healthy
+      - sample-lb
 
   prometheus:
     image: prom/prometheus:${PROMETHEUS_VERSION:-v3.15.1}
@@ -106,8 +121,8 @@ services:
       # n8n calls http://host.docker.internal:9095/v1/execute (D-MON-3).
       - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${EXECUTOR_PORT:-9095}:9095"
     volumes:
-      # Full Docker API access (root-equivalent on this host). The code only gets
-      # and restarts the allowlisted container.
+      # Full Docker API access (root-equivalent on this host). The code only acts
+      # on the allowlisted container, its replicas and the allowlisted rollback image.
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9095/health', timeout=2)"]
