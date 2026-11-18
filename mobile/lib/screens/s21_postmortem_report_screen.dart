@@ -25,6 +25,7 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
   IncidentModel? _incident;
   Map<String, dynamic>? _postmortem;
   List<Map<String, dynamic>> _checks = const [];
+  Map<String, String> _runNames = const {};
   String? _errorMessage;
   bool _isLoading = true;
   Timer? _poll;
@@ -62,8 +63,14 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
       final incident = _incident ?? await api.fetchIncidentById(id);
       final postmortem = await api.fetchLatestPostmortem(id);
       var checks = _checks;
+      var runNames = _runNames;
       try {
         checks = await api.fetchRecoveryChecks(id);
+        final runs = await api.fetchPlaybookRuns(incidentId: id);
+        runNames = {
+          for (final r in runs)
+            if (r.incidentId == id) r.id: r.playbookName ?? r.actionType.displayName,
+        };
       } catch (_) {
         // Measured impact is optional; the report still shows.
       }
@@ -72,6 +79,7 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
         _incident = incident;
         _postmortem = postmortem;
         _checks = checks;
+        _runNames = runNames;
         _errorMessage = null;
         _isLoading = false;
       });
@@ -138,7 +146,7 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
   }
 
   /// Facts measured by the recovery checks (workflow 07): time from detection
-  /// to the first healthy check, and the peak error rate.
+  /// to the first healthy check, and the outcome of each remediation.
   List<String> _measuredImpact() {
     final incident = _incident;
     if (incident == null || _checks.isEmpty) return const [];
@@ -153,8 +161,9 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
       facts.add('Detected ${localTime(incident.detectedAt)}, recovered ${localTime(recoveredAt)} '
           '(${formatDuration(recoveredAt.difference(incident.detectedAt.toLocal()))})');
     }
-    final peak = peakErrorRate(_checks);
-    if (peak != null) facts.add('Peak error rate after remediation: ${formatErrorRate(peak)} on ${incident.serviceName}');
+    // Per remediation, so a failed attempt's peak is not read as the result.
+    final outcomes = remediationOutcomes(_checks, _runNames);
+    if (outcomes != null) facts.add(outcomes);
     return facts;
   }
 

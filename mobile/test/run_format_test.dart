@@ -103,6 +103,17 @@ void main() {
     expect(text, contains('up: no_data'));
   });
 
+  test('remediationOutcomes: one result per run, oldest first', () {
+    final names = {'run-scale': 'Scale sample-app', 'run-rollback': 'Roll back sample-app'};
+    expect(
+      remediationOutcomes([_healthy, _unhealthy], names),
+      'Scale sample-app: peak 50.4%, not recovered → Roll back sample-app: 0%, recovered',
+    );
+    expect(remediationOutcomes([_healthy], const {}), 'Remediation: 0%, recovered');
+    expect(remediationOutcomes(const [], names), isNull);
+    expect(lastErrorRate(_healthy), 0);
+  });
+
   test('peakErrorRate across checks', () {
     expect(peakErrorRate([_healthy, _unhealthy]), closeTo(0.504, 0.001));
     expect(peakErrorRate(const []), isNull);

@@ -130,3 +130,41 @@ num? peakErrorRate(Iterable<Map<String, dynamic>> checks) {
 }
 
 String formatErrorRate(num v) => _percent(v);
+
+/// Error rate of the last attempt in one recovery check, or null.
+num? lastErrorRate(Map<String, dynamic> check) {
+  num? last;
+  for (final a in recoveryAttempts(check)) {
+    final results = a['results'] is List ? (a['results'] as List).whereType<Map>() : const <Map>[];
+    for (final r in results) {
+      if (r['name'] == 'error_rate' && r['ok'] == true && r['value'] is num) last = r['value'] as num;
+    }
+  }
+  return last;
+}
+
+/// One line per remediation, oldest first, e.g.
+/// "Scale sample-app: peak 50.4%, not recovered → Roll back sample-app: 0%, recovered".
+/// [runNames] maps playbook_run_id to the playbook name.
+String? remediationOutcomes(List<Map<String, dynamic>> checks, Map<String, String> runNames) {
+  final sorted = [...checks]
+    ..sort((a, b) => (parseTime(a['checked_at']) ?? DateTime(0)).compareTo(parseTime(b['checked_at']) ?? DateTime(0)));
+  final parts = <String>[];
+  for (final c in sorted) {
+    final name = runNames[c['playbook_run_id']?.toString()] ?? 'Remediation';
+    switch (c['status']) {
+      case 'healthy':
+        final last = lastErrorRate(c);
+        parts.add('$name: ${last != null ? '${_percent(last)}, ' : ''}recovered');
+        break;
+      case 'unhealthy':
+        final peak = peakErrorRate([c]);
+        parts.add('$name: ${peak != null ? 'peak ${_percent(peak)}, ' : ''}not recovered');
+        break;
+      case 'failed':
+        parts.add('$name: could not verify');
+        break;
+    }
+  }
+  return parts.isEmpty ? null : parts.join(' → ');
+}

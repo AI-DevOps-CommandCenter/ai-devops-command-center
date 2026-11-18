@@ -100,6 +100,9 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
     }
   }
 
+  // When the run actually ran (started, else finished, else requested).
+  static DateTime? _ranAt(PlaybookRunModel r) => r.startedAt ?? r.completedAt ?? r.createdAt;
+
   Future<void> _loadRemediation(String incidentId) async {
     final api = ApiService();
     PlaybookRunModel? latest;
@@ -110,7 +113,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
       final all = (await api.fetchPlaybookRuns(incidentId: incidentId)).where((r) => r.incidentId == incidentId).toList();
       awaitingApproval = all.any((r) => r.status == PlaybookRunStatus.pendingApproval);
       final runs = all.where((r) => r.status != PlaybookRunStatus.pendingApproval).toList()
-        ..sort((a, b) => (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+        ..sort((a, b) => (_ranAt(b) ?? DateTime(0)).compareTo(_ranAt(a) ?? DateTime(0)));
       latest = runs.isEmpty ? null : runs.first;
       if (latest != null) {
         check = recoveryCheckForRun(await api.fetchRecoveryChecks(incidentId), latest.id);
@@ -190,7 +193,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
               icon: Icons.play_circle_outline,
               title: 'Latest run',
               subtitle: '${run.playbookName ?? run.actionType.displayName} · ${run.status.slug}'
-                  '${run.createdAt != null ? ' · ${localTime(run.createdAt)}' : ''}',
+                  '${_ranAt(run) != null ? ' · ran ${localTime(_ranAt(run))}' : ''}',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
