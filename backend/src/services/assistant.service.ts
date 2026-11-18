@@ -45,6 +45,20 @@ export interface Explanation {
   model: string;
 }
 
+export const DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+export const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
+
+// The chat completions URL for a base URL. Accepts the documented base
+// (https://api.groq.com/openai/v1) and also the bare host (https://api.groq.com),
+// so the path is never missing or doubled.
+export function groqChatUrl(baseUrl: string): string {
+  const base = baseUrl.trim().replace(/\/+$/, "");
+  const withApi = /\/openai\/v1$/.test(base) ? base : new URL(base).pathname === "/" || new URL(base).pathname === ""
+    ? `${base}/openai/v1`
+    : base;
+  return `${withApi}/chat/completions`;
+}
+
 export interface GroqOptions {
   apiKey: string;
   model: string;
@@ -57,7 +71,7 @@ export interface GroqOptions {
 // request or the response body.
 export function createGroqClient(options: GroqOptions): AssistantClient {
   const doFetch = options.fetchImpl ?? fetch;
-  const url = `${options.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const url = groqChatUrl(options.baseUrl);
 
   return {
     model: options.model,
@@ -90,6 +104,16 @@ export function createGroqClient(options: GroqOptions): AssistantClient {
       if (res.status === 429) throw new AssistantError("rate_limited", "The AI service is busy. Try again in a minute.");
       if (res.status === 401 || res.status === 403) {
         throw new AssistantError("auth", "The AI service rejected the configured key.");
+      }
+      if (res.status === 404) {
+        // Groq answers 404 model_not_found for an unknown or retired model.
+        const code = await res.json().then((b: { error?: { code?: unknown } }) => b?.error?.code).catch(() => undefined);
+        if (code === "model_not_found") {
+          throw new AssistantError(
+            "unavailable",
+            `The AI model "${options.model}" is not available. Set GROQ_MODEL in backend/.env (for example ${DEFAULT_GROQ_MODEL}).`
+          );
+        }
       }
       if (!res.ok) throw new AssistantError("unavailable", `The AI service answered HTTP ${res.status}.`);
 
@@ -165,4 +189,29 @@ export async function explainText(client: AssistantClient, text: string): Promis
   const user = `Explain this log snippet or error message:\n\n${redacted}`;
   const raw = await client.complete(ASSISTANT_SYSTEM_PROMPT, user);
   return { ...parseExplanation(raw), redacted_count: count, model: client.model };
+}
+
+function envInt(env: NodeJS.ProcessEnv, name: string, fallback: number, min: number, max: number): number {
+  const raw = env[name]?.trim();
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${name} must be an integer from ${min} to ${max}.`);
+  return n;
+}
+
+// The assistant from the environment (GROQ_API_KEY, GROQ_MODEL,
+// GROQ_API_BASE_URL, GROQ_TIMEOUT_MS). null when GROQ_API_KEY is not set.
+// The key is read here only; it is never logged or returned.
+export function assistantFromEnv(env: NodeJS.ProcessEnv = process.env, fetchImpl?: typeof fetch): AssistantClient | null {
+  const apiKey = env.GROQ_API_KEY?.trim();
+  if (!apiKey) return null;
+  const baseUrl = env.GROQ_API_BASE_URL?.trim() || DEFAULT_GROQ_BASE_URL;
+  if (!/^https:\/\//.test(baseUrl)) throw new Error("GROQ_API_BASE_URL must be an https URL.");
+  return createGroqClient({
+    apiKey,
+    baseUrl,
+    model: env.GROQ_MODEL?.trim() || DEFAULT_GROQ_MODEL,
+    timeoutMs: envInt(env, "GROQ_TIMEOUT_MS", 25000, 1000, 60000),
+    fetchImpl
+  });
 }

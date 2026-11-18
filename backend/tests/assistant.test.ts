@@ -5,7 +5,9 @@ import { supabaseModuleFactory, supabaseMocks, mockValidUser, TEST_TOKEN } from 
 import { testConfig } from "./helpers/config.js";
 import {
   AssistantError,
+  assistantFromEnv,
   createGroqClient,
+  groqChatUrl,
   parseExplanation,
   stripCommands,
   type AssistantClient
@@ -232,5 +234,58 @@ describe("createGroqClient", () => {
     const fetchImpl = vi.fn(async () => { throw Object.assign(new Error("aborted"), { name: "TimeoutError" }); });
     const client = createGroqClient({ ...options, fetchImpl: fetchImpl as unknown as typeof fetch });
     await expect(client.complete("s", "u")).rejects.toMatchObject({ kind: "timeout" });
+  });
+});
+
+describe("Groq URL and model from the environment", () => {
+  const okFetch = () =>
+    vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: REPLY } }] }), { status: 200 }));
+  const sentTo = (fetchImpl: ReturnType<typeof okFetch>) => {
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    return { url, model: JSON.parse(String(init.body)).model };
+  };
+
+  it("defaults: POST https://api.groq.com/openai/v1/chat/completions with model openai/gpt-oss-120b", async () => {
+    const fetchImpl = okFetch();
+    const client = assistantFromEnv({ GROQ_API_KEY: "test-only-groq-key" }, fetchImpl as unknown as typeof fetch);
+
+    expect(client?.model).toBe("openai/gpt-oss-120b");
+    await client!.complete("s", "u");
+    expect(sentTo(fetchImpl)).toEqual({ url: "https://api.groq.com/openai/v1/chat/completions", model: "openai/gpt-oss-120b" });
+  });
+
+  it("uses GROQ_MODEL and GROQ_API_BASE_URL when set", async () => {
+    const fetchImpl = okFetch();
+    const client = assistantFromEnv(
+      { GROQ_API_KEY: "test-only-groq-key", GROQ_MODEL: "custom/model", GROQ_API_BASE_URL: "https://groq.example.test/openai/v1/" },
+      fetchImpl as unknown as typeof fetch
+    );
+    await client!.complete("s", "u");
+    expect(sentTo(fetchImpl)).toEqual({ url: "https://groq.example.test/openai/v1/chat/completions", model: "custom/model" });
+  });
+
+  it.each([
+    ["https://api.groq.com/openai/v1", "https://api.groq.com/openai/v1/chat/completions"],
+    ["https://api.groq.com/openai/v1/", "https://api.groq.com/openai/v1/chat/completions"],
+    ["https://api.groq.com", "https://api.groq.com/openai/v1/chat/completions"],
+    ["https://api.groq.com/", "https://api.groq.com/openai/v1/chat/completions"]
+  ])("groqChatUrl(%s) -> %s (never missing or doubled)", (base, url) => {
+    expect(groqChatUrl(base)).toBe(url);
+  });
+
+  it("no GROQ_API_KEY -> null (the route answers 503); a non-https base URL is refused", () => {
+    expect(assistantFromEnv({ GROQ_MODEL: "openai/gpt-oss-120b" })).toBeNull();
+    expect(() => assistantFromEnv({ GROQ_API_KEY: "k", GROQ_API_BASE_URL: "http://api.groq.com" })).toThrow(/https/);
+  });
+
+  it("Groq 404 model_not_found names the model and the setting to change", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ error: { code: "model_not_found", message: "The model does not exist" } }), { status: 404 }));
+    const client = assistantFromEnv({ GROQ_API_KEY: "test-only-groq-key", GROQ_MODEL: "retired-model" }, fetchImpl as unknown as typeof fetch);
+
+    await expect(client!.complete("s", "u")).rejects.toMatchObject({
+      kind: "unavailable",
+      message: 'The AI model "retired-model" is not available. Set GROQ_MODEL in backend/.env (for example openai/gpt-oss-120b).'
+    });
   });
 });
