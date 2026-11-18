@@ -4,7 +4,9 @@ import { authenticateToken } from "../middleware/auth.js";
 
 import {
   getNotificationsController,
-  markNotificationReadController
+  getNotificationPreferencesController,
+  markNotificationReadController,
+  updateNotificationPreferencesController
 } from "../controllers/notification.controller.js";
 
 const router = Router();
@@ -14,6 +16,10 @@ router.use(authenticateToken);
 
 // GET /api/notifications
 router.get("/", getNotificationsController);
+
+// GET/PUT /api/notifications/preferences (S27), before the /:id routes
+router.get("/preferences", getNotificationPreferencesController);
+router.put("/preferences", updateNotificationPreferencesController);
 
 // PATCH /api/notifications/:id/read
 router.patch("/:id/read", markNotificationReadController);
