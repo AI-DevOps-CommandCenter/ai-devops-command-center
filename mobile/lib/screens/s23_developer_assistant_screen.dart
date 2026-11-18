@@ -3,12 +3,16 @@ import '../models/incident_model.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../widgets/explain_panel.dart';
 import '../widgets/flow_widgets.dart';
 import 's07_root_cause_screen.dart';
 
-/// S23 – AI tab: the latest AI analysis of each recent incident (root cause,
-/// recommended action, confidence, model), from GET /api/incidents/:id/recommendation.
-/// The analyses are produced by n8n workflow 05 with Groq; the app only reads them.
+/// S23 – AI tab (developer assistant):
+///  - "Explain a log or error": paste text, POST /api/assistant/explain explains
+///    it (meaning, likely cause, what to check next). Explanation only.
+///  - the latest AI analysis of each recent incident (root cause, recommended
+///    action, confidence, model), from GET /api/incidents/:id/recommendation,
+///    produced by n8n workflow 05 with Groq; the app only reads them.
 class S23DeveloperAssistantScreen extends StatefulWidget {
   /// Kept for route compatibility (an incident id to show first); optional.
   final String? initialContext;
@@ -83,7 +87,7 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
       body: SafeArea(
         child: Column(
           children: [
-            FlowHeader(title: 'AI analyses', subtitle: _loading ? 'Loading…' : '${_entries.length} incidents analysed'),
+            FlowHeader(title: 'Developer assistant', subtitle: _loading ? 'Loading analyses…' : '${_entries.length} incidents analysed'),
             Expanded(child: _body(colors)),
           ],
         ),
@@ -93,16 +97,22 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
   }
 
   Widget _body(AppColorScheme colors) {
-    if (_loading) return const FlowMessage(icon: Icons.auto_awesome, message: 'Loading AI analyses…', busy: true);
-    if (_error != null) return FlowMessage(icon: Icons.error_outline, message: _error!, onRetry: _load);
-    if (_entries.isEmpty) {
-      return FlowMessage(icon: Icons.auto_awesome, message: 'No AI analysis has been stored yet.', onRetry: _load);
-    }
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
+          const ExplainPanel(),
+          const SizedBox(height: 16),
+          Text('Incident analyses', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.text)),
+          const SizedBox(height: 4),
+          if (_loading)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator()))
+          else if (_error != null)
+            FlowMessage(icon: Icons.error_outline, message: _error!, onRetry: _load)
+          else if (_entries.isEmpty)
+            Text('No AI analysis has been stored yet.', style: TextStyle(fontSize: 12, color: colors.muted))
+          else ...[
           Text(
             'Each analysis is written by the n8n investigation (logs, metrics and deployments, explained by Groq). The AI only suggests; a person approves every fix.',
             style: TextStyle(fontSize: 12, color: colors.muted, height: 1.4),
@@ -157,6 +167,7 @@ class _S23DeveloperAssistantScreenState extends State<S23DeveloperAssistantScree
           }),
           if (_withoutAnalysis > 0)
             Text('$_withoutAnalysis recent incident(s) have no AI analysis yet.', style: TextStyle(fontSize: 12, color: colors.muted)),
+          ],
         ],
       ),
     );
