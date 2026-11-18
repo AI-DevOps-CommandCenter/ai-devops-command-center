@@ -178,6 +178,8 @@ Every function below writes its audit entry (and, where relevant, a timeline eve
 | `create_notification(p_user_id \| NULL, p_incident_id, p_title, p_message, p_channels = {in_app,push})` → id | **automation** only (humans cannot notify others) | `p_user_id` NULL = team broadcast (`slack`/`discord` only) |
 | `claim_notification_deliveries(p_limit = 50)` → rows `{delivery_id, channel, attempt_count, notification_id, user_id, incident_id, title, message, recipient_email (email only), device_tokens (push only)}` | **automation** only | Claims pending deliveries not attempted in the last 2 minutes (at least once) |
 | `record_notification_delivery(p_delivery_id, p_status 'sent'\|'delivered'\|'failed', p_provider_message_id, p_error_message)` | **automation** only | `failed`/`delivered` are final |
+| `record_deployment(p_service_name, p_version, p_status = 'success'\|'failed', p_provider = 'local')` → id | **automation** only | Local release from `monitoring/scripts/release.sh` (`POST /api/machine/deployments`); audited as `DEPLOYMENT_RECORDED` (migration 20261118000400) |
+| `list_recent_deployments(p_service_name, p_since, p_until)` → rows `{id, service_name, version, provider, status, completed_at}` | **automation** only | Newest first, at most 20, window at most 7 days; read by workflow 04 (`GET /api/machine/deployments`) |
 | `consume_automation_nonce(p_nonce, p_signed_at)` | **automation** only | Replay protection: ±5 minutes; each nonce once (DC409) |
 | `current_app_role()` | any signed-in user | Returns the caller's role |
 | Internal, **no client EXECUTE**: `require_app_role`, `log_audit_event`, `write_incident_event`, `write_notification`, `notify_approvers`, `redact_sensitive` | the functions above | |
