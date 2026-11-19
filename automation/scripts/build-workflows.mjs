@@ -267,8 +267,33 @@ const wf02 = () => investigation(WF.logs, 'logs', 'Build LogQL query', '02-log-a
   '## 02 – Log Analysis (owner: Tharindu)\nLoki `query_range` for error/warning lines of the service around `started_at`.\nConfig: `LOKI_URL`, `LOKI_SERVICE_LABEL` (**confirm with Keshan**), `LOKI_LOOKBACK_MINUTES`, `LOKI_MAX_LINES`.');
 const wf03 = () => investigation(WF.metrics, 'metrics', 'Build PromQL queries', '03-metrics-analysis/build-queries.js', 'Prometheus: instant query', { notes: 'GET {PROMETHEUS_URL}/api/v1/query, one call per metric and phase.' }, 'Evaluate metrics', '03-metrics-analysis/evaluate-metrics.js',
   '## 03 – Metrics Analysis (owner: Tharindu)\nCurrent vs baseline for cpu, memory (prom-client defaults) and error_rate / latency_p95 / request_rate (only when `PROM_QUERY_*` is set).\nAbnormal = above `PROM_THRESHOLD_*` or ≥ `PROM_ANOMALY_FACTOR` × baseline.');
-const wf04 = () => investigation(WF.deploys, 'deployments', 'Build GitHub requests', '04-deployment-correlation/build-requests.js', 'GitHub API', { credential: CRED.github, headers: GITHUB_HEADERS, notes: 'GET /repos/{owner}/{repo}/commits and /actions/runs. Credential: fine-grained token, read-only.' }, 'Correlate changes', '04-deployment-correlation/correlate.js',
-  '## 04 – Deployment Correlation (owner: Tharindu)\nCommits + GitHub Actions runs before the incident. "Suspect" = within `DEPLOY_SUSPECT_MINUTES`. Correlation is a **possible** cause, never a confirmed one.');
+// 04 has two sources: GitHub (optional) and the local releases recorded by
+// release.sh (signed backend GET, its own HTTP node: the GitHub credential is
+// never sent to the backend). Without GitHub settings the local check still runs.
+function wf04() {
+  const w = makeWorkflow(WF.deploys);
+  w.sticky('## 04 – Deployment Correlation (owner: Tharindu)\nCommits + GitHub Actions runs (when `GITHUB_OWNER`/`GITHUB_REPO` are set) and local releases recorded by `monitoring/scripts/release.sh` (`GET /api/machine/deployments`, signed) before the incident. "Suspect" = within `DEPLOY_SUSPECT_MINUTES`; a local release is the strongest signal (rollback). Correlation is a **possible** cause, never a confirmed one.', 0, -2, 760, 240);
+  w.subTrigger('When called by 05 Root Cause', 0, 0, 'Input: { incident_id, service_name, alert_name, severity, started_at }');
+  w.code('Build GitHub requests', '04-deployment-correlation/build-requests.js', 1, 0, 'Two GitHub requests, or one { kind: none } item when GitHub is not configured.');
+  w.isTrue('Request ready?', 2, 0, '={{ !$json.skip }}');
+  w.code('Return skipped result', '02-log-analysis/skip-result.js', 3, 1, 'Invalid input: no HTTP call.');
+  w.isTrue('GitHub configured?', 3, 0, '={{ $json.kind !== "none" }}');
+  w.http('GitHub API', 4, -1, { credential: CRED.github, headers: GITHUB_HEADERS, notes: 'GET /repos/{owner}/{repo}/commits and /actions/runs. Credential: fine-grained token, read-only.' });
+  w.code('Sign local releases request', '04-deployment-correlation/sign-local-releases.js', 5, 0, 'Keeps the GitHub responses; signs GET /api/machine/deployments for the lookback window.');
+  w.isTrue('Read local releases?', 6, 0, '={{ !$json.skip_local }}');
+  w.http('Backend: local releases', 7, -1, { method: 'GET', signed: true, notes: 'GET /api/machine/deployments?service_name=&since=&until= → list_recent_deployments (releases recorded by release.sh).' });
+  w.code('Correlate changes', '04-deployment-correlation/correlate.js', 8, 0, 'Returns automation/schemas/investigation-output.schema.json');
+  w.chain('When called by 05 Root Cause', 'Build GitHub requests', 'Request ready?');
+  w.link('Request ready?', 'GitHub configured?', 0);
+  w.link('Request ready?', 'Return skipped result', 1);
+  w.link('GitHub configured?', 'GitHub API', 0);
+  w.link('GitHub configured?', 'Sign local releases request', 1);
+  w.chain('GitHub API', 'Sign local releases request', 'Read local releases?');
+  w.link('Read local releases?', 'Backend: local releases', 0);
+  w.link('Read local releases?', 'Correlate changes', 1);
+  w.link('Backend: local releases', 'Correlate changes');
+  return w;
+}
 
 // ---------- 05 Root Cause Analysis (Vishwa) ----------
 function wf05() {

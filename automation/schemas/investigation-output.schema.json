@@ -24,7 +24,7 @@
         "required": ["type", "source"],
         "properties": {
           "type": { "type": "string", "enum": ["log", "metric", "commit", "deployment", "workflow_run"] },
-          "source": { "type": "string", "enum": ["loki", "prometheus", "github"] },
+          "source": { "type": "string", "enum": ["loki", "prometheus", "github", "local"] },
           "timestamp": { "type": ["string", "null"] },
           "value": {},
           "ref": { "type": "string" }

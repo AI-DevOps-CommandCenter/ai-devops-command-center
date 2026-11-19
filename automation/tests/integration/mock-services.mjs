@@ -40,7 +40,7 @@ export function startMocks({ servicesPort, backendPort, secret, backendTimeoutMs
   //   'timeout_commit' (the run IS completed, the answer comes too late) | 'reset' (connection dropped)
   // start: 'ok' | 'timeout'.  recovery_store: 'ok' | 'not_found' | <HTTP status>.
   // postmortem_store: 'ok' | <HTTP status>.
-  const scenario = { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent', complete: [], start: 'ok', recovery_store: 'ok', postmortem_store: 'ok' };
+  const scenario = { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent', releases: 'none', complete: [], start: 'ok', recovery_store: 'ok', postmortem_store: 'ok' };
   const late = backendTimeoutMs * 2;
   const calls = [];
   const nonces = new Set();
@@ -225,6 +225,19 @@ export function startMocks({ servicesPort, backendPort, secret, backendTimeoutMs
       incidents[inc.incident_id] = inc;
       call.answer = 201;
       return send(res, 201, { success: true, message: 'Incident created.', data: { incident_id: inc.incident_id, investigation_id: inc.investigation_id, created: true } });
+    }
+
+    // Local releases: GET /api/machine/deployments?service_name=&since=&until= (workflow 04).
+    // scenario.releases: none (empty list) | recent (v2, 4 min before `until`) | down (503).
+    if (req.method === 'GET' && req.url.startsWith('/api/machine/deployments?')) {
+      if (scenario.releases === 'down') return send(res, 503, { success: false, message: 'Automation identity is unavailable.' });
+      const q = Object.fromEntries(new URL(req.url, 'http://mock').searchParams);
+      const until = Date.parse(q.until);
+      if (!q.service_name || isNaN(until) || isNaN(Date.parse(q.since))) return send(res, 400, { success: false, message: 'Invalid query.' });
+      const deployments = scenario.releases === 'recent'
+        ? [{ id: '00000000-0000-4000-8000-0000000000d2', service_name: q.service_name, version: 'v2', provider: 'local', status: 'success', completed_at: new Date(until - 4 * 60000).toISOString() }]
+        : [];
+      return send(res, 200, { success: true, data: { deployments } });
     }
 
     // BD-4: GET /api/machine/incidents/:id/context and POST .../postmortem.
