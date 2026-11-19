@@ -178,7 +178,7 @@ Always use `-p ccdemo`. The n8n data (owner account, credentials, workflows) liv
 
 4. Open workflows 00, 01, 04, 05 and 08. On every node with a ⚠ credential warning, select the matching credential and save.
 5. Run **00 – Groq Connection Test**. The result must be `PASS`.
-6. **Publish** 01 and 06 (webhooks), and 02, 03, 04, 05, 07 and 08 (sub-workflows). 09 is the error workflow and needs no publishing.
+6. **Publish** 01 and 06 (webhooks), 02, 03, 04, 05, 07 and 08 (sub-workflows), and 09 (error handler). Publish 09 first: 06 cannot be published until 09 is.
 
 ## 9. Start the backend
 
