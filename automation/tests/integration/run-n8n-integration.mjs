@@ -127,7 +127,7 @@ async function main() {
   const mocks = startMocks({ servicesPort: SVC, backendPort: BACKEND, secret: SECRET, backendTimeoutMs: BACKEND_TIMEOUT_MS });
   mocks.notifier = TLS ? startNotificationReceiver({ port: NOTIFY, key: TLS.key, cert: TLS.cert }) : null;
   console.log(TLS ? 'error notifications: test HTTPS receiver on ' + NOTIFY : 'error notifications: openssl not found, notification checks will be SKIPPED');
-  const setScenario = (s) => Object.assign(mocks.scenario, { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent', complete: [], start: 'ok', recovery_store: 'ok', postmortem_store: 'ok' }, s);
+  const setScenario = (s) => Object.assign(mocks.scenario, { groq: 'ok', loki: 'errors', prom: 'abnormal', recovery: 'recovered', github: 'recent', releases: 'none', complete: [], start: 'ok', recovery_store: 'ok', postmortem_store: 'ok' }, s);
   const takeCalls = () => mocks.calls.splice(0);
 
   // ---- import
@@ -202,7 +202,8 @@ async function main() {
   check('05 all evidence -> analysis_ready', o.status === 'analysis_ready' && o.rca && o.rca.recommended_action === 'rollback' && o.requires_human_review === true, o);
   check('05 no incident_id -> not stored (BD-1)', o.stored === false && o.store_error && o.store_error.kind === 'blocked', o.store_error);
   o = first(await post('it-rca', { ...ctx, incident_id: '22222222-2222-4222-8222-222222222222', investigation_id: '66666666-6666-4666-8666-666666666666' }));
-  const storeCall = takeCalls().find((c) => c.port === 'backend');
+  // 04 now also makes a signed GET /api/machine/deployments first, so pick the store call by path.
+  const storeCall = takeCalls().find((c) => c.port === 'backend' && c.path.startsWith('/api/machine/investigations/'));
   check('05 store call is HMAC-signed and accepted by the signature check', storeCall && storeCall.auth === 'ok' && storeCall.path === '/api/machine/investigations/66666666-6666-4666-8666-666666666666/analysis', storeCall);
   check('05 store endpoint missing -> not_implemented (BD-2)', o.stored === false && o.store_error && o.store_error.kind === 'not_implemented', o);
   setScenario({ loki: 'down' });
@@ -211,7 +212,7 @@ async function main() {
   setScenario({ loki: 'empty', prom: 'normal', github: 'none' }); takeCalls();
   o = first(await post('it-rca', ctx));
   check('05 no evidence -> no_evidence, Groq NOT called', o.status === 'no_evidence' && !takeCalls().some((c) => c.path.includes('groq')), o);
-  setScenario({ loki: 'down', prom: 'down', github: 'auth' });
+  setScenario({ loki: 'down', prom: 'down', github: 'auth', releases: 'down' });
   o = first(await post('it-rca', ctx));
   check('05 all sources down -> sources_unavailable', o.status === 'sources_unavailable', o);
   setScenario({ groq: 'garbage' });
