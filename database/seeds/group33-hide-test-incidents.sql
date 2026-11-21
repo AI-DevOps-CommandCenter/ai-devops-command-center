@@ -10,10 +10,11 @@
 -- Real alert incidents "HighErrorRate on sample-app" (8bf69678, 256aee75,
 -- 5faa19d5) are kept. c2ed6d9e is also "HighErrorRate on sample-app", but it
 -- was the 21 Nov live release check (deploy-bad -> rollback recommendation),
--- so it is hidden on purpose.
+-- so it is hidden on purpose. bb7167ca is the 21 Nov rehearsal incident
+-- (deploy-bad -> rollback, resolved), hidden for the same reason.
 -- =============================================================================
 
--- 1. Preview (read-only): must return exactly these 7 rows.
+-- 1. Preview (read-only): must return exactly these 8 rows.
 SELECT id, title, status, environment, created_at
 FROM public.incidents
 WHERE id IN (
@@ -23,11 +24,12 @@ WHERE id IN (
   'bc074803-2f4f-460d-a23d-7e417b349529', -- Push live test (sample-app)
   'd3310000-0000-4000-8000-000000000001', -- old demo seed v2 (replaced by v3)
   '38b1ccbc-fea7-4d92-af5f-09f366854d68', -- TEST_AUDIT_RUNTIME_INCIDENT (8 Nov)
-  'c2ed6d9e-9c43-4d1b-8bcb-006a9b6f81ae'  -- release check 21 Nov (sample-app)
+  'c2ed6d9e-9c43-4d1b-8bcb-006a9b6f81ae', -- release check 21 Nov (sample-app)
+  'bb7167ca-636e-46f0-b822-c403eb5b85cd'  -- rehearsal 21 Nov (sample-app)
 )
 ORDER BY created_at;
 
--- 2. The change (one transaction; aborts unless exactly 7 rows change).
+-- 2. The change (one transaction; aborts unless exactly 8 rows change).
 BEGIN;
 DO $hide$
 DECLARE
@@ -42,11 +44,12 @@ BEGIN
      'bc074803-2f4f-460d-a23d-7e417b349529',
      'd3310000-0000-4000-8000-000000000001',
      '38b1ccbc-fea7-4d92-af5f-09f366854d68',
-     'c2ed6d9e-9c43-4d1b-8bcb-006a9b6f81ae'
+     'c2ed6d9e-9c43-4d1b-8bcb-006a9b6f81ae',
+     'bb7167ca-636e-46f0-b822-c403eb5b85cd'
    );
   GET DIAGNOSTICS v_count = ROW_COUNT;
-  IF v_count <> 7 THEN
-    RAISE EXCEPTION 'Expected 7 test incidents, matched %. Nothing changed.', v_count;
+  IF v_count <> 8 THEN
+    RAISE EXCEPTION 'Expected 8 test incidents, matched %. Nothing changed.', v_count;
   END IF;
 END;
 $hide$;

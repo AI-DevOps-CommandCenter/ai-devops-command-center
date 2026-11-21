@@ -131,6 +131,51 @@ num? peakErrorRate(Iterable<Map<String, dynamic>> checks) {
 
 String formatErrorRate(num v) => _percent(v);
 
+// ISO timestamps with a UTC "Z" or an explicit offset: 2026-11-21T08:42:36.234Z,
+// 2026-11-21T08:39:48.08704+00:00, 2026-11-21 08:39:48+00.
+final _isoTime = RegExp(r'\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)(?![\w:])');
+// A UTC time without a date: 08:42:36.234Z, 08:42Z.
+final _bareUtcTime = RegExp(r'\b(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?Z\b');
+// "error_rate" / "error rate" / "5xx rate", then up to 60 characters of the same clause.
+final _errorRateLabel = RegExp(r'\b(?:error[ _-]?rate|5xx[ _-]?rate)\b', caseSensitive: false);
+// A ratio such as 0.502868068833652, .05 or 1.0 that is not already a percentage.
+final _ratio = RegExp(r'(?<![\d.])(?:0?\.\d+|1\.0+)(?![\d.]|\s*%)');
+
+/// Text written by the AI or the automation, made readable: UTC times become
+/// local times ("14:12:36", with the date when it is not [day]) and error-rate
+/// ratios become percentages ("50.3%"). Other text is unchanged.
+String readableText(String? text, {DateTime? day}) {
+  if (text == null || text.isEmpty) return text ?? '';
+  final ref = day?.toLocal();
+  var out = text.replaceAllMapped(_isoTime, (m) {
+    final t = parseTime(m[0]!.replaceFirst(' ', 'T'));
+    if (t == null) return m[0]!;
+    return ref != null && sameLocalDay(t, ref) ? localTime(t) : localDateTime(t);
+  });
+  if (ref != null) {
+    final utcDay = ref.toUtc();
+    out = out.replaceAllMapped(_bareUtcTime, (m) {
+      final t = DateTime.utc(utcDay.year, utcDay.month, utcDay.day, int.parse(m[1]!), int.parse(m[2]!),
+          m[3] == null ? 0 : int.parse(m[3]!));
+      return m[3] == null ? localTime(t).substring(0, 5) : localTime(t);
+    });
+  }
+  final buf = StringBuffer();
+  var pos = 0;
+  for (final label in _errorRateLabel.allMatches(out)) {
+    if (label.start < pos) continue;
+    // The clause after the label ends at ';', a new sentence or 60 characters.
+    var end = (label.end + 60).clamp(0, out.length);
+    final stop = RegExp(r';|\.\s|\n').firstMatch(out.substring(label.end, end));
+    if (stop != null) end = label.end + stop.start;
+    buf.write(out.substring(pos, label.end));
+    buf.write(out.substring(label.end, end).replaceAllMapped(_ratio, (m) => _percent(double.parse(m[0]!))));
+    pos = end;
+  }
+  buf.write(out.substring(pos));
+  return buf.toString();
+}
+
 /// Error rate of the last attempt in one recovery check, or null.
 num? lastErrorRate(Map<String, dynamic> check) {
   num? last;

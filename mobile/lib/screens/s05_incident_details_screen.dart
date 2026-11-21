@@ -36,6 +36,7 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
   Map<String, dynamic>? _latestCheck;
   bool _hasPostmortem = false;
   bool _awaitingApproval = false;
+  bool _resolving = false;
 
   @override
   void didChangeDependencies() {
@@ -148,6 +149,28 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
     return incident.status == IncidentStatus.open ? 0 : 1;
   }
 
+  // Same action as S20 "Mark incident resolved", offered here once the
+  // recovery check is healthy so it is easy to find.
+  Future<void> _resolveIncident(IncidentModel incident) async {
+    setState(() => _resolving = true);
+    try {
+      await ApiService().updateIncidentStatus(incident.id, 'resolved');
+      if (!mounted) return;
+      setState(() => _resolving = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incident marked as resolved.')));
+      _loadIncident();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _resolving = false);
+      final msg = e is ApiException && e.statusCode == 403
+          ? 'Only operators and admins can resolve incidents.'
+          : e is ApiException
+              ? e.message
+              : 'Could not resolve the incident.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
   String _statusLabel(IncidentModel incident) =>
       _recoveredNotResolved ? 'recovered · awaiting resolve' : incident.status.name;
 
@@ -188,6 +211,24 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
         children: [
           Text('REMEDIATION',
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: colors.muted)),
+          if (_recoveredNotResolved) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: OutlinedButton.icon(
+                onPressed: _resolving ? null : () => _resolveIncident(incident),
+                icon: _resolving
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.task_alt, size: 18),
+                label: const Text('Mark incident resolved', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+          ],
           if (run != null) ...[
             link(
               icon: Icons.play_circle_outline,
@@ -236,7 +277,9 @@ class _S05IncidentDetailsScreenState extends State<S05IncidentDetailsScreen> {
     );
   }
 
-  String _formatDateTime(DateTime dt) {
+  // Local time: detected_at is stored in UTC.
+  String _formatDateTime(DateTime utc) {
+    final dt = utc.toLocal();
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 

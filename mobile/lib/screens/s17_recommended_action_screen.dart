@@ -12,6 +12,16 @@ import 's23_developer_assistant_screen.dart';
 /// and the enabled playbook(s) for that action. "Request remediation" creates a
 /// playbook run + approval (POST /api/playbook-runs). Nothing runs until a
 /// DIFFERENT operator/admin approves it on S18.
+// The two "Demo: sample-app restart (APPROVE/REJECT)" playbooks belong to the
+// seed v3 incident (database/seeds/group33-demo-seed-v3.sql). They are hidden
+// for every other incident so they are not offered as real remediations.
+const _seedIncidentId = 'd3410000-0000-4000-8000-000000000001';
+
+List<Map<String, dynamic>> _withoutSeedPlaybooks(List<Map<String, dynamic>> playbooks, String incidentId) {
+  if (incidentId == _seedIncidentId) return playbooks;
+  return playbooks.where((p) => !(p['name']?.toString() ?? '').startsWith('Demo: ')).toList();
+}
+
 class S17RecommendedActionScreen extends StatefulWidget {
   final String? incidentId;
 
@@ -72,8 +82,8 @@ class _S17RecommendedActionScreenState extends State<S17RecommendedActionScreen>
       final incident = results[0] as IncidentModel;
       final rec = results[1] as Map<String, dynamic>;
       final approvals = results[2] as List<ApprovalModel>;
-      final playbooks = (rec['playbooks'] as List<Map<String, dynamic>>?) ?? [];
-      final others = (rec['other_playbooks'] as List<Map<String, dynamic>>?) ?? [];
+      final playbooks = _withoutSeedPlaybooks((rec['playbooks'] as List<Map<String, dynamic>>?) ?? [], id);
+      final others = _withoutSeedPlaybooks((rec['other_playbooks'] as List<Map<String, dynamic>>?) ?? [], id);
       ApprovalModel? pending;
       for (final a in approvals) {
         if (a.incidentId == id) {

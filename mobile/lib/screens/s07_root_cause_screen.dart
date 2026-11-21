@@ -4,6 +4,7 @@ import '../widgets/app_back_button.dart';
 import '../services/api_service.dart';
 import 's08_evidence_details_screen.dart';
 import 's17_recommended_action_screen.dart';
+import '../utils/run_format.dart';
 
 class S07RootCauseScreen extends StatefulWidget {
   final String? incidentId;
@@ -183,8 +184,14 @@ class _S07RootCauseScreenState extends State<S07RootCauseScreen> {
       );
     }
 
-    final rootCause = inv?['root_cause']?.toString() ?? 'No probable cause has been stored yet.';
-    final summary = inv?['summary']?.toString() ?? 'The AI investigation has not finished for this incident.';
+    // Times in the AI text are shown in local time, error rates as percentages.
+    final day = parseTime(inv?['created_at']);
+    final rootCause = inv?['root_cause'] != null
+        ? readableText(inv!['root_cause'].toString(), day: day)
+        : 'No probable cause has been stored yet.';
+    final summary = inv?['summary'] != null
+        ? readableText(inv!['summary'].toString(), day: day)
+        : 'The AI investigation has not finished for this incident.';
     final aiModel = inv?['ai_model']?.toString() ?? '—';
     final evidence = (inv?['evidence'] is List) ? (inv!['evidence'] as List) : [];
 
@@ -288,7 +295,7 @@ class _S07RootCauseScreenState extends State<S07RootCauseScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          text.toString(),
+                          readableText(text.toString(), day: day),
                           style: TextStyle(fontSize: 13, color: colors.text),
                         ),
                       ),
