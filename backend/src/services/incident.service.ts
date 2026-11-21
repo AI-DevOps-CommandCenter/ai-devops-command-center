@@ -1,0 +1,153 @@
+import type { UserSupabaseClient } from "../config/supabase.js";
+
+// Allowed incident severity levels
+export type IncidentSeverity =
+  | "critical"
+  | "high"
+  | "medium"
+  | "low"
+  | "info";
+
+// Data required to create an incident
+export interface CreateIncidentInput {
+  title: string;
+  description?: string;
+  service_name: string;
+  environment?: string;
+  severity: IncidentSeverity;
+}
+
+// Filters for retrieving incidents
+export interface IncidentFilters {
+  status?: IncidentStatus;
+  severity?: IncidentSeverity;
+  service_name?: string;
+  limit?: number;
+  offset?: number;
+  // Test incidents (environment = 'test') are hidden unless this is true.
+  include_test?: boolean;
+}
+
+// PostgREST filter: environment IS NULL OR environment <> 'test'. Test runs
+// (live tests, old demo seeds) are marked environment = 'test' and kept out of
+// the incident list, history and dashboard counts. Decided approvals are
+// immutable, so these incidents cannot be deleted instead.
+export const TEST_ENVIRONMENT = "test";
+export const NOT_TEST_ENVIRONMENT_FILTER = `environment.is.null,environment.neq.${TEST_ENVIRONMENT}`;
+
+// Create a new incident
+export async function createIncident(
+  client: UserSupabaseClient,
+  input: CreateIncidentInput,
+  userId: string
+) {
+  const { data, error } = await client
+    .from("incidents")
+    .insert({
+      title: input.title,
+      description: input.description,
+      service_name: input.service_name,
+      environment: input.environment,
+      severity: input.severity,
+      status: "open",
+      source: "manual",
+      created_by: userId
+    })
+    .select()
+    .single();
+
+  return { data, error };
+}
+
+// Retrieve incidents with optional filters
+export async function getIncidents(
+  client: UserSupabaseClient,
+  filters: IncidentFilters = {}
+) {
+  const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
+  const offset = Math.max(filters.offset ?? 0, 0);
+
+  let query = client
+    .from("incidents")
+    .select("*")
+    .order("detected_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (filters.status) {
+    query = query.eq("status", filters.status);
+  }
+
+  if (filters.severity) {
+    query = query.eq("severity", filters.severity);
+  }
+
+  if (filters.service_name) {
+    query = query.eq("service_name", filters.service_name);
+  }
+
+  if (!filters.include_test) {
+    query = query.or(NOT_TEST_ENVIRONMENT_FILTER);
+  }
+
+  const { data, error } = await query;
+
+  return { data, error };
+}
+
+export async function getIncidentById(
+  client: UserSupabaseClient,
+  incidentId: string
+) {
+  const { data, error } = await client
+    .from("incidents")
+    .select("*")
+    .eq("id", incidentId)
+    .single();
+
+  return { data, error };
+}
+
+export type IncidentStatus =
+  | "open"
+  | "investigating"
+  | "identified"
+  | "mitigating"
+  | "resolved"
+  | "closed";
+
+export interface UpdateIncidentInput {
+  title?: string;
+  description?: string;
+  service_name?: string;
+  environment?: string;
+  severity?: IncidentSeverity;
+  status?: IncidentStatus;
+}
+
+// Update an existing incident
+export async function updateIncident(
+  client: UserSupabaseClient,
+  incidentId: string,
+  input: UpdateIncidentInput
+) {
+  const now = new Date().toISOString();
+  // resolved_at follows the status: set when the incident is resolved or
+  // closed, cleared when it is reopened. Other updates leave it unchanged.
+  const resolution =
+    input.status === undefined
+      ? {}
+      : { resolved_at: input.status === "resolved" || input.status === "closed" ? now : null };
+
+  const { data, error } = await client
+    .from("incidents")
+    .update({
+      ...input,
+      ...resolution,
+      updated_at: now
+    })
+    .eq("id", incidentId)
+    .select()
+    .single();
+
+  return { data, error };
+}

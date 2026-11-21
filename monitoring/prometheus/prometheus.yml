@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+# Every target gets a `service` label. It is the label n8n uses
+# (PROM_SERVICE_LABEL=service) and it is also on `up`, which workflow 07 queries.
+# The job name is the same value, so queries on `job` work as well.
+scrape_configs:
+  # Every sample-app instance (the compose container and the replicas the
+  # executor's `scale` adds) has the network alias `sample-app`, so a DNS lookup
+  # finds all of them. `instance` is the container IP and port.
+  - job_name: sample-app
+    dns_sd_configs:
+      - names: ["sample-app"]
+        type: A
+        port: 8000
+        refresh_interval: 15s
+    relabel_configs:
+      - target_label: service
+        replacement: sample-app
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          service: prometheus
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+        labels:
+          service: alertmanager
+
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+        labels:
+          service: loki

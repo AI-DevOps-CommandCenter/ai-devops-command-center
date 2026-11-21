@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Root Cause Analysis Output (workflow 05, Groq answer after validation)",
+  "description": "Extends ai-output.schema.json (summary, severity, evidence, confidence, recommended_action) with root_cause and the split between confirmed findings and possible causes. Values for severity and recommended_action match the database CHECK constraints on ai_analyses. The result is advisory only: it never triggers a remediation.",
+  "type": "object",
+  "required": ["summary", "root_cause", "severity", "confidence", "confirmed_findings", "possible_causes", "evidence", "recommended_action", "requires_human_review"],
+  "additionalProperties": false,
+  "properties": {
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "root_cause": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "confirmed_findings": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 }, "description": "Directly shown by the data." },
+    "possible_causes": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 }, "description": "Likely, not proven." },
+    "evidence": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } },
+    "recommended_action": { "type": ["string", "null"], "enum": ["restart", "rollback", "scale", "circuit_breaker", null] },
+    "recommendations": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 500 } },
+    "requires_human_review": { "const": true }
+  }
+}
