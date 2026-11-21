@@ -316,19 +316,6 @@ class _S02SignInScreenState extends State<S02SignInScreen> {
 
                         // Bottom push spacer
                         const Spacer(),
-
-                        // Footer
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Text(
-                            'Group 33 ·',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: colors.muted,
-                            ),
-                          ),
-                        ),
                       ],
                     ),
                   ),

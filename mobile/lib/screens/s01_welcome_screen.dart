@@ -133,16 +133,6 @@ class S01WelcomeScreen extends StatelessWidget {
                   ),
 
                   const SizedBox(height: 16),
-
-                  // 4. Footer
-                  Text(
-                    'Group 33 ·',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colors.muted,
-                    ),
-                  ),
                 ],
               ),
             ),
