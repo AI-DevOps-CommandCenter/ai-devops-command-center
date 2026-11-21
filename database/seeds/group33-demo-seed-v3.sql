@@ -34,7 +34,9 @@
 BEGIN;
 
 -- IDs already provisioned by the team; no Auth/profile writes in this file.
--- requester (role=user):  59b56aa4-1019-48f9-817c-30f3d10ca1dc
+-- requester (role=user or operator):  59b56aa4-1019-48f9-817c-30f3d10ca1dc
+--   operator on staging: the live run needs it, a 'user' cannot see or request
+--   on alert-created incidents (request_playbook_run, incidents RLS).
 -- approver  (role=admin): 50d6db16-e804-4481-8bc6-f8a7838bd387
 --
 -- Stable fixture IDs (different from actual Auth users):
@@ -78,9 +80,9 @@ BEGIN
           FROM auth.users u
           JOIN public.profiles p ON p.id = u.id
          WHERE u.id = '59b56aa4-1019-48f9-817c-30f3d10ca1dc'::uuid
-           AND p.role = 'user'
+           AND p.role IN ('user', 'operator')
     ) THEN
-        RAISE EXCEPTION 'Expected requester Auth user/profile not found with role=user.';
+        RAISE EXCEPTION 'Expected requester Auth user/profile not found with role=user or operator.';
     END IF;
     IF NOT EXISTS (
         SELECT 1
