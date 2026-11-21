@@ -39,6 +39,7 @@ import 'screens/s40_loading_screen.dart';
 import 'screens/s41_all_clear_screen.dart';
 import 'screens/s45_brand_screen.dart';
 import 'services/notification_service.dart';
+import 'services/foreground_push_banner.dart';
 import 'services/password_recovery.dart';
 import 'screens/s29b_set_new_password_screen.dart';
 
@@ -50,6 +51,8 @@ void main() async {
   try {
     await NotificationService().initialize();
   } catch (_) {}
+  // Pushes that arrive while the app is open are shown as an in-app banner.
+  ForegroundPushBanner.start();
   runApp(const DevOpsCommandCenterApp());
 }
 
@@ -115,6 +118,8 @@ class DevOpsCommandCenterApp extends StatelessWidget {
               ),
             );
           },
+          navigatorKey: ForegroundPushBanner.navigatorKey,
+          scaffoldMessengerKey: ForegroundPushBanner.messengerKey,
           initialRoute: '/',
           // Only used once, at startup; null keeps Flutter's default initial route.
           onGenerateInitialRoutes: PasswordRecovery.pending == null
