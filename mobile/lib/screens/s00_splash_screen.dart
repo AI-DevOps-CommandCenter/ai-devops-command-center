@@ -99,7 +99,7 @@ class _S00SplashScreenState extends State<S00SplashScreen> {
                 right: 0,
                 child: Center(
                   child: Text(
-                    'Group 33 · v1.0',
+                    'v1.0',
                     style: TextStyle(
                       fontSize: 12,
                       color: colors.muted,

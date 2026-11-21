@@ -420,18 +420,6 @@ class _S03OverviewDashboardScreenState extends State<S03OverviewDashboardScreen>
                           ? const Center(child: CircularProgressIndicator())
                           : Text(_metricsError!, style: TextStyle(fontSize: 13, color: colors.muted)),
                     ),
-
-                  const SizedBox(height: 16),
-
-                  // Footer
-                  Text(
-                    'Group 33 ·',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colors.muted,
-                    ),
-                  ),
                 ],
               ),
             ),

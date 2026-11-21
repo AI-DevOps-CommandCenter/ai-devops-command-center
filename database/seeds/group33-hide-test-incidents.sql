@@ -8,10 +8,12 @@
 -- environment = 'test' out of GET /api/incidents (incident list, History)
 -- and the dashboard counts (branch feature/demo-seed-v3).
 -- Real alert incidents "HighErrorRate on sample-app" (8bf69678, 256aee75,
--- 5faa19d5) are kept.
+-- 5faa19d5) are kept. c2ed6d9e is also "HighErrorRate on sample-app", but it
+-- was the 21 Nov live release check (deploy-bad -> rollback recommendation),
+-- so it is hidden on purpose.
 -- =============================================================================
 
--- 1. Preview (read-only): must return exactly these 6 rows.
+-- 1. Preview (read-only): must return exactly these 7 rows.
 SELECT id, title, status, environment, created_at
 FROM public.incidents
 WHERE id IN (
@@ -20,11 +22,12 @@ WHERE id IN (
   'efc31843-6ee9-486a-b6e9-e673a479cff3', -- Push live test (sample-app)
   'bc074803-2f4f-460d-a23d-7e417b349529', -- Push live test (sample-app)
   'd3310000-0000-4000-8000-000000000001', -- old demo seed v2 (replaced by v3)
-  '38b1ccbc-fea7-4d92-af5f-09f366854d68'  -- TEST_AUDIT_RUNTIME_INCIDENT (8 Nov)
+  '38b1ccbc-fea7-4d92-af5f-09f366854d68', -- TEST_AUDIT_RUNTIME_INCIDENT (8 Nov)
+  'c2ed6d9e-9c43-4d1b-8bcb-006a9b6f81ae'  -- release check 21 Nov (sample-app)
 )
 ORDER BY created_at;
 
--- 2. The change (one transaction; aborts unless exactly 6 rows change).
+-- 2. The change (one transaction; aborts unless exactly 7 rows change).
 BEGIN;
 DO $hide$
 DECLARE
@@ -38,11 +41,12 @@ BEGIN
      'efc31843-6ee9-486a-b6e9-e673a479cff3',
      'bc074803-2f4f-460d-a23d-7e417b349529',
      'd3310000-0000-4000-8000-000000000001',
-     '38b1ccbc-fea7-4d92-af5f-09f366854d68'
+     '38b1ccbc-fea7-4d92-af5f-09f366854d68',
+     'c2ed6d9e-9c43-4d1b-8bcb-006a9b6f81ae'
    );
   GET DIAGNOSTICS v_count = ROW_COUNT;
-  IF v_count <> 6 THEN
-    RAISE EXCEPTION 'Expected 6 test incidents, matched %. Nothing changed.', v_count;
+  IF v_count <> 7 THEN
+    RAISE EXCEPTION 'Expected 7 test incidents, matched %. Nothing changed.', v_count;
   END IF;
 END;
 $hide$;
