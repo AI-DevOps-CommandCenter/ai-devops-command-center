@@ -32,6 +32,19 @@ function toTime(v) {
   return t && !isNaN(t.getTime()) ? t : null;
 }
 
+// Local wall-clock time for the report text ("14:12:36"). Same zone as
+// GENERIC_TIMEZONE / TZ in automation/docker-compose.yml. The AI copies these
+// instead of UTC times.
+const TIME_ZONE = 'Asia/Colombo';
+function localTime(t) {
+  if (!t) return null;
+  try {
+    return new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(t);
+  } catch {
+    return null;
+  }
+}
+
 function percent(v) {
   return Math.round(Number(v) * 1000) / 10; // 0.1741 -> 17.4
 }
@@ -53,6 +66,7 @@ function impactFacts() {
       if (r && r.name === 'error_rate' && r.ok && Number.isFinite(Number(r.value))) {
         errorRates.push({
           at: toTime(c.at) ? toTime(c.at).toISOString() : null,
+          at_local: localTime(toTime(c.at)),
           error_rate_percent: percent(r.value),
           threshold_percent: Number.isFinite(Number(r.threshold)) && r.threshold !== null ? percent(r.threshold) : null,
         });
@@ -70,6 +84,9 @@ function impactFacts() {
     alert_description: incident.description || null,
     detected_at: detected ? detected.toISOString() : null,
     recovered_at: recoveredAt ? recoveredAt.toISOString() : null,
+    time_zone: TIME_ZONE,
+    detected_at_local: localTime(detected),
+    recovered_at_local: localTime(recoveredAt),
     detection_to_recovery_minutes: minutes,
     error_rate_after_remediation: errorRates.slice(-6),
     peak_error_rate_after_remediation_percent: errorRates.length ? Math.max(...errorRates.map((e) => e.error_rate_percent)) : null,
