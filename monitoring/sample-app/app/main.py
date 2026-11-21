@@ -1,8 +1,14 @@
 """sample-app: a small orders API used as the target of the monitoring stack.
 
-Normal endpoints:  GET /api/orders, GET /api/orders/{order_id}, GET /health
+Normal endpoints:  GET /api/orders, GET /api/orders/{order_id}, GET /health (with the release version)
 Prometheus:        GET /metrics
 Admin (internal):  GET/POST /admin/fault, POST /admin/circuit-breaker
+
+Release (set in the image, see Dockerfile):
+  APP_VERSION     the version string reported by /health and logged at startup
+  RELEASE_FAULT   optional built-in fault active from startup, "errors:0.5" or
+                  "latency:0.3". It simulates a bad release: a restart does not
+                  clear it, only a rollback to an image without it does.
 
 The admin endpoints have no authentication. The container port must not be
 published to the host; only services on the Docker network can reach them.
@@ -52,12 +58,32 @@ async def with_stock(request: Request, order: dict) -> dict:
     return {**order, "stock": stock, "degraded": False}
 
 
+def parse_release_fault(value: str) -> tuple[str, float] | None:
+    """Parse RELEASE_FAULT ("errors:0.5", "latency:0.3"); empty means none."""
+    value = value.strip()
+    if not value:
+        return None
+    mode, _, rate = value.partition(":")
+    if mode not in ("errors", "latency"):
+        raise ValueError(f"RELEASE_FAULT mode must be errors or latency, got {mode!r}")
+    rate_value = float(rate or "1.0")
+    if not 0.0 <= rate_value <= 1.0:
+        raise ValueError(f"RELEASE_FAULT rate must be between 0 and 1, got {rate_value}")
+    return mode, rate_value
+
+
 def create_app(fault_latency_seconds: float | None = None) -> FastAPI:
     service = os.getenv("SERVICE_NAME", "sample-app")
-    setup_logging(service, os.getenv("LOG_LEVEL", "INFO"))
+    version = os.getenv("APP_VERSION", "dev")
+    setup_logging(service, os.getenv("LOG_LEVEL", "INFO"), version)
+    release_fault = parse_release_fault(os.getenv("RELEASE_FAULT", ""))
 
     app = FastAPI(title=service, docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.version = version
     app.state.faults = FaultState()
+    if release_fault:
+        app.state.faults.set_fault(*release_fault)
+    log.info("release started")
     app.state.fault_latency_seconds = (
         fault_latency_seconds
         if fault_latency_seconds is not None
@@ -67,8 +93,8 @@ def create_app(fault_latency_seconds: float | None = None) -> FastAPI:
     init_error_series(API_ROUTES)
 
     @app.get("/health")
-    async def health():
-        return {"status": "ok"}
+    async def health(request: Request):
+        return {"status": "ok", "version": request.app.state.version}
 
     @app.get("/metrics")
     async def metrics():

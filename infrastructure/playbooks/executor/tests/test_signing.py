@@ -24,7 +24,23 @@ def test_nonce_is_accepted_once_until_it_expires():
 
 def test_repository_allowlist_loads():
     targets = load_allowlist(Path(__file__).resolve().parent.parent / "allowlist.json")
-    assert set(targets["sample-app"].actions) == {"restart", "circuit_breaker"}
+    assert set(targets["sample-app"].actions) == {"restart", "circuit_breaker", "rollback", "scale"}
+    assert targets["sample-app"].rollback_image == "dc-sample-app:stable"
+    assert targets["sample-app"].max_replicas == 3
+
+
+@pytest.mark.parametrize("entry, message", [
+    ({"actions": ["rollback"]}, "rollback needs rollback_image"),
+    ({"actions": ["rollback"], "rollback_image": "no-tag"}, "name:tag"),
+    ({"actions": ["scale"]}, "at least 2"),
+    ({"actions": ["scale"], "max_replicas": 9}, "from 1 to 5"),
+    ({"actions": ["scale"], "max_replicas": "3"}, "from 1 to 5"),
+])
+def test_allowlist_validates_rollback_and_scale_settings(tmp_path, entry, message):
+    path = tmp_path / "allowlist.json"
+    path.write_text(json.dumps({"x": {"container": "c", "base_url": "http://x:1", **entry}}))
+    with pytest.raises(ValueError, match=message):
+        load_allowlist(path)
 
 
 def test_allowlist_rejects_unknown_action(tmp_path):

@@ -13,15 +13,18 @@ LOGGER_ALIASES = {"uvicorn.error": "uvicorn"}
 
 
 class JsonFormatter(logging.Formatter):
-    def __init__(self, service: str):
+    def __init__(self, service: str, version: str | None = None):
         super().__init__()
         self.service = service
+        self.version = version
 
     def format(self, record: logging.LogRecord) -> str:
         entry = {
             "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(timespec="milliseconds"),
             "level": record.levelname.lower(),
             "service": self.service,
+            # The release on every line, so log analysis can tie errors to a version.
+            **({"version": self.version} if self.version else {}),
             "logger": LOGGER_ALIASES.get(record.name, record.name),
             "msg": record.getMessage(),
         }
@@ -33,10 +36,10 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(entry)
 
 
-def setup_logging(service: str, level: str = "INFO") -> None:
+def setup_logging(service: str, level: str = "INFO", version: str | None = None) -> None:
     """Send every logger, uvicorn's included, through one JSON handler on stdout."""
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter(service))
+    handler.setFormatter(JsonFormatter(service, version))
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level)
