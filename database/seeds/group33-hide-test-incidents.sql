@@ -11,10 +11,11 @@
 -- 5faa19d5) are kept. c2ed6d9e is also "HighErrorRate on sample-app", but it
 -- was the 21 Nov live release check (deploy-bad -> rollback recommendation),
 -- so it is hidden on purpose. bb7167ca is the 21 Nov rehearsal incident
--- (deploy-bad -> rollback, resolved), hidden for the same reason.
+-- (deploy-bad -> rollback, resolved), hidden for the same reason. 8f773b9c and
+-- a0c67aa8 are the 21 Nov phone push tests (Galaxy M34), hidden too.
 -- =============================================================================
 
--- 1. Preview (read-only): must return exactly these 8 rows.
+-- 1. Preview (read-only): must return exactly these 10 rows.
 SELECT id, title, status, environment, created_at
 FROM public.incidents
 WHERE id IN (
@@ -25,11 +26,13 @@ WHERE id IN (
   'd3310000-0000-4000-8000-000000000001', -- old demo seed v2 (replaced by v3)
   '38b1ccbc-fea7-4d92-af5f-09f366854d68', -- TEST_AUDIT_RUNTIME_INCIDENT (8 Nov)
   'c2ed6d9e-9c43-4d1b-8bcb-006a9b6f81ae', -- release check 21 Nov (sample-app)
-  'bb7167ca-636e-46f0-b822-c403eb5b85cd'  -- rehearsal 21 Nov (sample-app)
+  'bb7167ca-636e-46f0-b822-c403eb5b85cd', -- rehearsal 21 Nov (sample-app)
+  '8f773b9c-88bb-45e4-ba64-94a0f8f1d2ee', -- push test 21 Nov (sample-app)
+  'a0c67aa8-d129-4705-9a32-fa076d30cb8a'  -- push retest 21 Nov (sample-app)
 )
 ORDER BY created_at;
 
--- 2. The change (one transaction; aborts unless exactly 8 rows change).
+-- 2. The change (one transaction; aborts unless exactly 10 rows change).
 BEGIN;
 DO $hide$
 DECLARE
@@ -45,11 +48,13 @@ BEGIN
      'd3310000-0000-4000-8000-000000000001',
      '38b1ccbc-fea7-4d92-af5f-09f366854d68',
      'c2ed6d9e-9c43-4d1b-8bcb-006a9b6f81ae',
-     'bb7167ca-636e-46f0-b822-c403eb5b85cd'
+     'bb7167ca-636e-46f0-b822-c403eb5b85cd',
+     '8f773b9c-88bb-45e4-ba64-94a0f8f1d2ee',
+     'a0c67aa8-d129-4705-9a32-fa076d30cb8a'
    );
   GET DIAGNOSTICS v_count = ROW_COUNT;
-  IF v_count <> 8 THEN
-    RAISE EXCEPTION 'Expected 8 test incidents, matched %. Nothing changed.', v_count;
+  IF v_count <> 10 THEN
+    RAISE EXCEPTION 'Expected 10 test incidents, matched %. Nothing changed.', v_count;
   END IF;
 END;
 $hide$;
