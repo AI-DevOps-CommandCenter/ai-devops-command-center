@@ -140,7 +140,7 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
       firstDate ??= localDate(t);
       final newDay = lastDay != null && !sameLocalDay(lastDay, t);
       lastDay = t;
-      rows.add('${newDay ? '${localDate(t)}, ' : ''}${localTime(t)}  $event');
+      rows.add('${newDay ? '${localDate(t)}, ' : ''}${localTime(t)}  ${readableText(event, day: t)}');
     }
     return (date: firstDate, rows: rows);
   }
@@ -192,12 +192,16 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
     }
 
     final report = pm['report'] is Map ? Map<String, dynamic>.from(pm['report']) : <String, dynamic>{};
+    // AI text: local times instead of UTC, error rates as percentages.
+    final day = _incident?.detectedAt;
+    String? readable(dynamic v) => v == null ? null : readableText(v.toString(), day: day);
+    List<String> readableList(dynamic v) => _strings(v).map((e) => readableText(e, day: day)).toList();
     final timeline = _timeline(pm['timeline']);
     final measured = _measuredImpact();
-    final aiImpact = pm['impact']?.toString();
+    final aiImpact = readable(pm['impact']);
     final aiImpactUnknown = aiImpact == null || aiImpact.trim().isEmpty || aiImpact.toLowerCase().startsWith('unknown');
-    final lessons = _strings(report['lessons_learned']);
-    final actions = _strings(pm['action_items']);
+    final lessons = readableList(report['lessons_learned']);
+    final actions = readableList(pm['action_items']);
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -212,7 +216,7 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
               child: Text(report['title'].toString(),
                   style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: colors.text)),
             ),
-          FlowSection(label: 'Summary', text: pm['summary']?.toString()),
+          FlowSection(label: 'Summary', text: readable(pm['summary'])),
           // AI text plus the measured facts; an "Unknown" AI answer is replaced
           // by the measured facts when there are any.
           FlowSection(
@@ -221,15 +225,15 @@ class _S21PostmortemReportScreenState extends State<S21PostmortemReportScreen> {
             items: measured.isNotEmpty ? measured : null,
           ),
           FlowSection(label: timeline.date == null ? 'Timeline' : 'Timeline · ${timeline.date}', items: timeline.rows),
-          FlowSection(label: 'Root cause', text: pm['root_cause']?.toString()),
-          if (report['remediation'] != null) FlowSection(label: 'Remediation', text: report['remediation'].toString()),
+          FlowSection(label: 'Root cause', text: readable(pm['root_cause'])),
+          if (report['remediation'] != null) FlowSection(label: 'Remediation', text: readable(report['remediation'])),
           if (report['recovery_result'] != null)
-            FlowSection(label: 'Recovery result', text: report['recovery_result'].toString()),
-          if (_strings(report['evidence']).isNotEmpty) FlowSection(label: 'Evidence', items: _strings(report['evidence'])),
+            FlowSection(label: 'Recovery result', text: readable(report['recovery_result'])),
+          if (_strings(report['evidence']).isNotEmpty) FlowSection(label: 'Evidence', items: readableList(report['evidence'])),
           FlowSection(
             label: 'Lessons learned',
             items: lessons.isNotEmpty ? lessons : null,
-            text: lessons.isEmpty ? pm['lessons_learned']?.toString() : null,
+            text: lessons.isEmpty ? readable(pm['lessons_learned']) : null,
           ),
           FlowSection(label: 'Preventive actions', items: actions),
           Row(

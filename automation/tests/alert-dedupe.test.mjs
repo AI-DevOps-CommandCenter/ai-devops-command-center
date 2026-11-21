@@ -260,6 +260,11 @@ test('08 impact_facts: duration, measured error rates and earlier checks', async
   assert.equal(f.peak_error_rate_after_remediation_percent, 17.4);
   assert.equal(f.remediation_runs, 2);
   assert.deepEqual(f.earlier_recovery_checks, [{ checked_at: '2026-11-18T07:49:34Z', status: 'unhealthy' }]);
+  // Local times (Asia/Colombo, UTC+05:30) for the report text.
+  assert.equal(f.time_zone, 'Asia/Colombo');
+  assert.equal(f.detected_at_local, '13:11:06');
+  assert.equal(f.recovered_at_local, '14:22:48');
+  assert.deepEqual(f.error_rate_after_remediation.map((e) => e.at_local), ['14:21:48', '14:22:48']);
 
   // Not recovered and no stored context: unknown parts stay null.
   const [ctx2] = await runCodeNode('08-postmortem/sign-context.js', { items: [{ incident_id: id, status: 'not_recovered', evidence: [] }], env: BACKEND_ENV });
@@ -267,4 +272,5 @@ test('08 impact_facts: duration, measured error rates and earlier checks', async
   assert.equal(c2.context.impact_facts.recovered_at, null);
   assert.equal(c2.context.impact_facts.detection_to_recovery_minutes, null);
   assert.equal(c2.context.impact_facts.peak_error_rate_after_remediation_percent, null);
+  assert.equal(c2.context.impact_facts.recovered_at_local, null);
 });

@@ -198,7 +198,8 @@ class _S20RecoveryVerificationScreenState extends State<S20RecoveryVerificationS
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
-          const FlowStepper(activeStage: 4),
+          // 6 = every stage done (as on S05) once the incident is resolved.
+          FlowStepper(activeStage: _incidentResolved == true ? 6 : 4),
           const SizedBox(height: 14),
           FlowCard(
             background: toneBg,

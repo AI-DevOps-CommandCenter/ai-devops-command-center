@@ -120,4 +120,44 @@ void main() {
     expect(formatErrorRate(0.5040221893453085), '50.4%');
     expect(formatErrorRate(0.0174), '1.7%');
   });
+
+  group('readableText', () {
+    final day = DateTime.parse('2026-11-21T08:42:36.234Z');
+    // Expected values use the machine's time zone, so the test runs anywhere.
+    final local = localTime('2026-11-21T08:42:36.234Z');
+
+    test('ISO UTC times become local times on the same day', () {
+      expect(readableText('Detected at 2026-11-21T08:42:36.234Z.', day: day), 'Detected at $local.');
+      expect(readableText('deployed 2026-11-21T08:39:48.08704+00:00', day: day),
+          'deployed ${localTime('2026-11-21T08:39:48.08704+00:00')}');
+    });
+
+    test('a time on another day keeps its date', () {
+      expect(readableText('at 2026-11-19T08:42:36Z', day: day), 'at ${localDateTime('2026-11-19T08:42:36Z')}');
+    });
+
+    test('bare UTC times use the given day', () {
+      expect(readableText('from 08:42:36.234Z to 08:50Z', day: day),
+          'from $local to ${localTime('2026-11-21T08:50:00Z').substring(0, 5)}');
+      expect(readableText('from 08:42:36Z'), 'from 08:42:36Z'); // no day: unchanged
+    });
+
+    test('error-rate ratios become percentages', () {
+      expect(readableText('error_rate metric abnormal: current 0.502868068833652 (source: prometheus)'),
+          'error_rate metric abnormal: current 50.3% (source: prometheus)');
+      expect(readableText('Error rate 0.05, baseline 0.0'), 'Error rate 5%, baseline 0%');
+      expect(readableText('error rate 50.3% already'), 'error rate 50.3% already');
+    });
+
+    test('other numbers are not changed', () {
+      expect(readableText('confidence 0.75; error_rate 0.5'), 'confidence 0.75; error_rate 50%');
+      expect(readableText('version 2.1 and 0.5 CPU'), 'version 2.1 and 0.5 CPU');
+      expect(readableText('error rate high. Took 0.5 s'), 'error rate high. Took 0.5 s');
+    });
+
+    test('null and empty', () {
+      expect(readableText(null), '');
+      expect(readableText(''), '');
+    });
+  });
 }

@@ -512,20 +512,26 @@ class _S19ExecutionProgressScreenState extends State<S19ExecutionProgressScreen>
 
   Widget _buildInfoRow(String label, String value, AppColorScheme colors,
       {Color? highlightColor}) {
+    // Long values (the playbook UUID) wrap inside the card instead of overflowing.
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           label,
           style: TextStyle(fontSize: 13, color: colors.muted),
         ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: highlightColor ?? colors.text,
-            fontFamily: label == 'Playbook ID' ? 'JetBrains Mono' : null,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            softWrap: true,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: highlightColor ?? colors.text,
+              fontFamily: label == 'Playbook ID' ? 'JetBrains Mono' : null,
+            ),
           ),
         ),
       ],

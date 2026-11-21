@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/flow_widgets.dart';
+import '../utils/run_format.dart';
 
 /// S08 – the evidence behind the latest AI analysis of an incident
 /// (GET /api/incidents/:id/recommendation → analysis).
@@ -101,8 +102,11 @@ class _S08EvidenceDetailsScreenState extends State<S08EvidenceDetailsScreen> {
       return FlowMessage(icon: Icons.search_off, message: 'No AI analysis has been stored for this incident yet.', onRetry: _load);
     }
 
+    // Local times and error rates as percentages (readableText).
+    final day = parseTime(a['created_at']);
     final evidence = (a['evidence'] is List ? a['evidence'] as List : const [])
         .map((e) => e is Map ? (e['description'] ?? e['title'] ?? e.toString()).toString() : e.toString())
+        .map((line) => readableText(line, day: day))
         .toList();
     final groups = <String, List<String>>{};
     for (final line in evidence) {
@@ -116,8 +120,8 @@ class _S08EvidenceDetailsScreenState extends State<S08EvidenceDetailsScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
-          FlowSection(label: 'Probable cause', text: a['root_cause']?.toString()),
-          FlowSection(label: 'Summary', text: a['summary']?.toString()),
+          FlowSection(label: 'Probable cause', text: a['root_cause'] == null ? null : readableText(a['root_cause'].toString(), day: day)),
+          FlowSection(label: 'Summary', text: a['summary'] == null ? null : readableText(a['summary'].toString(), day: day)),
           if (groups.isEmpty) const FlowSection(label: 'Evidence', text: 'The analysis did not list any evidence.'),
           ...groups.entries.map((g) => Padding(
                 padding: const EdgeInsets.only(bottom: 14),
