@@ -6,10 +6,12 @@
 # 1. checks that Docker Desktop is running
 # 2. starts n8n (automation/, project ccdemo)
 # 3. starts the monitoring stack and the playbook executor (monitoring/)
-# 4. starts the backend on http://localhost:3000 (no watch mode)
-# 5. serves the EXISTING web build (mobile/build/web) on http://127.0.0.1:8080
+# 4. warns about an open (not resolved) sample-app alert incident: the next
+#    deploy-bad would attach to it instead of creating a new incident (read-only)
+# 5. starts the backend on http://localhost:3000 (no watch mode)
+# 6. serves the EXISTING web build (mobile/build/web) on http://127.0.0.1:8080
 #    (it does not rebuild the web app)
-# 6. runs `adb reverse tcp:3000 tcp:3000` for every connected phone
+# 7. runs `adb reverse tcp:3000 tcp:3000` for every connected phone
 #
 # Safe to run again: anything already running is left as it is.
 # Logs: .demo/backend.log, .demo/web.log. Stop everything with scripts/demo-stop.sh.
@@ -68,7 +70,7 @@ find_adb() {
 }
 
 # ---------------------------------------------------------------- 1. Docker
-step "1/6 Docker Desktop"
+step "1/7 Docker Desktop"
 DOCKER_OK=0
 if ! command -v docker >/dev/null 2>&1; then
   fail "Docker CLI not found. Install/start Docker Desktop."
@@ -80,7 +82,7 @@ else
 fi
 
 # ---------------------------------------------------------------- 2. n8n
-step "2/6 n8n"
+step "2/7 n8n"
 if [ $DOCKER_OK -eq 1 ]; then
   if (cd automation && docker compose -p ccdemo up -d) >"$LOG_DIR/compose-n8n.log" 2>&1; then
     if wait_http http://127.0.0.1:5678/healthz 90; then
@@ -96,7 +98,7 @@ else
 fi
 
 # ---------------------------------------------------------------- 3. monitoring + executor
-step "3/6 Monitoring stack + executor"
+step "3/7 Monitoring stack + executor"
 if [ $DOCKER_OK -eq 1 ]; then
   if ! grep -Eq '^[[:space:]]*EXECUTOR_SIGNING_SECRET=.{32,}' monitoring/.env 2>/dev/null; then
     warn "monitoring/.env has no EXECUTOR_SIGNING_SECRET: the executor will answer 503 (see docs/SETUP.md)"
@@ -140,8 +142,29 @@ else
   fail "Monitoring + executor skipped (Docker is not running)"
 fi
 
-# ---------------------------------------------------------------- 4. backend
-step "4/6 Backend"
+# ---------------------------------------------------------------- 4. open alert incidents
+step "4/7 Open alert incidents (read-only)"
+open_out=$(node scripts/check-open-alert-incidents.mjs 2>&1)
+case $? in
+  0) ok "No open sample-app alert incident (deploy-bad will create a new one)" ;;
+  3)
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      id=${line%% |*}
+      env_field=$(echo "$line" | cut -d'|' -f3 | tr -d ' ')
+      if [ "$env_field" = "test" ]; then
+        how="it is hidden in the app (environment = test), so resolve it in the Supabase SQL editor"
+      else
+        how="open it in the app and use 'Mark resolved' on S05"
+      fi
+      warn "OPEN alert incident $id (${line#* | }). Resolve it BEFORE deploy-bad: $how. Otherwise the new alert attaches to it and no new incident is created"
+    done <<<"$open_out"
+    ;;
+  *) warn "Could not check for open alert incidents: $open_out" ;;
+esac
+
+# ---------------------------------------------------------------- 5. backend
+step "5/7 Backend"
 if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:3000/ 2>/dev/null; then
   ok "Backend        http://localhost:3000 (was already running)"
 elif [ -n "$(port_pids 3000)" ]; then
@@ -161,8 +184,8 @@ else
   fi
 fi
 
-# ---------------------------------------------------------------- 5. web app
-step "5/6 Web app (existing build, not rebuilt)"
+# ---------------------------------------------------------------- 6. web app
+step "6/7 Web app (existing build, not rebuilt)"
 if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:8080/ 2>/dev/null; then
   ok "Web app        http://127.0.0.1:8080 (was already running)"
 elif [ -n "$(port_pids 8080)" ]; then
@@ -181,8 +204,8 @@ else
   fi
 fi
 
-# ---------------------------------------------------------------- 6. phone
-step "6/6 Phone (USB)"
+# ---------------------------------------------------------------- 7. phone
+step "7/7 Phone (USB)"
 if ADB=$(find_adb); then
   devices=$("$ADB" devices 2>/dev/null | tr -d '\r' | awk 'NR > 1 && $2 == "device" { print $1 }')
   unauthorized=$("$ADB" devices 2>/dev/null | tr -d '\r' | awk 'NR > 1 && $2 == "unauthorized" { print $1 }')
